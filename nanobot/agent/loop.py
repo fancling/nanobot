@@ -20,6 +20,7 @@ from nanobot.agent import model_presets as preset_helpers
 from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.cron_turns import CronTurnCoordinator
+from nanobot.agent.frame_request import FrameRequestAdapter
 from nanobot.agent.hook import AgentHook, CompositeHook
 from nanobot.agent.memory import Consolidator
 from nanobot.agent.progress_hook import AgentProgressHook
@@ -61,7 +62,6 @@ from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.document import extract_documents, reference_non_image_attachments
 from nanobot.utils.helpers import image_placeholder_text
 from nanobot.utils.helpers import truncate_text as truncate_text_fn
-from nanobot.utils.image_generation_intent import image_generation_prompt
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.runtime import (
     EMPTY_FINAL_RESPONSE_MESSAGE,
@@ -269,6 +269,7 @@ class AgentLoop:
         self._extra_hooks: list[AgentHook] = hooks or []
 
         self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
+        self.frame_request_adapter = FrameRequestAdapter(self.context)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         # One file-read/write tracker per logical session. The tool registry is
@@ -614,21 +615,17 @@ class AgentLoop:
     ) -> list[dict[str, Any]]:
         """Build the initial message list for the LLM turn."""
         scope = self.workspace_scopes.for_message(msg, session.metadata)
-        return self.context.build_messages(
+        runtime_lines = [*goal_state_runtime_lines(session.metadata)]
+        runtime_lines.extend(agent_context.runtime_lines(self, msg, scope.project_path))
+        return self.frame_request_adapter.build_frame_only_messages(
+            session=session,
             history=history,
-            current_message=image_generation_prompt(msg.content, msg.metadata),
-            media=msg.media if msg.media else None,
-            channel=msg.channel,
-            chat_id=self._runtime_chat_id(msg),
-            sender_id=msg.sender_id,
-            session_summary=pending_summary,
-            session_metadata=session.metadata,
+            msg=msg,
+            pending_summary=pending_summary,
+            runtime_lines=runtime_lines,
             workspace=scope.project_path,
-            runtime_state=self,
-            inbound_message=msg,
-            include_memory_recent_history=include_memory_recent_history,
-            session_key=session.key,
-            unified_session=self._unified_session,
+            tool_names=self.tools.tool_names,
+            token_budget={"conversation.recent_raw": self._replay_token_budget()},
         )
 
     async def _dispatch_command_inline(

@@ -1,0 +1,70 @@
+from __future__ import annotations
+
+from pathlib import Path
+from types import SimpleNamespace
+
+from nanobot.agent.context import ContextBuilder
+from nanobot.agent.frame_request import FrameRequestAdapter
+from nanobot.agent.loop import AgentLoop
+from nanobot.bus.events import InboundMessage
+from nanobot.session.manager import Session
+
+
+class _Provider:
+    generation = SimpleNamespace(max_tokens=4096)
+
+    def get_default_model(self) -> str:
+        return "test-model"
+
+
+class _Tools:
+    tool_names = ["read_file", "exec"]
+
+    def get(self, _name: str):
+        return None
+
+
+def _loop(tmp_path: Path) -> AgentLoop:
+    loop = AgentLoop.__new__(AgentLoop)
+    loop.workspace = tmp_path
+    loop.context_window_tokens = 16000
+    loop.provider = _Provider()
+    loop.model = "test-model"
+    loop.tools = _Tools()
+    loop._unified_session = False
+    loop._mcp_servers = {}
+    loop._mcp_stacks = {}
+    loop.context = ContextBuilder(tmp_path, timezone="UTC")
+    loop.workspace_scopes = SimpleNamespace(
+        for_message=lambda _msg, _metadata: SimpleNamespace(project_path=tmp_path),
+    )
+    loop.frame_request_adapter = FrameRequestAdapter(loop.context)
+    return loop
+
+
+def test_build_initial_messages_uses_frame_only_request(tmp_path: Path) -> None:
+    session = Session(key="cli:direct")
+    session.add_message("user", "old user text")
+    session.add_message("assistant", "old assistant text")
+    history = session.get_history(include_timestamps=True)
+    msg = InboundMessage(
+        channel="cli",
+        sender_id="user",
+        chat_id="direct",
+        content="new text",
+    )
+
+    initial = _loop(tmp_path)._build_initial_messages(
+        msg,
+        session,
+        history,
+        pending_summary="old summary",
+    )
+
+    assert [message["role"] for message in initial] == ["system", "user"]
+    assert initial[1]["content"] == "new text"
+    assert "<workspace_frame" in initial[0]["content"]
+    assert "conversation.recent_raw" in initial[0]["content"]
+    assert "old user text" in initial[0]["content"]
+    assert "old summary" in initial[0]["content"]
+    assert not any(message.get("content") == "old user text" for message in initial[1:])
