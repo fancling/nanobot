@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import datetime
+from html import escape
 from typing import Any, Literal
 
 FramePriority = Literal["critical", "high", "medium", "low"]
@@ -89,9 +90,9 @@ class WorkspaceFrame:
 class WorkspaceFrameRenderer:
     def render(self, frame: WorkspaceFrame) -> str:
         lines = [
-            f'<workspace_frame schema_version="{frame.meta.schema_version}" '
-            f'frame_id="{frame.frame_id}">',
-            f"frame_type: {frame.frame_type}",
+            f'<workspace_frame schema_version="{self._render_attr(frame.meta.schema_version)}" '
+            f'frame_id="{self._render_attr(frame.frame_id)}">',
+            f"frame_type: {self._render_value(frame.frame_type)}",
             f"created_at: {self._render_value(frame.created_at)}",
             "<focus>",
         ]
@@ -111,8 +112,9 @@ class WorkspaceFrameRenderer:
 
     def _render_module(self, module: WorkspaceFrameModule) -> list[str]:
         lines = [
-            f'<module id="{module.module_id}" type="{module.module_type}" '
-            f'priority="{module.activation.priority}">',
+            f'<module id="{self._render_attr(module.module_id)}" '
+            f'type="{self._render_attr(module.module_type)}" '
+            f'priority="{self._render_attr(module.activation.priority)}">',
             "<activation>",
         ]
         lines.extend(self._render_fields(module.activation))
@@ -137,5 +139,23 @@ class WorkspaceFrameRenderer:
 
     def _render_value(self, value: Any) -> str:
         if isinstance(value, str):
-            return value
-        return json.dumps(value, ensure_ascii=False, indent=2, default=str)
+            if self._requires_quoted_string(value):
+                return escape(json.dumps(value, ensure_ascii=False), quote=False)
+            return escape(value, quote=False)
+        rendered = json.dumps(value, ensure_ascii=False, indent=2, default=str)
+        return escape(rendered, quote=False)
+
+    def _render_attr(self, value: Any) -> str:
+        return escape(str(value), quote=True)
+
+    def _requires_quoted_string(self, value: str) -> bool:
+        return (
+            value != value.strip()
+            or "\n" in value
+            or "\r" in value
+            or "<" in value
+            or ">" in value
+            or '"' in value
+            or "'" in value
+            or ": " in value
+        )
