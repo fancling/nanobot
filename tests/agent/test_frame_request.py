@@ -77,3 +77,33 @@ def test_adapter_preserves_image_current_event_blocks(tmp_path: Path) -> None:
     assert "data:image" not in system_content
     assert "_meta" not in system_content
     assert str(png) not in system_content
+
+
+def test_adapter_scrubs_media_path_breadcrumbs_from_frame_text(tmp_path: Path) -> None:
+    context = ContextBuilder(workspace=tmp_path, timezone="UTC")
+    session = Session(key="cli:direct")
+    png = tmp_path / "image.png"
+    png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+    msg = InboundMessage(
+        channel="cli",
+        sender_id="direct",
+        chat_id="direct",
+        content=f"describe this\n[image: {png}]",
+        media=[str(png)],
+    )
+
+    messages = FrameRequestAdapter(context).build_frame_only_messages(
+        session=session,
+        history=[],
+        msg=msg,
+        pending_summary=None,
+        runtime_lines=[],
+        workspace=tmp_path,
+        tool_names=[],
+    )
+
+    system_content = messages[0]["content"]
+    assert str(png) not in system_content
+    assert "describe this" in system_content
+    assert isinstance(messages[1]["content"], list)
+    assert any(block.get("type") == "image_url" for block in messages[1]["content"])

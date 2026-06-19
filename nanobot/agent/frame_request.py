@@ -38,12 +38,13 @@ class FrameRequestAdapter:
             current_text,
             getattr(msg, "media", None) or None,
         )
+        frame_text = self._sanitize_frame_text(current_text, msg)
         frame = self.builder.build(
             session=session,
             history=history,
             msg=msg,
-            current_input=current_text,
-            current_event_content=self._sanitized_current_event(current_text, msg),
+            current_input=frame_text,
+            current_event_content=self._sanitized_current_event(frame_text, msg),
             pending_summary=pending_summary,
             runtime_lines=runtime_lines,
             workspace=workspace,
@@ -61,3 +62,14 @@ class FrameRequestAdapter:
             "text": current_text,
             "media_count": len(media),
         }
+
+    def _sanitize_frame_text(self, current_text: str, msg: Any) -> str:
+        media_paths = [path for path in (getattr(msg, "media", None) or []) if isinstance(path, str)]
+        if not media_paths:
+            return current_text
+
+        sanitized = current_text
+        for path in media_paths:
+            sanitized = sanitized.replace(f"[image: {path}]", "[media]")
+            sanitized = sanitized.replace(path, "[media]")
+        return sanitized
