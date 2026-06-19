@@ -30,13 +30,16 @@ class FrameRequestAdapter:
         tool_names: list[str],
         token_budget: Mapping[str, Any] | None = None,
         runtime_chat_id: str | None = None,
+        runtime_channel: str | None = None,
         include_memory_recent_history: bool = True,
         unified_session: bool = False,
+        current_text: str | None = None,
     ) -> list[dict[str, Any]]:
-        current_text = image_generation_prompt(
-            getattr(msg, "content", ""),
-            getattr(msg, "metadata", {}),
-        )
+        if current_text is None:
+            current_text = image_generation_prompt(
+                getattr(msg, "content", ""),
+                getattr(msg, "metadata", {}),
+            )
         user_content = self.context._build_user_content(
             current_text,
             getattr(msg, "media", None) or None,
@@ -54,6 +57,7 @@ class FrameRequestAdapter:
             tool_names=tool_names,
             token_budget=token_budget,
             runtime_chat_id=runtime_chat_id,
+            runtime_channel=runtime_channel,
             include_memory_recent_history=include_memory_recent_history,
             unified_session=unified_session,
         )

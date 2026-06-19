@@ -615,20 +615,49 @@ class AgentLoop:
     ) -> list[dict[str, Any]]:
         """Build the initial message list for the LLM turn."""
         scope = self.workspace_scopes.for_message(msg, session.metadata)
+        return self._build_frame_initial_messages(
+            msg=msg,
+            session=session,
+            history=history,
+            pending_summary=pending_summary,
+            workspace=scope.project_path,
+            runtime_chat_id=self._runtime_chat_id(msg),
+            runtime_channel=msg.channel,
+            skip_runtime_lines=False,
+            include_memory_recent_history=include_memory_recent_history,
+        )
+
+    def _build_frame_initial_messages(
+        self,
+        *,
+        msg: InboundMessage,
+        session: Session,
+        history: list[dict[str, Any]],
+        pending_summary: str | None,
+        workspace: Path,
+        runtime_chat_id: str,
+        runtime_channel: str | None = None,
+        skip_runtime_lines: bool = False,
+        current_text: str | None = None,
+        include_memory_recent_history: bool = True,
+    ) -> list[dict[str, Any]]:
         runtime_lines = [*goal_state_runtime_lines(session.metadata)]
-        runtime_lines.extend(agent_context.runtime_lines(self, msg, scope.project_path))
+        if not skip_runtime_lines:
+            runtime_lines.extend(agent_context.runtime_lines(self, msg, workspace))
         return self.frame_request_adapter.build_frame_only_messages(
             session=session,
             history=history,
             msg=msg,
             pending_summary=pending_summary,
             runtime_lines=runtime_lines,
-            workspace=scope.project_path,
+            workspace=workspace,
             tool_names=self.tools.tool_names,
             token_budget={"conversation.recent_raw": self._replay_token_budget()},
-            runtime_chat_id=self._runtime_chat_id(msg),
+            runtime_chat_id=runtime_chat_id,
+            runtime_channel=runtime_channel,
             include_memory_recent_history=include_memory_recent_history,
             unified_session=self._unified_session,
+            current_text=current_text,
         )
 
     async def _dispatch_command_inline(
@@ -1168,7 +1197,6 @@ class AgentLoop:
             channel, chat_id, msg.metadata.get("message_id"),
             msg.metadata, session_key=key,
         )
-        current_role = "assistant" if is_subagent else "user"
         _hist_kwargs: dict[str, Any] = {
             "max_messages": self._max_messages,
             "max_tokens": self._replay_token_budget(),
@@ -1178,21 +1206,17 @@ class AgentLoop:
         history = session.get_history(**_hist_kwargs)
         workspace_scope = self.workspace_scopes.for_message(msg, session.metadata)
 
-        messages = self.context.build_messages(
+        messages = self._build_frame_initial_messages(
+            msg=msg,
+            session=session,
             history=history,
-            current_message="" if is_subagent else msg.content,
-            channel=channel,
-            chat_id=chat_id,
-            current_role=current_role,
-            sender_id=msg.sender_id,
-            session_summary=pending,
-            session_metadata=session.metadata,
+            pending_summary=pending,
             workspace=workspace_scope.project_path,
-            runtime_state=self,
-            inbound_message=msg,
+            runtime_chat_id=chat_id,
+            runtime_channel=channel,
             skip_runtime_lines=is_subagent,
-            session_key=key,
-            unified_session=self._unified_session,
+            current_text="" if is_subagent else msg.content,
+            include_memory_recent_history=True,
         )
         t_wall = time.time()
         final_content, _, all_msgs, stop_reason, _ = await self._run_agent_loop(

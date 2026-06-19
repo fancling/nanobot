@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import platform
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from html import escape
@@ -12,6 +13,9 @@ from nanobot.utils.helpers import current_time_str, truncate_text_to_tokens
 from nanobot.utils.prompt_templates import render_template
 
 FramePriority = Literal["critical", "high", "medium", "low"]
+
+_LOCAL_IMAGE_BREADCRUMB_RE = re.compile(r"\[image:\s*(?:/|~)[^\]\n]*\]")
+_DATA_IMAGE_RE = re.compile(r"data:image/[^\s\"')\]]+")
 
 
 @dataclass(frozen=True)
@@ -198,6 +202,7 @@ class WorkspaceFrameBuilder:
         tool_names: list[str],
         token_budget: Mapping[str, Any] | None = None,
         runtime_chat_id: str | None = None,
+        runtime_channel: str | None = None,
         include_memory_recent_history: bool = True,
         unified_session: bool = False,
     ) -> WorkspaceFrame:
@@ -291,6 +296,7 @@ class WorkspaceFrameBuilder:
                     current_event_content,
                     runtime_lines,
                     runtime_chat_id,
+                    runtime_channel,
                 ),
                 now,
                 priority="critical",
@@ -481,10 +487,15 @@ class WorkspaceFrameBuilder:
         lines = []
         for message in history:
             role = message.get("role", "unknown")
-            content = message.get("content", "")
+            content = self._sanitize_history_content(message.get("content", ""))
             lines.append(f"{role}: {content}")
         text = "\n".join(lines)
         return truncate_text_to_tokens(text, token_budget) if text else ""
+
+    def _sanitize_history_content(self, content: Any) -> str:
+        text = str(content)
+        text = _LOCAL_IMAGE_BREADCRUMB_RE.sub("[media]", text)
+        return _DATA_IMAGE_RE.sub("[media]", text)
 
     def _runtime_content(
         self,
@@ -493,10 +504,11 @@ class WorkspaceFrameBuilder:
         current_event_content: Any,
         runtime_lines: list[str],
         runtime_chat_id: str | None,
+        runtime_channel: str | None,
     ) -> dict[str, Any]:
         return {
             "current_time": current_time_str(self.context.timezone),
-            "channel": getattr(msg, "channel", None),
+            "channel": runtime_channel if runtime_channel is not None else getattr(msg, "channel", None),
             "chat_id": (
                 runtime_chat_id if runtime_chat_id is not None else getattr(msg, "chat_id", None)
             ),

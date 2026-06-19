@@ -139,3 +139,65 @@ def test_build_initial_messages_omits_memory_recent_history_when_disabled(
 
     assert "memory archive fact" not in initial[0]["content"]
     assert "session replay fact" in initial[0]["content"]
+
+
+def test_build_initial_messages_scrubs_prior_media_paths_from_frame(
+    tmp_path: Path,
+) -> None:
+    session = Session(key="cli:direct")
+    png = tmp_path / "image.png"
+    png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+    session.add_message("user", "prior image text", media=[str(png)])
+    history = session.get_history(include_timestamps=True)
+    msg = InboundMessage(
+        channel="cli",
+        sender_id="user",
+        chat_id="direct",
+        content="new text",
+    )
+
+    initial = _loop(tmp_path)._build_initial_messages(
+        msg,
+        session,
+        history,
+        pending_summary=None,
+    )
+
+    assert str(png) not in initial[0]["content"]
+    assert "[media]" in initial[0]["content"]
+    assert "prior image text" in initial[0]["content"]
+
+
+def test_build_frame_initial_messages_embeds_system_history_in_frame(
+    tmp_path: Path,
+) -> None:
+    loop = _loop(tmp_path)
+    session = Session(key="cli:direct")
+    session.add_message("user", "old system-session text")
+    history = session.get_history(include_timestamps=True)
+    msg = InboundMessage(
+        channel="system",
+        sender_id="system",
+        chat_id="cli:direct",
+        content="system event",
+    )
+
+    initial = loop._build_frame_initial_messages(
+        msg=msg,
+        session=session,
+        history=history,
+        pending_summary=None,
+        workspace=tmp_path,
+        runtime_chat_id="direct",
+        skip_runtime_lines=False,
+        current_text="system event",
+        include_memory_recent_history=True,
+    )
+
+    assert [message["role"] for message in initial] == ["system", "user"]
+    assert initial[1]["content"] == "system event"
+    assert "<workspace_frame" in initial[0]["content"]
+    assert "old system-session text" in initial[0]["content"]
+    assert not any(
+        message.get("content") == "old system-session text" for message in initial[1:]
+    )
