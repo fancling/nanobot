@@ -405,3 +405,30 @@ def test_builder_defaults_recent_raw_token_budget(tmp_path: Path) -> None:
     )
 
     assert frame.meta.token_budget["conversation.recent_raw"] == 8000
+
+
+def test_builder_adds_recent_raw_default_to_partial_token_budget(tmp_path: Path) -> None:
+    context = ContextBuilder(workspace=tmp_path, timezone="UTC")
+    session = Session(key="cli:direct")
+    msg = InboundMessage(
+        channel="cli",
+        sender_id="direct",
+        chat_id="direct",
+        content="new request",
+    )
+
+    frame = WorkspaceFrameBuilder(context).build(
+        session=session,
+        history=[],
+        msg=msg,
+        current_input="new request",
+        current_event_content="new request",
+        pending_summary=None,
+        runtime_lines=[],
+        workspace=tmp_path,
+        tool_names=[],
+        token_budget={"other": 1},
+    )
+
+    assert frame.meta.token_budget["conversation.recent_raw"] == 8000
+    assert frame.meta.token_budget["other"] == 1

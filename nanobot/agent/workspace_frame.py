@@ -199,8 +199,10 @@ class WorkspaceFrameBuilder:
     ) -> WorkspaceFrame:
         now = datetime.now(timezone.utc)
         root = workspace or self.context.workspace
-        resolved_token_budget = dict(
-            token_budget or {"conversation.recent_raw": self._RECENT_RAW_TOKEN_CAP}
+        resolved_token_budget = dict(token_budget or {})
+        resolved_token_budget.setdefault(
+            "conversation.recent_raw",
+            self._RECENT_RAW_TOKEN_CAP,
         )
         modules: list[WorkspaceFrameModule] = []
 
