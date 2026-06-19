@@ -170,6 +170,46 @@ def test_build_initial_messages_scrubs_prior_media_paths_from_frame(
     assert "prior image text" in initial[0]["content"]
 
 
+def test_build_initial_messages_scrubs_structured_media_history_from_frame(
+    tmp_path: Path,
+) -> None:
+    session = Session(key="cli:direct")
+    png = tmp_path / "image.png"
+    png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+    history = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": "data:image/png;base64,AAAA"},
+                    "_meta": {"path": str(png)},
+                },
+                {"type": "text", "text": "caption text"},
+            ],
+        }
+    ]
+    msg = InboundMessage(
+        channel="cli",
+        sender_id="user",
+        chat_id="direct",
+        content="new text",
+    )
+
+    initial = _loop(tmp_path)._build_initial_messages(
+        msg,
+        session,
+        history,
+        pending_summary=None,
+    )
+
+    assert "data:image" not in initial[0]["content"]
+    assert "_meta" not in initial[0]["content"]
+    assert str(png) not in initial[0]["content"]
+    assert "[media]" in initial[0]["content"]
+    assert "caption text" in initial[0]["content"]
+
+
 def test_build_frame_initial_messages_embeds_system_history_in_frame(
     tmp_path: Path,
 ) -> None:

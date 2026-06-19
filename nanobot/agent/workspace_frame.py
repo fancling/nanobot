@@ -493,6 +493,24 @@ class WorkspaceFrameBuilder:
         return truncate_text_to_tokens(text, token_budget) if text else ""
 
     def _sanitize_history_content(self, content: Any) -> str:
+        if isinstance(content, list):
+            return "\n".join(
+                sanitized
+                for item in content
+                if (sanitized := self._sanitize_history_content(item))
+            )
+        if isinstance(content, dict):
+            block_type = content.get("type")
+            if block_type == "text":
+                return self._sanitize_history_content(content.get("text", ""))
+            if block_type == "image_url" or "image_url" in content:
+                return "[media]"
+            cleaned = {
+                str(key): self._sanitize_history_content(value)
+                for key, value in content.items()
+                if key != "_meta"
+            }
+            return json.dumps(cleaned, ensure_ascii=False, default=str)
         text = str(content)
         text = _LOCAL_IMAGE_BREADCRUMB_RE.sub("[media]", text)
         return _DATA_IMAGE_RE.sub("[media]", text)
