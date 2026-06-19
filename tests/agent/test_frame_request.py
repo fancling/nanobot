@@ -72,3 +72,8 @@ def test_adapter_preserves_image_current_event_blocks(tmp_path: Path) -> None:
         block.get("type") == "text" and block.get("text") == "describe image"
         for block in messages[1]["content"]
     )
+    system_content = messages[0]["content"]
+    assert "describe image" in system_content
+    assert "data:image" not in system_content
+    assert "_meta" not in system_content
+    assert str(png) not in system_content
