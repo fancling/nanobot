@@ -1228,7 +1228,7 @@ class AgentLoop:
         )
         wall_done = time.time()
         latency_ms = max(0, int((wall_done - t_wall) * 1000))
-        self._save_turn(session, all_msgs, 1 + len(history), turn_latency_ms=latency_ms)
+        self._save_turn(session, all_msgs, len(messages), turn_latency_ms=latency_ms)
         self._runtime_events().record_turn_latency(key, latency_ms)
         session.enforce_file_cap(
             on_archive=partial(self.context.memory.raw_archive, session_key=key)

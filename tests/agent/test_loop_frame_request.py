@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.frame_request import FrameRequestAdapter
 from nanobot.agent.loop import AgentLoop
@@ -200,4 +202,63 @@ def test_build_frame_initial_messages_embeds_system_history_in_frame(
     assert "old system-session text" in initial[0]["content"]
     assert not any(
         message.get("content") == "old system-session text" for message in initial[1:]
+    )
+
+
+@pytest.mark.asyncio
+async def test_process_system_message_saves_response_after_frame_initial_messages(
+    tmp_path: Path,
+) -> None:
+    loop = _loop(tmp_path)
+    loop.max_tool_result_chars = 10_000
+    loop._max_messages = 120
+    loop._background_tasks = []
+
+    session = Session(key="cli:direct")
+    session.add_message("user", "old user text")
+    session.add_message("assistant", "old assistant text")
+
+    loop.sessions = SimpleNamespace(
+        get_or_create=lambda _key: session,
+        save=lambda _session: None,
+    )
+    loop.auto_compact = SimpleNamespace(
+        prepare_session=lambda current_session, _key: (current_session, None),
+    )
+
+    async def _no_consolidate(*_args, **_kwargs):
+        return None
+
+    loop.consolidator = SimpleNamespace(maybe_consolidate_by_tokens=_no_consolidate)
+    loop._set_tool_context = lambda *_args, **_kwargs: None
+    loop._runtime_events = lambda: SimpleNamespace(record_turn_latency=lambda *_args: None)
+
+    def _close_background(coro):
+        coro.close()
+
+    loop._schedule_background = _close_background
+
+    async def _run_agent_loop(initial_messages, **_kwargs):
+        return (
+            "system result",
+            None,
+            [*initial_messages, {"role": "assistant", "content": "system result"}],
+            "completed",
+            None,
+        )
+
+    loop._run_agent_loop = _run_agent_loop
+
+    msg = InboundMessage(
+        channel="system",
+        sender_id="system",
+        chat_id="cli:direct",
+        content="system event",
+    )
+
+    await loop._process_system_message(msg)
+
+    assert any(
+        message.get("role") == "assistant" and message.get("content") == "system result"
+        for message in session.messages
     )
