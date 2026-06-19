@@ -30,6 +30,8 @@ class FrameRequestAdapter:
         tool_names: list[str],
         token_budget: Mapping[str, Any] | None = None,
         runtime_chat_id: str | None = None,
+        include_memory_recent_history: bool = True,
+        unified_session: bool = False,
     ) -> list[dict[str, Any]]:
         current_text = image_generation_prompt(
             getattr(msg, "content", ""),
@@ -52,6 +54,8 @@ class FrameRequestAdapter:
             tool_names=tool_names,
             token_budget=token_budget,
             runtime_chat_id=runtime_chat_id,
+            include_memory_recent_history=include_memory_recent_history,
+            unified_session=unified_session,
         )
         return [
             {"role": "system", "content": self.renderer.render(frame)},

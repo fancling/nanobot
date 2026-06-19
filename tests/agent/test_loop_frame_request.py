@@ -89,3 +89,53 @@ def test_build_initial_messages_uses_runtime_context_chat_id(tmp_path: Path) -> 
 
     assert "chat_id: parent-id" in initial[0]["content"]
     assert "chat_id: thread-id" not in initial[0]["content"]
+
+
+def test_build_initial_messages_includes_memory_recent_history(tmp_path: Path) -> None:
+    loop = _loop(tmp_path)
+    session = Session(key="cli:direct")
+    loop.context.memory.append_history("memory archive fact", session_key=session.key)
+    msg = InboundMessage(
+        channel="cli",
+        sender_id="user",
+        chat_id="direct",
+        content="new text",
+    )
+
+    initial = loop._build_initial_messages(
+        msg,
+        session,
+        history=[],
+        pending_summary=None,
+        include_memory_recent_history=True,
+    )
+
+    assert "memory.recent_history" in initial[0]["content"]
+    assert "memory archive fact" in initial[0]["content"]
+
+
+def test_build_initial_messages_omits_memory_recent_history_when_disabled(
+    tmp_path: Path,
+) -> None:
+    loop = _loop(tmp_path)
+    session = Session(key="cli:direct")
+    session.add_message("user", "session replay fact")
+    history = session.get_history(include_timestamps=True)
+    loop.context.memory.append_history("memory archive fact", session_key=session.key)
+    msg = InboundMessage(
+        channel="cli",
+        sender_id="user",
+        chat_id="direct",
+        content="new text",
+    )
+
+    initial = loop._build_initial_messages(
+        msg,
+        session,
+        history,
+        pending_summary=None,
+        include_memory_recent_history=False,
+    )
+
+    assert "memory archive fact" not in initial[0]["content"]
+    assert "session replay fact" in initial[0]["content"]

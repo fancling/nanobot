@@ -627,6 +627,8 @@ class AgentLoop:
             tool_names=self.tools.tool_names,
             token_budget={"conversation.recent_raw": self._replay_token_budget()},
             runtime_chat_id=self._runtime_chat_id(msg),
+            include_memory_recent_history=include_memory_recent_history,
+            unified_session=self._unified_session,
         )
 
     async def _dispatch_command_inline(

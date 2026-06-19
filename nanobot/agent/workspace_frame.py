@@ -179,6 +179,7 @@ class WorkspaceFrameRenderer:
 
 class WorkspaceFrameBuilder:
     _RECENT_RAW_TOKEN_CAP = 8_000
+    _MEMORY_RECENT_HISTORY_MAX_ENTRIES = 50
 
     def __init__(self, context: Any) -> None:
         self.context = context
@@ -197,6 +198,8 @@ class WorkspaceFrameBuilder:
         tool_names: list[str],
         token_budget: Mapping[str, Any] | None = None,
         runtime_chat_id: str | None = None,
+        include_memory_recent_history: bool = True,
+        unified_session: bool = False,
     ) -> WorkspaceFrame:
         now = datetime.now(timezone.utc)
         root = workspace or self.context.workspace
@@ -231,6 +234,23 @@ class WorkspaceFrameBuilder:
         if memory:
             modules.append(
                 self._module("memory.long_term", "memory", memory, now, priority="high")
+            )
+
+        memory_recent = self._memory_recent_history_content(
+            session,
+            include_memory_recent_history=include_memory_recent_history,
+            unified_session=unified_session,
+        )
+        if memory_recent:
+            modules.append(
+                self._module(
+                    "memory.recent_history",
+                    "memory",
+                    memory_recent,
+                    now,
+                    priority="medium",
+                    source="memory",
+                )
             )
 
         modules.extend(self._skills_modules(now))
@@ -334,6 +354,7 @@ class WorkspaceFrameBuilder:
         now: datetime,
         *,
         priority: FramePriority,
+        source: str = "runtime",
     ) -> WorkspaceFrameModule:
         return WorkspaceFrameModule(
             module_id=module_id,
@@ -351,7 +372,7 @@ class WorkspaceFrameBuilder:
                 expires_at=None,
             ),
             provenance=WorkspaceFrameProvenance(
-                source="runtime",
+                source=source,
                 observed_at=now,
                 trust_level="high",
             ),
@@ -404,6 +425,28 @@ class WorkspaceFrameBuilder:
         if self.context._is_template_content(self.context.memory.read_memory(), "memory/MEMORY.md"):
             return ""
         return memory
+
+    def _memory_recent_history_content(
+        self,
+        session: Any,
+        *,
+        include_memory_recent_history: bool,
+        unified_session: bool,
+    ) -> str:
+        if not include_memory_recent_history:
+            return ""
+        entries = self.context.memory.read_recent_history_for_prompt(
+            since_cursor=self.context.memory.get_last_dream_cursor(),
+            session_key=getattr(session, "key", None),
+            unified_session=unified_session,
+        )
+        if not entries:
+            return ""
+        capped = entries[-self._MEMORY_RECENT_HISTORY_MAX_ENTRIES:]
+        history_text = "\n".join(
+            f"- [{entry['timestamp']}] {entry['content']}" for entry in capped
+        )
+        return truncate_text_to_tokens(history_text, self._RECENT_RAW_TOKEN_CAP)
 
     def _skills_modules(self, now: datetime) -> list[WorkspaceFrameModule]:
         modules: list[WorkspaceFrameModule] = []
