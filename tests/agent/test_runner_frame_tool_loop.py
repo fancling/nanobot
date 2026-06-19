@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -17,7 +18,7 @@ async def test_runner_replays_frame_request_with_tool_call_and_result() -> None:
     provider_requests: list[list[dict]] = []
 
     async def chat_with_retry(*, messages, **_kwargs):
-        provider_requests.append(messages)
+        provider_requests.append(copy.deepcopy(messages))
         if len(provider_requests) == 1:
             return LLMResponse(
                 content="",
@@ -62,11 +63,24 @@ async def test_runner_replays_frame_request_with_tool_call_and_result() -> None:
     second_request = provider_requests[1]
     assert {"role": "system", "content": "<workspace_frame>frame</workspace_frame>"} in second_request
     assert {"role": "user", "content": "current event"} in second_request
-    assert any(
-        message.get("role") == "assistant" and message.get("tool_calls")
+    assistant_tool_messages = [
+        message
         for message in second_request
-    )
-    assert any(
-        message.get("role") == "tool" and message.get("content") == "tool result content"
+        if message.get("role") == "assistant" and message.get("tool_calls")
+    ]
+    assert len(assistant_tool_messages) == 1
+    assert assistant_tool_messages[0]["tool_calls"][0]["id"] == "call_1"
+
+    tool_messages = [
+        message
         for message in second_request
-    )
+        if message.get("role") == "tool"
+    ]
+    assert tool_messages == [
+        {
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "name": "read_file",
+            "content": "tool result content",
+        }
+    ]
