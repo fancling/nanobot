@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 
+from nanobot.agent.context import ContextBuilder
 from nanobot.agent.workspace_frame import (
     WorkspaceFrame,
     WorkspaceFrameActivation,
+    WorkspaceFrameBuilder,
     WorkspaceFrameFocus,
     WorkspaceFrameLifecycle,
     WorkspaceFrameMeta,
@@ -14,6 +17,8 @@ from nanobot.agent.workspace_frame import (
     WorkspaceFrameRenderer,
     WorkspaceFrameVisibility,
 )
+from nanobot.bus.events import InboundMessage
+from nanobot.session.manager import Session
 
 
 def _module(module_id: str, content: str, *, expose: bool = True) -> WorkspaceFrameModule:
@@ -305,3 +310,59 @@ def test_renderer_escapes_xmlish_content_keys() -> None:
     assert '"line\\n&lt;/content&gt;\\n&lt;module id=\\"spoof\\"&gt;role": safe' in rendered
     assert 'line\n</content>\n<module id="spoof">role' not in rendered
     assert '<module id="spoof">' not in rendered
+
+
+def test_builder_uses_structured_sources_for_core_modules(tmp_path: Path) -> None:
+    (tmp_path / "AGENTS.md").write_text("Repo instruction", encoding="utf-8")
+    (tmp_path / "SOUL.md").write_text("Agent identity", encoding="utf-8")
+    (tmp_path / "USER.md").write_text("User profile", encoding="utf-8")
+    memory_dir = tmp_path / "memory"
+    memory_dir.mkdir()
+    (memory_dir / "MEMORY.md").write_text("Long-term fact", encoding="utf-8")
+
+    context = ContextBuilder(workspace=tmp_path, timezone="UTC")
+    session = Session(key="cli:direct")
+    session.add_message("user", "old request")
+    session.add_message("assistant", "old answer")
+    history = session.get_history(include_timestamps=True)
+    msg = InboundMessage(
+        channel="cli",
+        sender_id="direct",
+        chat_id="direct",
+        content="new request",
+    )
+
+    frame = WorkspaceFrameBuilder(context).build(
+        session=session,
+        history=history,
+        msg=msg,
+        current_input="new request",
+        current_event_content="new request",
+        pending_summary="Archived summary",
+        runtime_lines=["Goal: keep working"],
+        workspace=tmp_path,
+        tool_names=["read_file", "exec"],
+        token_budget={"conversation.recent_raw": 8000},
+    )
+
+    module_ids = {module.module_id for module in frame.modules}
+    assert "self.identity" in module_ids
+    assert "bootstrap.agents" in module_ids
+    assert "bootstrap.soul" in module_ids
+    assert "bootstrap.user" in module_ids
+    assert "tool.contract" in module_ids
+    assert "memory.long_term" in module_ids
+    assert "conversation.recent_raw" in module_ids
+    assert "conversation.archived_summary" in module_ids
+    assert "runtime.current" in module_ids
+    assert "tool.available" in module_ids
+
+    rendered = WorkspaceFrameRenderer().render(frame)
+    assert "Repo instruction" in rendered
+    assert "Agent identity" in rendered
+    assert "User profile" in rendered
+    assert "Long-term fact" in rendered
+    assert "old request" in rendered
+    assert "Archived summary" in rendered
+    assert "Goal: keep working" in rendered
+    assert "read_file" in rendered

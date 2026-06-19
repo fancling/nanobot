@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import json
+import platform
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from html import escape
+from pathlib import Path
 from typing import Any, Literal
+
+from nanobot.utils.helpers import current_time_str, truncate_text_to_tokens
+from nanobot.utils.prompt_templates import render_template
 
 FramePriority = Literal["critical", "high", "medium", "low"]
 
@@ -170,3 +175,263 @@ class WorkspaceFrameRenderer:
             or "'" in value
             or ": " in value
         )
+
+
+class WorkspaceFrameBuilder:
+    def __init__(self, context: Any) -> None:
+        self.context = context
+
+    def build(
+        self,
+        *,
+        session: Any,
+        history: list[dict[str, Any]],
+        msg: Any,
+        current_input: str,
+        current_event_content: Any,
+        pending_summary: str | None,
+        runtime_lines: list[str],
+        workspace: Path,
+        tool_names: list[str],
+        token_budget: dict[str, int],
+    ) -> WorkspaceFrame:
+        now = datetime.now(timezone.utc)
+        root = workspace or self.context.workspace
+        modules: list[WorkspaceFrameModule] = []
+
+        modules.append(
+            self._module(
+                "self.identity",
+                "identity",
+                self._identity_content(root, getattr(msg, "channel", None)),
+                now,
+                priority="critical",
+            )
+        )
+        modules.extend(self._bootstrap_modules(root, now))
+        modules.append(
+            self._module(
+                "tool.contract",
+                "tool_contract",
+                render_template("agent/tool_contract.md"),
+                now,
+                priority="critical",
+            )
+        )
+
+        memory = self._memory_content()
+        if memory:
+            modules.append(
+                self._module("memory.long_term", "memory", memory, now, priority="high")
+            )
+
+        modules.extend(self._skills_modules(now))
+
+        recent_raw = self._history_content(
+            history,
+            token_budget.get("conversation.recent_raw", 0),
+        )
+        if recent_raw:
+            modules.append(
+                self._module(
+                    "conversation.recent_raw",
+                    "conversation",
+                    recent_raw,
+                    now,
+                    priority="high",
+                )
+            )
+
+        if pending_summary:
+            modules.append(
+                self._module(
+                    "conversation.archived_summary",
+                    "conversation",
+                    pending_summary,
+                    now,
+                    priority="medium",
+                )
+            )
+
+        modules.append(
+            self._module(
+                "runtime.current",
+                "runtime",
+                self._runtime_content(session, msg, current_event_content, runtime_lines),
+                now,
+                priority="critical",
+            )
+        )
+
+        if tool_names:
+            modules.append(
+                self._module(
+                    "tool.available",
+                    "tool",
+                    {"tools": tool_names},
+                    now,
+                    priority="high",
+                )
+            )
+
+        return WorkspaceFrame(
+            frame_id=f"workspace-frame-{now.isoformat()}",
+            frame_type="agent_os_workspace_frame",
+            created_at=now,
+            focus=WorkspaceFrameFocus(
+                event_type="user_message",
+                current_input=current_input,
+                active_topic=None,
+                active_question=None,
+                dialogue_anchor=getattr(session, "key", None),
+            ),
+            modules=modules,
+            policy=WorkspaceFramePolicy(
+                response_mode="task_execution",
+                tone="concise",
+                depth="medium",
+                should_do=["answer the current event"],
+                should_avoid=["inventing unavailable state"],
+                action_constraints=["respect workspace boundaries"],
+            ),
+            meta=WorkspaceFrameMeta(
+                schema_version="0.1",
+                token_budget=token_budget,
+                builder_trace=["workspace_frame_builder.structured_sources"],
+                render_mode="xmlish",
+            ),
+        )
+
+    def _module(
+        self,
+        module_id: str,
+        module_type: str,
+        content: Any,
+        now: datetime,
+        *,
+        priority: FramePriority,
+    ) -> WorkspaceFrameModule:
+        return WorkspaceFrameModule(
+            module_id=module_id,
+            module_type=module_type,
+            activation=WorkspaceFrameActivation(
+                trigger="structured_source",
+                reason=f"Loaded {module_id} from runtime source",
+                priority=priority,
+                confidence=1.0,
+            ),
+            content=content if isinstance(content, dict) else {"text": content},
+            lifecycle=WorkspaceFrameLifecycle(
+                ttl="current_turn",
+                created_at=now,
+                expires_at=None,
+            ),
+            provenance=WorkspaceFrameProvenance(
+                source="runtime",
+                observed_at=now,
+                trust_level="high",
+            ),
+            visibility=WorkspaceFrameVisibility(
+                expose_to_llm=True,
+                expose_to_user=False,
+                can_write_memory=False,
+            ),
+        )
+
+    def _identity_content(self, workspace: Path, channel: str | None) -> str:
+        system = platform.system()
+        runtime = (
+            f"{'macOS' if system == 'Darwin' else system} "
+            f"{platform.machine()}, Python {platform.python_version()}"
+        )
+        return render_template(
+            "agent/identity.md",
+            workspace_path=str(workspace.expanduser().resolve()),
+            runtime=runtime,
+            platform_policy=render_template("agent/platform_policy.md", system=system),
+            channel=channel or "",
+        )
+
+    def _bootstrap_modules(self, workspace: Path, now: datetime) -> list[WorkspaceFrameModule]:
+        module_names = {
+            "AGENTS.md": "bootstrap.agents",
+            "SOUL.md": "bootstrap.soul",
+            "USER.md": "bootstrap.user",
+        }
+        modules: list[WorkspaceFrameModule] = []
+        for filename, module_id in module_names.items():
+            path = workspace / filename
+            if path.exists():
+                modules.append(
+                    self._module(
+                        module_id,
+                        "bootstrap",
+                        path.read_text(encoding="utf-8"),
+                        now,
+                        priority="critical",
+                    )
+                )
+        return modules
+
+    def _memory_content(self) -> str:
+        memory = self.context.memory.get_memory_context()
+        if not memory:
+            return ""
+        if self.context._is_template_content(self.context.memory.read_memory(), "memory/MEMORY.md"):
+            return ""
+        return memory
+
+    def _skills_modules(self, now: datetime) -> list[WorkspaceFrameModule]:
+        modules: list[WorkspaceFrameModule] = []
+        always_skills = self.context.skills.get_always_skills()
+        if always_skills:
+            always_content = self.context.skills.load_skills_for_context(always_skills)
+            if always_content:
+                modules.append(
+                    self._module(
+                        "skills.always",
+                        "skills",
+                        always_content,
+                        now,
+                        priority="high",
+                    )
+                )
+
+        skills_summary = self.context.skills.build_skills_summary(exclude=set(always_skills))
+        if skills_summary:
+            modules.append(
+                self._module(
+                    "skills.available",
+                    "skills",
+                    render_template("agent/skills_section.md", skills_summary=skills_summary),
+                    now,
+                    priority="medium",
+                )
+            )
+        return modules
+
+    def _history_content(self, history: list[dict[str, Any]], token_budget: int) -> str:
+        lines = []
+        for message in history:
+            role = message.get("role", "unknown")
+            content = message.get("content", "")
+            lines.append(f"{role}: {content}")
+        text = "\n".join(lines)
+        return truncate_text_to_tokens(text, token_budget) if text else ""
+
+    def _runtime_content(
+        self,
+        session: Any,
+        msg: Any,
+        current_event_content: Any,
+        runtime_lines: list[str],
+    ) -> dict[str, Any]:
+        return {
+            "current_time": current_time_str(self.context.timezone),
+            "channel": getattr(msg, "channel", None),
+            "chat_id": getattr(msg, "chat_id", None),
+            "sender_id": getattr(msg, "sender_id", None),
+            "session_key": getattr(session, "key", None),
+            "current_event_content": current_event_content,
+            "runtime_lines": [line for line in runtime_lines if line],
+        }
