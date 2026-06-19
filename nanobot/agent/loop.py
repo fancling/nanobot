@@ -626,6 +626,7 @@ class AgentLoop:
             workspace=scope.project_path,
             tool_names=self.tools.tool_names,
             token_budget={"conversation.recent_raw": self._replay_token_budget()},
+            runtime_chat_id=self._runtime_chat_id(msg),
         )
 
     async def _dispatch_command_inline(

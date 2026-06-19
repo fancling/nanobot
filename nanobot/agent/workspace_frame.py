@@ -196,6 +196,7 @@ class WorkspaceFrameBuilder:
         workspace: Path,
         tool_names: list[str],
         token_budget: Mapping[str, Any] | None = None,
+        runtime_chat_id: str | None = None,
     ) -> WorkspaceFrame:
         now = datetime.now(timezone.utc)
         root = workspace or self.context.workspace
@@ -264,7 +265,13 @@ class WorkspaceFrameBuilder:
             self._module(
                 "runtime.current",
                 "runtime",
-                self._runtime_content(session, msg, current_event_content, runtime_lines),
+                self._runtime_content(
+                    session,
+                    msg,
+                    current_event_content,
+                    runtime_lines,
+                    runtime_chat_id,
+                ),
                 now,
                 priority="critical",
             )
@@ -442,11 +449,14 @@ class WorkspaceFrameBuilder:
         msg: Any,
         current_event_content: Any,
         runtime_lines: list[str],
+        runtime_chat_id: str | None,
     ) -> dict[str, Any]:
         return {
             "current_time": current_time_str(self.context.timezone),
             "channel": getattr(msg, "channel", None),
-            "chat_id": getattr(msg, "chat_id", None),
+            "chat_id": (
+                runtime_chat_id if runtime_chat_id is not None else getattr(msg, "chat_id", None)
+            ),
             "sender_id": getattr(msg, "sender_id", None),
             "session_key": getattr(session, "key", None),
             "current_event_content": current_event_content,

@@ -29,6 +29,7 @@ class FrameRequestAdapter:
         workspace: Path,
         tool_names: list[str],
         token_budget: Mapping[str, Any] | None = None,
+        runtime_chat_id: str | None = None,
     ) -> list[dict[str, Any]]:
         current_text = image_generation_prompt(
             getattr(msg, "content", ""),
@@ -50,6 +51,7 @@ class FrameRequestAdapter:
             workspace=workspace,
             tool_names=tool_names,
             token_budget=token_budget,
+            runtime_chat_id=runtime_chat_id,
         )
         return [
             {"role": "system", "content": self.renderer.render(frame)},

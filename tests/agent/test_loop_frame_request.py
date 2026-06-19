@@ -68,3 +68,24 @@ def test_build_initial_messages_uses_frame_only_request(tmp_path: Path) -> None:
     assert "old user text" in initial[0]["content"]
     assert "old summary" in initial[0]["content"]
     assert not any(message.get("content") == "old user text" for message in initial[1:])
+
+
+def test_build_initial_messages_uses_runtime_context_chat_id(tmp_path: Path) -> None:
+    session = Session(key="cli:thread-id")
+    msg = InboundMessage(
+        channel="cli",
+        sender_id="user",
+        chat_id="thread-id",
+        content="new text",
+        metadata={"context_chat_id": "parent-id"},
+    )
+
+    initial = _loop(tmp_path)._build_initial_messages(
+        msg,
+        session,
+        history=[],
+        pending_summary=None,
+    )
+
+    assert "chat_id: parent-id" in initial[0]["content"]
+    assert "chat_id: thread-id" not in initial[0]["content"]
