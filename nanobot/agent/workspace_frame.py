@@ -135,7 +135,10 @@ class WorkspaceFrameRenderer:
         return self._render_mapping(value.__dict__)
 
     def _render_mapping(self, values: dict[str, Any]) -> list[str]:
-        return [f"{key}: {self._render_value(value)}" for key, value in values.items()]
+        return [
+            f"{self._render_key(key)}: {self._render_value(value)}"
+            for key, value in values.items()
+        ]
 
     def _render_value(self, value: Any) -> str:
         if isinstance(value, str):
@@ -147,6 +150,14 @@ class WorkspaceFrameRenderer:
 
     def _render_attr(self, value: Any) -> str:
         return escape(str(value), quote=True)
+
+    def _render_key(self, value: Any) -> str:
+        if isinstance(value, str):
+            if self._requires_quoted_string(value):
+                return escape(json.dumps(value, ensure_ascii=False), quote=False)
+            return escape(value, quote=False)
+        rendered = json.dumps(value, ensure_ascii=False, default=str)
+        return escape(rendered, quote=False)
 
     def _requires_quoted_string(self, value: str) -> bool:
         return (
