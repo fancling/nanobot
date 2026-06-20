@@ -36,8 +36,18 @@ def normalize_reading_snapshot(value: Any) -> dict[str, Any]:
     document = _mapping(value.get("document"), "document")
     location = _mapping(value.get("location"), "location")
     focus = _mapping(value.get("focus"), "focus")
-    reading_state = _optional_mapping(value.get("reading_state"), "reading_state")
-    prediction = _optional_mapping(value.get("prediction"), "prediction")
+    has_reading_state = "reading_state" in value
+    has_prediction = "prediction" in value
+    reading_state = (
+        _optional_mapping(value.get("reading_state"), "reading_state")
+        if has_reading_state
+        else {}
+    )
+    prediction = (
+        _optional_mapping(value.get("prediction"), "prediction")
+        if has_prediction
+        else {}
+    )
 
     focused_text = _text(focus, "focused_text", group="focus", required=True)
     if not focused_text:
@@ -70,29 +80,42 @@ def normalize_reading_snapshot(value: Any) -> dict[str, Any]:
             "user_note": _text(focus, "user_note", group="focus", fallback=""),
             "current_question": _text(focus, "current_question", group="focus", fallback=""),
         },
-        "reading_state": {
-            "mode": _text(reading_state, "mode", group="reading_state", fallback="slow_reading"),
-            "engagement": _text(
-                reading_state,
-                "engagement",
-                group="reading_state",
-                fallback="actively_reflecting",
-            ),
-        },
-        "prediction": {
-            "likely_need": _text(
-                prediction,
-                "likely_need",
-                group="prediction",
-                fallback="respond to the current reading focus",
-            ),
-            "bad_response_risk": _text(
-                prediction,
-                "bad_response_risk",
-                group="prediction",
-                fallback="avoid generic summary",
-            ),
-        },
+        "reading_state": (
+            {
+                "mode": _text(
+                    reading_state,
+                    "mode",
+                    group="reading_state",
+                    fallback="slow_reading",
+                ),
+                "engagement": _text(
+                    reading_state,
+                    "engagement",
+                    group="reading_state",
+                    fallback="actively_reflecting",
+                ),
+            }
+            if has_reading_state
+            else {}
+        ),
+        "prediction": (
+            {
+                "likely_need": _text(
+                    prediction,
+                    "likely_need",
+                    group="prediction",
+                    fallback="respond to the current reading focus",
+                ),
+                "bad_response_risk": _text(
+                    prediction,
+                    "bad_response_risk",
+                    group="prediction",
+                    fallback="avoid generic summary",
+                ),
+            }
+            if has_prediction
+            else {}
+        ),
     }
 
 

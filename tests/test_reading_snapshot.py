@@ -81,6 +81,21 @@ def test_normalize_reading_snapshot_truncates_large_text_fields() -> None:
     assert len(normalized["prediction"]["bad_response_risk"]) <= 403
 
 
+def test_normalize_reading_snapshot_optional_blocks_default_to_empty_dicts() -> None:
+    payload = {
+        "version": 1,
+        "scene": "reading",
+        "document": {"id": "doc-1", "title": "My Essay", "kind": "markdown"},
+        "location": {"paragraph_index": 2, "paragraph_count": 8},
+        "focus": {"focused_text": "The focused paragraph."},
+    }
+
+    normalized = normalize_reading_snapshot(payload)
+
+    assert normalized["reading_state"] == {}
+    assert normalized["prediction"] == {}
+
+
 def test_normalize_reading_snapshot_clamps_location_numbers() -> None:
     payload = {
         "version": 1,
