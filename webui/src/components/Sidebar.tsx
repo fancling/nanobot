@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import {
   Archive,
   Brain,
+  BookOpen,
   CalendarClock,
   Menu,
   Search,
@@ -39,7 +40,8 @@ interface SidebarProps {
   onOpenSkills: () => void;
   onOpenAutomations: () => void;
   onOpenSearch: () => void;
-  activeUtility?: "apps" | "skills" | "automations" | null;
+  onOpenReader: () => void;
+  activeUtility?: "apps" | "skills" | "automations" | "reader" | null;
   onToggleArchived: () => void;
   onCollapse: () => void;
   onExpand?: () => void;
@@ -153,6 +155,13 @@ export function Sidebar(props: SidebarProps) {
           label={t("sidebar.searchAria")}
           onClick={props.onOpenSearch}
           icon={<Search className="h-4 w-4" />}
+        />
+        <SidebarActionButton
+          collapsed={collapsed}
+          label="Reader"
+          onClick={props.onOpenReader}
+          active={props.activeUtility === "reader"}
+          icon={<BookOpen className="h-4 w-4" />}
         />
         <SidebarActionButton
           collapsed={collapsed}

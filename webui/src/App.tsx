@@ -10,6 +10,7 @@ import { Moon, PanelLeft, Sun } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { DeleteConfirm } from "@/components/DeleteConfirm";
 import { RenameChatDialog } from "@/components/RenameChatDialog";
+import { ReaderPage } from "@/components/reader/ReaderPage";
 import { Sidebar } from "@/components/Sidebar";
 import { SessionSearchDialog } from "@/components/SessionSearchDialog";
 import { SettingsView, type SettingsSectionKey } from "@/components/settings/SettingsView";
@@ -32,6 +33,13 @@ import {
 import { displayTitle } from "@/lib/chat-groups";
 import { deriveTitle } from "@/lib/format";
 import { NanobotClient } from "@/lib/nanobot-client";
+import {
+  isReaderSessionState,
+  loadReaderStateResult,
+  saveReaderState,
+  type ReaderState,
+} from "@/lib/reading";
+import { importEpubDocument } from "@/lib/readerEpub";
 import { ClientProvider, useClient } from "@/providers/ClientProvider";
 import type {
   ChatSummary,
@@ -73,7 +81,7 @@ const SIDEBAR_RAIL_WIDTH = 56;
 const MOBILE_SIDEBAR_WIDTH = `min(${SIDEBAR_WIDTH}px, calc(100vw - 0.75rem))`;
 const TOKEN_REFRESH_MARGIN_MS = 30_000;
 const TOKEN_REFRESH_MIN_DELAY_MS = 5_000;
-type ShellView = "chat" | "settings" | "apps" | "automations" | "skills";
+type ShellView = "chat" | "settings" | "apps" | "automations" | "skills" | "reader";
 type ShellRoute = {
   view: ShellView;
   activeKey: string | null;
@@ -138,6 +146,9 @@ function readShellRoute(): ShellRoute {
   if (path === "/skills") {
     return { view: "skills", activeKey, settingsSection: "skills" };
   }
+  if (path === "/reader") {
+    return { view: "reader", activeKey, settingsSection: "overview" };
+  }
   if (path.startsWith("/chat/")) {
     const encoded = path.slice("/chat/".length);
     try {
@@ -159,6 +170,11 @@ function shellRouteHash(route: ShellRoute): string {
       : "#/new";
   }
   const params = new URLSearchParams();
+  if (route.view === "reader") {
+    if (route.activeKey) params.set("chat", route.activeKey);
+    const query = params.toString();
+    return `#/reader${query ? `?${query}` : ""}`;
+  }
   if (route.activeKey) params.set("chat", route.activeKey);
   if (route.view === "settings" && route.settingsSection !== "overview") {
     params.set("section", route.settingsSection);
@@ -193,6 +209,26 @@ function tokenRefreshDelayMs(expiresAt: number): number {
     Math.max(1_000, remaining / 2),
   );
   return Math.max(TOKEN_REFRESH_MIN_DELAY_MS, remaining - margin);
+}
+
+function blankReaderState(imported?: Awaited<ReturnType<typeof importEpubDocument>>): ReaderState {
+  return {
+    version: 1,
+    documentId: imported?.documentId ?? crypto.randomUUID(),
+    title: imported?.title ?? "",
+    rawText: imported?.rawText ?? "",
+    focusedParagraphIndex: 0,
+    selectedText: "",
+    note: "",
+    question: "",
+    mode: "slow_reading",
+    collapsed: imported ? false : true,
+    documentKind: imported?.documentKind ?? "markdown",
+    readerSession: imported?.readerSession,
+    sourceFileName: imported?.sourceFileName,
+    sections: imported?.sections,
+    activeSectionIndex: imported?.activeSectionIndex ?? 0,
+  };
 }
 
 function AuthForm({
@@ -586,6 +622,8 @@ function Shell({
     useState<WorkspaceScopePayload | null>(null);
   const [workspaceOverrides, setWorkspaceOverrides] =
     useState<Record<string, WorkspaceScopePayload>>({});
+  const [readerState, setReaderState] = useState<ReaderState | null>(null);
+  const [readerPersistenceFailed, setReaderPersistenceFailed] = useState(false);
   const runningChatIdsRef = useRef<Set<string>>(new Set());
   const activeChatIdRef = useRef<string | null>(null);
   const hostSidebarPreviewCloseTimerRef = useRef<number | null>(null);
@@ -655,6 +693,7 @@ function Shell({
   const runningChatIdList = useMemo(() => Array.from(runningChatIds), [runningChatIds]);
   const updatedChatIdList = useMemo(() => Array.from(updatedChatIds), [updatedChatIds]);
   const activeChatId = activeSession?.chatId ?? null;
+  const activeReaderChatId = view === "reader" ? activeSession?.chatId ?? null : null;
   useEffect(() => {
     activeChatIdRef.current = activeChatId;
     if (!activeChatId) return;
@@ -681,6 +720,17 @@ function Shell({
     workspaces?.default_scope,
   ]);
   const activeChatRunning = activeChatId ? runningChatIds.has(activeChatId) : false;
+
+  useEffect(() => {
+    if (!activeReaderChatId) {
+      setReaderState(null);
+      setReaderPersistenceFailed(false);
+      return;
+    }
+    const loaded = loadReaderStateResult(activeReaderChatId);
+    setReaderState(loaded.state);
+    setReaderPersistenceFailed(loaded.storageFailed);
+  }, [activeReaderChatId]);
 
   const refreshWorkspaces = useCallback(async () => {
     try {
@@ -991,7 +1041,10 @@ function Shell({
         setDraftWorkspaceScope(null);
       }
       setWorkspaceError(null);
-      navigate({ view: "chat", activeKey: key, settingsSection: "overview" });
+      const nextView = selectedChatId && isReaderSessionState(loadReaderStateResult(selectedChatId).state)
+        ? "reader"
+        : "chat";
+      navigate({ view: nextView, activeKey: key, settingsSection: "overview" });
       setMobileSidebarOpen(false);
     },
     [navigate, sessions],
@@ -1198,6 +1251,12 @@ function Shell({
     setMobileSidebarOpen(false);
   }, [activeKey, navigate]);
 
+  const onOpenReader = useCallback(() => {
+    setSessionSearchOpen(false);
+    navigate({ view: "reader", activeKey: null, settingsSection: "overview" });
+    setMobileSidebarOpen(false);
+  }, [navigate]);
+
   const onSettingsSectionChange = useCallback(
     (section: SettingsSectionKey) => {
       navigate({
@@ -1222,6 +1281,38 @@ function Shell({
       settingsSection: "overview",
     });
   }, [activeKey, navigate, sessions]);
+
+  const persistReaderState = useCallback((chatId: string, nextState: ReaderState) => {
+    const persisted = saveReaderState(chatId, nextState);
+    setReaderPersistenceFailed(!persisted);
+  }, []);
+
+  const onReaderChange = useCallback((patch: Partial<ReaderState>) => {
+    if (!activeReaderChatId || !readerState) return;
+    const nextState = { ...readerState, ...patch };
+    setReaderState(nextState);
+    persistReaderState(activeReaderChatId, nextState);
+  }, [activeReaderChatId, persistReaderState, readerState]);
+
+  const onReaderImportEpub = useCallback(async (file: File) => {
+    if (!activeReaderChatId) return;
+    try {
+      const imported = await importEpubDocument(file);
+      const nextState = {
+        ...(readerState ?? blankReaderState()),
+        ...imported,
+        focusedParagraphIndex: 0,
+        selectedText: "",
+        note: "",
+        question: "",
+        collapsed: false,
+      } satisfies ReaderState;
+      setReaderState(nextState);
+      persistReaderState(activeReaderChatId, nextState);
+    } catch (error) {
+      console.error("Failed to import EPUB", error);
+    }
+  }, [activeReaderChatId, persistReaderState, readerState]);
 
   const onRestart = useCallback(() => {
     const chatId = activeSession?.chatId ?? client.defaultChatId;
@@ -1379,6 +1470,10 @@ function Shell({
       });
       return;
     }
+    if (view === "reader") {
+      document.title = t("app.documentTitle.chat", { title: "Reader" });
+      return;
+    }
     document.title = activeSession
       ? t("app.documentTitle.chat", { title: headerTitle })
       : t("app.documentTitle.base");
@@ -1402,7 +1497,11 @@ function Shell({
     onOpenAutomations,
     onOpenSkills,
     onOpenSearch: onOpenSessionSearch,
-    activeUtility: view === "apps" || view === "automations" || view === "skills" ? view : null,
+    onOpenReader,
+    activeUtility:
+      view === "apps" || view === "automations" || view === "skills" || view === "reader"
+        ? view
+        : null,
     onToggleArchived,
     pinnedKeys: sidebarState.pinned_keys,
     archivedKeys: sidebarState.archived_keys,
@@ -1554,6 +1653,7 @@ function Shell({
             onSelect={onSelectSearchResult}
           />
         <main
+          aria-label={view === "reader" && readerState ? "Reader page" : undefined}
           className={cn(
             "relative flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background",
             showHostChrome && hostSidebarOpen && "border-l border-border/55",
@@ -1588,7 +1688,31 @@ function Shell({
                 onOpenModelSettings={onOpenModelSettings}
               />
             </div>
-            {view !== "chat" && (
+            {view === "reader" ? (
+              <div className="absolute inset-0 flex flex-col">
+                <ReaderPage
+                  state={readerState}
+                  disabled={!activeReaderChatId}
+                  persistenceFailed={readerPersistenceFailed}
+                  onChange={onReaderChange}
+                  onImportEpub={onReaderImportEpub}
+                  onSendReading={(content, snapshot) => {
+                    if (!activeReaderChatId) return;
+                    client.sendMessage(
+                      activeReaderChatId,
+                      content,
+                      undefined,
+                      {
+                        ...(activeWorkspaceScope ? { workspaceScope: activeWorkspaceScope } : {}),
+                        readingSnapshot: snapshot,
+                      },
+                    );
+                  }}
+                  onBackToChat={onBackToChat}
+                />
+              </div>
+            ) : null}
+            {view !== "chat" && view !== "reader" && (
               <div className="absolute inset-0 flex flex-col">
                 <SettingsView
                   theme={theme}

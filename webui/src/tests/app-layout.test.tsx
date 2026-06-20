@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import i18n from "@/i18n";
+import { READER_STATE_STORAGE_PREFIX } from "@/lib/reading";
 import type { ChatSummary, SessionAutomationJob } from "@/lib/types";
 
 const connectSpy = vi.fn();
@@ -355,6 +356,57 @@ describe("App layout", () => {
     expect(screen.getByText("Missing CLI")).toBeInTheDocument();
     fireEvent.click(screen.getByText("Raw SKILL.md"));
     expect(screen.getByText(/Use GitHub CLI/)).toBeInTheDocument();
+  });
+
+  it("opens the sidebar Reader page", async () => {
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Reader" }));
+
+    expect(await screen.findByRole("main", { name: /reader page/i })).toBeInTheDocument();
+    expect(window.location.hash).toBe("#/reader");
+  });
+
+  it("routes reader-backed sessions to the Reader page", async () => {
+    window.localStorage.setItem(
+      `${READER_STATE_STORAGE_PREFIX}book-chat`,
+      JSON.stringify({
+        version: 1,
+        documentId: "book-1",
+        title: "Book",
+        rawText: "Book text.",
+        focusedParagraphIndex: 0,
+        selectedText: "",
+        note: "",
+        question: "",
+        mode: "slow_reading",
+        collapsed: false,
+        documentKind: "epub",
+        readerSession: true,
+      }),
+    );
+    mockSessions = [
+      {
+        key: "websocket:book-chat",
+        channel: "websocket",
+        chatId: "book-chat",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        title: "Book",
+        preview: "Book",
+      },
+    ];
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: /^Book$/ }));
+
+    expect(await screen.findByRole("main", { name: /reader page/i })).toBeInTheDocument();
+    expect(window.location.hash).toBe("#/reader?chat=websocket%3Abook-chat");
   });
 
   it("opens Automations from the main sidebar", async () => {
