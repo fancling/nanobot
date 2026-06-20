@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { type KeyboardEvent, useCallback } from "react";
 
 import { parseReaderParagraphs, type ReaderParagraph } from "@/lib/reading";
 import { cn } from "@/lib/utils";
@@ -33,6 +33,30 @@ export function ReaderDocument({
     [onSelectedText],
   );
 
+  const handleFocusParagraph = useCallback(
+    (index: number) => {
+      onFocusParagraph(index);
+    },
+    [onFocusParagraph],
+  );
+
+  const handleClick = useCallback(
+    (paragraph: ReaderParagraph) => {
+      if (selectedText()) return;
+      handleFocusParagraph(paragraph.index);
+    },
+    [handleFocusParagraph],
+  );
+
+  const handleKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>, paragraph: ReaderParagraph) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      handleFocusParagraph(paragraph.index);
+    },
+    [handleFocusParagraph],
+  );
+
   return (
     <main
       aria-label="Reader document"
@@ -51,9 +75,10 @@ export function ReaderDocument({
           {paragraphs.map((paragraph) => {
             const active = paragraph.index === focusedParagraphIndex;
             return (
-              <button
+              <div
                 key={paragraph.id}
-                type="button"
+                role="button"
+                tabIndex={0}
                 aria-label={`Focus paragraph ${paragraph.index + 1}`}
                 aria-pressed={active}
                 className={cn(
@@ -63,11 +88,12 @@ export function ReaderDocument({
                     ? "border-primary/40 bg-primary/10"
                     : "border-transparent hover:border-border hover:bg-muted/40",
                 )}
-                onClick={() => onFocusParagraph(paragraph.index)}
+                onClick={() => handleClick(paragraph)}
+                onKeyDown={(event) => handleKeyDown(event, paragraph)}
                 onMouseUp={() => handleMouseUp(paragraph)}
               >
                 <span className="whitespace-pre-wrap">{paragraph.text}</span>
-              </button>
+              </div>
             );
           })}
         </div>

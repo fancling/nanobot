@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Bot, MessageCircle, StickyNote, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -30,19 +30,28 @@ export function ReaderCompanionRail({
   const [selectionQuestion, setSelectionQuestion] = useState("");
   const [noteDraft, setNoteDraft] = useState(state.note);
   const paragraphs = useMemo(() => parseReaderParagraphs(state.rawText), [state.rawText]);
-  const focused = paragraphs[state.focusedParagraphIndex] ?? paragraphs[0];
+  const activeParagraphIndex = paragraphs.length > 0
+    ? Math.max(0, Math.min(state.focusedParagraphIndex, paragraphs.length - 1))
+    : 0;
+  const focused = paragraphs[activeParagraphIndex];
+
+  useEffect(() => {
+    setParagraphQuestion("");
+    setSelectionQuestion("");
+    setNoteDraft(state.note);
+  }, [state.documentId, state.note]);
 
   const send = (question: string, selectedText = state.selectedText, note = noteDraft) => {
     if (!focused || disabled) return;
     const nextState: ReaderState = {
       ...state,
-      focusedParagraphIndex: focused.index,
+      focusedParagraphIndex: activeParagraphIndex,
       selectedText,
       note,
       question,
     };
     onChange({
-      focusedParagraphIndex: focused.index,
+      focusedParagraphIndex: activeParagraphIndex,
       selectedText,
       note,
       question,

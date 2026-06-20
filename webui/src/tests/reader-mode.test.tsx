@@ -1,8 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ReaderMode } from "@/components/thread/reader/ReaderMode";
 import type { ReaderState } from "@/lib/reading";
+
+const getSelectionSpy = vi.spyOn(window, "getSelection");
 
 function state(overrides: Partial<ReaderState> = {}): ReaderState {
   return {
@@ -23,6 +25,11 @@ function state(overrides: Partial<ReaderState> = {}): ReaderState {
 }
 
 describe("ReaderMode", () => {
+  afterEach(() => {
+    getSelectionSpy.mockReset();
+    vi.clearAllMocks();
+  });
+
   it("renders document-first reader mode with companion rail and agent presence", () => {
     render(
       <ReaderMode
@@ -59,6 +66,35 @@ describe("ReaderMode", () => {
     expect(onChange).toHaveBeenCalledWith({ focusedParagraphIndex: 1, selectedText: "" });
   });
 
+  it("keeps selected text after the paragraph mouse and click sequence", () => {
+    const onChange = vi.fn();
+    getSelectionSpy.mockReturnValue({ toString: () => "Focused passage" } as Selection);
+    render(
+      <ReaderMode
+        state={state()}
+        disabled={false}
+        persistenceFailed={false}
+        onChange={onChange}
+        onClose={vi.fn()}
+        onSendReading={vi.fn()}
+      />,
+    );
+
+    const paragraph = screen.getByRole("button", { name: /Focus paragraph 2/i });
+    fireEvent.mouseDown(paragraph);
+    fireEvent.mouseUp(paragraph);
+    fireEvent.click(paragraph);
+
+    expect(onChange).toHaveBeenCalledWith({
+      focusedParagraphIndex: 1,
+      selectedText: "Focused passage",
+    });
+    expect(onChange).not.toHaveBeenLastCalledWith({
+      focusedParagraphIndex: 1,
+      selectedText: "",
+    });
+  });
+
   it("sends a paragraph question with a reading snapshot", () => {
     const onSendReading = vi.fn();
     render(
@@ -83,6 +119,101 @@ describe("ReaderMode", () => {
         focus: expect.objectContaining({
           focused_text: "Focused passage.",
           current_question: "Why this turn?",
+        }),
+      }),
+    );
+  });
+
+  it("resets local companion drafts when the document changes", () => {
+    const onSendReading = vi.fn();
+    const { rerender } = render(
+      <ReaderMode
+        state={state({ documentId: "doc-a", note: "Doc A saved note" })}
+        disabled={false}
+        persistenceFailed={false}
+        onChange={vi.fn()}
+        onClose={vi.fn()}
+        onSendReading={onSendReading}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText(/Question about focused paragraph/i), {
+      target: { value: "Doc A draft question" },
+    });
+    fireEvent.change(screen.getByLabelText(/Note for this paragraph/i), {
+      target: { value: "Doc A draft note" },
+    });
+
+    rerender(
+      <ReaderMode
+        state={state({
+          documentId: "doc-b",
+          title: "Second essay",
+          rawText: "Doc B opening.",
+          note: "Doc B saved note",
+        })}
+        disabled={false}
+        persistenceFailed={false}
+        onChange={vi.fn()}
+        onClose={vi.fn()}
+        onSendReading={onSendReading}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Ask about paragraph/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Send note with paragraph/i }));
+
+    expect(onSendReading).not.toHaveBeenCalledWith(
+      "Doc A draft question",
+      expect.anything(),
+    );
+    expect(onSendReading).toHaveBeenCalledWith(
+      "聊聊这一段",
+      expect.objectContaining({
+        focus: expect.objectContaining({
+          user_note: "Doc B saved note",
+        }),
+      }),
+    );
+    expect(onSendReading).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        focus: expect.objectContaining({
+          user_note: "Doc A draft note",
+        }),
+      }),
+    );
+  });
+
+  it("uses the last paragraph when focused index is above range", () => {
+    const onSendReading = vi.fn();
+    render(
+      <ReaderMode
+        state={state({ focusedParagraphIndex: 99 })}
+        disabled={false}
+        persistenceFailed={false}
+        onChange={vi.fn()}
+        onClose={vi.fn()}
+        onSendReading={onSendReading}
+      />,
+    );
+
+    expect(
+      within(screen.getByRole("complementary", { name: /reader companion/i })).getByText("After."),
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/Question about focused paragraph/i), {
+      target: { value: "Why the ending?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Ask about paragraph/i }));
+
+    expect(onSendReading).toHaveBeenCalledWith(
+      "Why the ending?",
+      expect.objectContaining({
+        location: expect.objectContaining({
+          paragraph_index: 2,
+        }),
+        focus: expect.objectContaining({
+          focused_text: "After.",
         }),
       }),
     );
