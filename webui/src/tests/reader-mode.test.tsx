@@ -326,4 +326,38 @@ describe("ReaderMode", () => {
       }),
     );
   });
+
+  it("lets the user close reader mode from the companion rail", () => {
+    const onClose = vi.fn();
+    render(
+      <ReaderMode
+        state={state()}
+        disabled={false}
+        persistenceFailed={false}
+        onChange={vi.fn()}
+        onClose={onClose}
+        onSendReading={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /close reader/i }));
+
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("keeps paragraph actions disabled when there is no readable content", () => {
+    render(
+      <ReaderMode
+        state={state({ rawText: "   " })}
+        disabled={false}
+        persistenceFailed={false}
+        onChange={vi.fn()}
+        onClose={vi.fn()}
+        onSendReading={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /Ask about paragraph/i })).toBeDisabled();
+    expect(screen.getByText(/Add reading text to begin/i)).toBeInTheDocument();
+  });
 });
