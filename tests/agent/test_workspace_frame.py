@@ -474,3 +474,85 @@ def test_builder_adds_recent_raw_default_to_partial_token_budget(tmp_path: Path)
 
     assert frame.meta.token_budget["conversation.recent_raw"] == 8000
     assert frame.meta.token_budget["other"] == 1
+
+
+def test_builder_adds_reading_scene_module(tmp_path: Path) -> None:
+    context = ContextBuilder(workspace=tmp_path)
+    session = Session("websocket:reading-chat")
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="client-1",
+        chat_id="reading-chat",
+        content="聊聊这一段",
+        metadata={
+            "reading_snapshot": {
+                "version": 1,
+                "scene": "reading",
+                "document": {"id": "doc-1", "title": "Essay", "kind": "markdown"},
+                "location": {"paragraph_index": 1, "paragraph_count": 3},
+                "focus": {
+                    "focused_text": "Focused passage.",
+                    "before": "Before.",
+                    "after": "After.",
+                    "user_note": "This feels connected.",
+                    "current_question": "What is happening here?",
+                },
+                "reading_state": {
+                    "mode": "slow_reading",
+                    "engagement": "actively_reflecting",
+                },
+                "prediction": {
+                    "likely_need": "connect passage to user reflection",
+                    "bad_response_risk": "avoid generic summary",
+                },
+            }
+        },
+    )
+
+    frame = WorkspaceFrameBuilder(context).build(
+        session=session,
+        history=[],
+        msg=msg,
+        current_input="聊聊这一段",
+        current_event_content={"text": "聊聊这一段", "media_count": 0},
+        pending_summary=None,
+        runtime_lines=[],
+        workspace=tmp_path,
+        tool_names=[],
+    )
+
+    reading = next(module for module in frame.modules if module.module_id == "scene.reading")
+    assert reading.module_type == "scene"
+    assert reading.activation.priority == "high"
+    assert reading.provenance.source == "webui.reading_shell"
+    assert reading.content["snapshot"]["focus"]["focused_text"] == "Focused passage."
+
+    rendered = WorkspaceFrameRenderer().render(frame)
+    assert '<module id="scene.reading" type="scene" priority="high">' in rendered
+    assert "current reading scene" in rendered
+    assert "Focused passage." in rendered
+
+
+def test_builder_omits_reading_scene_for_normal_message(tmp_path: Path) -> None:
+    context = ContextBuilder(workspace=tmp_path)
+    session = Session("websocket:normal-chat")
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="client-1",
+        chat_id="normal-chat",
+        content="hello",
+    )
+
+    frame = WorkspaceFrameBuilder(context).build(
+        session=session,
+        history=[],
+        msg=msg,
+        current_input="hello",
+        current_event_content={"text": "hello", "media_count": 0},
+        pending_summary=None,
+        runtime_lines=[],
+        workspace=tmp_path,
+        tool_names=[],
+    )
+
+    assert all(module.module_id != "scene.reading" for module in frame.modules)

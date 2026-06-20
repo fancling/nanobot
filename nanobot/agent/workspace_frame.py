@@ -322,6 +322,18 @@ class WorkspaceFrameBuilder:
                 priority="critical",
             )
         )
+        reading_snapshot = self._reading_snapshot_content(msg)
+        if reading_snapshot:
+            modules.append(
+                self._module(
+                    "scene.reading",
+                    "scene",
+                    reading_snapshot,
+                    now,
+                    priority="high",
+                    source="webui.reading_shell",
+                )
+            )
 
         if tool_names:
             modules.append(
@@ -554,6 +566,22 @@ class WorkspaceFrameBuilder:
             "session_key": getattr(session, "key", None),
             "current_event_content": current_event_content,
             "runtime_lines": [line for line in runtime_lines if line],
+        }
+
+    def _reading_snapshot_content(self, msg: Any) -> dict[str, Any] | None:
+        metadata = getattr(msg, "metadata", None)
+        if not isinstance(metadata, Mapping):
+            return None
+        snapshot = metadata.get("reading_snapshot")
+        if not isinstance(snapshot, dict):
+            return None
+        return {
+            "instruction": (
+                "This module represents the current reading scene for this turn. "
+                "Use it to respond to the user's focused passage, note, and question; "
+                "avoid treating it as a permanent book store."
+            ),
+            "snapshot": snapshot,
         }
 
     def _tone_for_channel(self, channel: str | None) -> str:
