@@ -105,6 +105,7 @@ export function ReaderMode({
         />
       </div>
       <ReaderCompanionRail
+        key={`${state.documentId}:${activeSection?.id ?? "raw"}`}
         state={activeState}
         disabled={disabled}
         persistenceFailed={persistenceFailed}

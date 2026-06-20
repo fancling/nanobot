@@ -124,6 +124,69 @@ describe("ReaderMode", () => {
     ).toBeInTheDocument();
   });
 
+  it("resets section A paragraph drafts before section B sends a question", () => {
+    const onSendReading = vi.fn();
+    const { rerender } = render(
+      <ReaderMode
+        state={state({
+          documentId: "book-1",
+          rawText: "Full book opening.\n\nFull book middle.\n\nFull book ending.",
+          activeSectionIndex: 0,
+          sections: [
+            { id: "s-1", title: "Opening", rawText: "Opening section.", paragraphCount: 1 },
+            { id: "s-2", title: "Middle", rawText: "Middle section.", paragraphCount: 1 },
+          ],
+        })}
+        disabled={false}
+        persistenceFailed={false}
+        onChange={vi.fn()}
+        onClose={vi.fn()}
+        onSendReading={onSendReading}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText(/Question about focused paragraph/i), {
+      target: { value: "Draft for section A" },
+    });
+
+    rerender(
+      <ReaderMode
+        state={state({
+          documentId: "book-1",
+          rawText: "Full book opening.\n\nFull book middle.\n\nFull book ending.",
+          activeSectionIndex: 1,
+          focusedParagraphIndex: 0,
+          sections: [
+            { id: "s-1", title: "Opening", rawText: "Opening section.", paragraphCount: 1 },
+            { id: "s-2", title: "Middle", rawText: "Middle section.", paragraphCount: 1 },
+          ],
+        })}
+        disabled={false}
+        persistenceFailed={false}
+        onChange={vi.fn()}
+        onClose={vi.fn()}
+        onSendReading={onSendReading}
+      />,
+    );
+
+    expect(within(screen.getByRole("main", { name: /reader document/i })).getByText("Middle section.")).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("complementary", { name: /reader companion/i })).getByText("Middle section."),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Ask about paragraph/i }));
+
+    expect(onSendReading).not.toHaveBeenCalledWith("Draft for section A", expect.anything());
+    expect(onSendReading).toHaveBeenCalledWith(
+      "聊聊这一段",
+      expect.objectContaining({
+        focus: expect.objectContaining({
+          focused_text: "Middle section.",
+        }),
+      }),
+    );
+  });
+
   it("clicking a paragraph updates the focused paragraph", () => {
     const onChange = vi.fn();
     render(
