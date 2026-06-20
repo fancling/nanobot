@@ -21,6 +21,11 @@ export interface ReaderState {
   collapsed: boolean;
 }
 
+export interface ReaderStateLoadResult {
+  state: ReaderState | null;
+  storageFailed: boolean;
+}
+
 const TITLE_MAX_CHARS = 240;
 const FOCUSED_TEXT_MAX_CHARS = 1200;
 const SELECTED_TEXT_MAX_CHARS = 800;
@@ -159,47 +164,59 @@ export function buildReadingSnapshot(state: ReaderState): ReadingSnapshot {
   };
 }
 
-export function saveReaderState(chatId: string, state: ReaderState): void {
+export function saveReaderState(chatId: string, state: ReaderState): boolean {
   const storage = storageAvailable();
-  if (!storage) return;
+  if (!storage) return false;
   const key = getStorageKey(chatId);
   try {
     storage.setItem(key, JSON.stringify(state));
+    return true;
   } catch {
-    // ignore storage failures in restricted/private modes
+    return false;
+  }
+}
+
+export function loadReaderStateResult(chatId: string): ReaderStateLoadResult {
+  const storage = storageAvailable();
+  if (!storage) return { state: null, storageFailed: true };
+  const key = getStorageKey(chatId);
+  try {
+    const raw = storage.getItem(key);
+    if (!raw) return { state: null, storageFailed: false };
+
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) {
+      return { state: null, storageFailed: false };
+    }
+    const maybe = parsed as Record<string, unknown>;
+
+    if (maybe.version !== 1 || typeof maybe.rawText !== "string") {
+      return { state: null, storageFailed: false };
+    }
+
+    return {
+      state: {
+        version: 1,
+        documentId:
+          typeof maybe.documentId === "string"
+            ? maybe.documentId
+            : "",
+        title: normalizeText(maybe.title),
+        rawText: maybe.rawText,
+        focusedParagraphIndex: normalizeInt(maybe.focusedParagraphIndex, 0),
+        selectedText: normalizeText(maybe.selectedText),
+        note: normalizeText(maybe.note),
+        question: normalizeText(maybe.question),
+        mode: maybe.mode === "slow_reading" ? maybe.mode : "slow_reading",
+        collapsed: maybe.collapsed === true,
+      },
+      storageFailed: false,
+    };
+  } catch {
+    return { state: null, storageFailed: true };
   }
 }
 
 export function loadReaderState(chatId: string): ReaderState | null {
-  const storage = storageAvailable();
-  if (!storage) return null;
-  const key = getStorageKey(chatId);
-  try {
-    const raw = storage.getItem(key);
-    if (!raw) return null;
-
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null) return null;
-    const maybe = parsed as Record<string, unknown>;
-
-    if (maybe.version !== 1 || typeof maybe.rawText !== "string") return null;
-
-    return {
-      version: 1,
-      documentId:
-        typeof maybe.documentId === "string"
-          ? maybe.documentId
-          : "",
-      title: normalizeText(maybe.title),
-      rawText: maybe.rawText,
-      focusedParagraphIndex: normalizeInt(maybe.focusedParagraphIndex, 0),
-      selectedText: normalizeText(maybe.selectedText),
-      note: normalizeText(maybe.note),
-      question: normalizeText(maybe.question),
-      mode: maybe.mode === "slow_reading" ? maybe.mode : "slow_reading",
-      collapsed: maybe.collapsed === true,
-    };
-  } catch {
-    return null;
-  }
+  return loadReaderStateResult(chatId).state;
 }

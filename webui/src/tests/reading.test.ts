@@ -128,7 +128,7 @@ describe("reading utilities", () => {
   });
 
   it("persists reader state by chat id", () => {
-    saveReaderState("chat-1", {
+    const saved = saveReaderState("chat-1", {
       version: 1,
       documentId: "doc-1",
       title: "Essay",
@@ -141,6 +141,7 @@ describe("reading utilities", () => {
       collapsed: false,
     });
 
+    expect(saved).toBe(true);
     expect(window.localStorage.getItem(`${READER_STATE_STORAGE_PREFIX}chat-1`)).toContain("Essay");
     expect(loadReaderState("chat-1")?.note).toBe("Note");
   });

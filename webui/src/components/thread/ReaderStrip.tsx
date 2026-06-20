@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   buildReadingSnapshot,
-  loadReaderState,
+  loadReaderStateResult,
   parseReaderParagraphs,
   saveReaderState,
   type ReaderState,
@@ -22,6 +22,7 @@ interface ReaderStripProps {
 
 interface ReaderStripState {
   chatId: string | null;
+  persistenceFailed: boolean;
   value: ReaderState;
 }
 
@@ -47,7 +48,16 @@ export function ReaderStrip({
 }: ReaderStripProps) {
   const [reader, setReader] = useState<ReaderStripState>(() => ({
     chatId,
-    value: chatId ? loadReaderState(chatId) ?? blankState() : blankState(),
+    ...(() => {
+      if (!chatId) {
+        return { persistenceFailed: false, value: blankState() };
+      }
+      const loaded = loadReaderStateResult(chatId);
+      return {
+        persistenceFailed: loaded.storageFailed,
+        value: loaded.state ?? blankState(),
+      };
+    })(),
   }));
   const [inlineError, setInlineError] = useState<string | null>(null);
   const state = reader.value;
@@ -56,22 +66,32 @@ export function ReaderStrip({
     if (!chatId) {
       setReader({
         chatId: null,
+        persistenceFailed: false,
         value: blankState(),
       });
       setInlineError(null);
       return;
     }
+    const loaded = loadReaderStateResult(chatId);
     setReader({
       chatId,
-      value: loadReaderState(chatId) ?? blankState(),
+      persistenceFailed: loaded.storageFailed,
+      value: loaded.state ?? blankState(),
     });
     setInlineError(null);
   }, [chatId]);
 
   useEffect(() => {
     if (!chatId || reader.chatId !== chatId) return;
-    saveReaderState(chatId, state);
-  }, [chatId, reader.chatId, state]);
+    const persisted = saveReaderState(chatId, state);
+    if (!persisted && !reader.persistenceFailed) {
+      setReader((current) => (
+        current.chatId === chatId
+          ? { ...current, persistenceFailed: true }
+          : current
+      ));
+    }
+  }, [chatId, reader.chatId, reader.persistenceFailed, state]);
 
   const paragraphs = useMemo(() => parseReaderParagraphs(state.rawText), [state.rawText]);
   const activeParagraphIndex = paragraphs.length > 0
@@ -220,6 +240,11 @@ export function ReaderStrip({
           </div>
           {inlineError ? (
             <p className="text-xs text-destructive">{inlineError}</p>
+          ) : null}
+          {reader.persistenceFailed ? (
+            <p className="text-xs text-muted-foreground">
+              Reader draft persistence is unavailable in this browser context.
+            </p>
           ) : null}
         </div>
       ) : null}

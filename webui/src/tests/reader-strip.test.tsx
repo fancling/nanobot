@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ReaderStrip } from "@/components/thread/ReaderStrip";
@@ -84,5 +84,24 @@ describe("ReaderStrip", () => {
     await waitFor(() => {
       expect(window.localStorage.getItem(chatBKey)).toContain("\"title\":\"Chat B essay\"");
     });
+  });
+
+  it("shows a non-blocking warning when draft persistence fails", async () => {
+    vi.spyOn(window, "localStorage", "get").mockImplementation(() => {
+      throw new Error("storage blocked");
+    });
+
+    render(
+      <ReaderStrip
+        chatId="chat-reader"
+        onSendReading={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /open reader/i }));
+
+    expect(
+      await screen.findByText(/reader draft persistence is unavailable/i),
+    ).toBeInTheDocument();
   });
 });

@@ -445,6 +445,53 @@ async def test_webui_message_envelope_rejects_non_object_reading_snapshot(
 
 
 @pytest.mark.asyncio
+async def test_webui_message_rejects_reading_snapshot_before_scope_persistence(
+    bus: MagicMock,
+    tmp_path,
+) -> None:
+    default_workspace = tmp_path / "default"
+    project = tmp_path / "project"
+    default_workspace.mkdir()
+    project.mkdir()
+    sessions = SessionManager(tmp_path / "sessions")
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
+        bus,
+        gateway=_basic_handler(
+            bus,
+            session_manager=sessions,
+            workspace_path=default_workspace,
+        ),
+    )
+    channel._handle_message = AsyncMock()
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {
+            "type": "message",
+            "chat_id": "reading-chat",
+            "content": "聊聊这一段",
+            "webui": True,
+            "workspace_scope": {
+                "project_path": str(project),
+                "access_mode": "full",
+            },
+            "reading_snapshot": {"version": 1, "scene": "chat"},
+        },
+    )
+
+    payload = json.loads(conn.send.await_args.args[0])
+    assert payload["event"] == "error"
+    assert payload["detail"] == "reading_snapshot_rejected"
+    assert sessions.read_session_file("websocket:reading-chat") is None
+    bus.publish_inbound.assert_not_awaited()
+    channel._handle_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_webui_message_envelope_persists_user_transcript_for_refresh(
     bus: MagicMock,
     tmp_path,
