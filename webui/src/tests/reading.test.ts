@@ -9,19 +9,32 @@ import {
 } from "@/lib/reading";
 import { importEpubDocument } from "@/lib/readerEpub";
 
+const epubMocks = vi.hoisted(() => ({
+  bookLoad: vi.fn(),
+  itemLoad: vi.fn(),
+  itemUnload: vi.fn(),
+}));
+
 vi.mock("epubjs", () => ({
   default: vi.fn(() => ({
+    load: epubMocks.bookLoad,
     loaded: {
       metadata: Promise.resolve({ title: "Mock EPUB" }),
       spine: Promise.resolve({
         items: [
           {
-            load: vi.fn(async () => ({
-              body: {
-                textContent: "First EPUB paragraph.\n\nSecond EPUB paragraph.",
-              },
-            })),
-            unload: vi.fn(),
+            load: epubMocks.itemLoad.mockImplementation(async (request: (url: string) => Promise<unknown>) => {
+              await request("chapter-one.xhtml");
+              return new DOMParser().parseFromString(
+                `<html><body>
+                  <h1>Chapter One</h1>
+                  <p>First EPUB paragraph.</p><p>Second EPUB paragraph.</p>
+                  <ul><li>Listed thought.</li></ul>
+                </body></html>`,
+                "text/html",
+              );
+            }),
+            unload: epubMocks.itemUnload,
           },
         ],
       }),
@@ -33,6 +46,9 @@ describe("reading utilities", () => {
   beforeEach(() => {
     window.localStorage.clear();
     vi.restoreAllMocks();
+    epubMocks.bookLoad.mockReset();
+    epubMocks.itemLoad.mockReset();
+    epubMocks.itemUnload.mockReset();
   });
 
   it("parses plain text and markdown-like paragraphs", () => {
@@ -255,7 +271,11 @@ describe("reading utilities", () => {
 
     expect(document.title).toBe("Mock EPUB");
     expect(document.documentKind).toBe("epub");
-    expect(document.rawText).toContain("First EPUB paragraph.");
-    expect(document.rawText).toContain("Second EPUB paragraph.");
+    expect(document.rawText).toBe(
+      "Chapter One\n\nFirst EPUB paragraph.\n\nSecond EPUB paragraph.\n\nListed thought.",
+    );
+    expect(epubMocks.itemLoad).toHaveBeenCalledOnce();
+    expect(epubMocks.bookLoad).toHaveBeenCalledWith("chapter-one.xhtml");
+    expect(epubMocks.itemUnload).toHaveBeenCalledOnce();
   });
 });

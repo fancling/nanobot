@@ -1,10 +1,13 @@
 declare module "epubjs" {
+  type EpubRequestFunction = (...args: unknown[]) => Promise<unknown>;
+
   interface EpubSpineItem {
-    load: (book: unknown) => Promise<Document | Element | { body?: { textContent?: string | null } }>;
+    load: (request: EpubRequestFunction) => Promise<Document | Element | { body?: { textContent?: string | null } }>;
     unload?: () => void;
   }
 
   interface EpubBook {
+    load: EpubRequestFunction;
     loaded: {
       metadata: Promise<{ title?: string | null }>;
       spine: Promise<{ items?: EpubSpineItem[] }>;
