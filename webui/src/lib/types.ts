@@ -951,11 +951,11 @@ export interface ReadingSnapshot {
     user_note: string;
     current_question: string;
   };
-  reading_state: {
+  reading_state?: {
     mode: "slow_reading" | string;
     engagement: string;
   };
-  prediction: {
+  prediction?: {
     likely_need: string;
     bad_response_risk: string;
   };

@@ -870,4 +870,20 @@ describe("NanobotClient", () => {
       focus: { focused_text: "Focused passage." },
     });
   });
+
+  it("omits reading_snapshot when not provided", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+
+    client.sendMessage("chat-reading", "hello");
+
+    const sent = JSON.parse(lastSocket().sent.at(-1) ?? "{}");
+    expect("reading_snapshot" in sent).toBe(false);
+    expect(sent.reading_snapshot).toBeUndefined();
+  });
 });
