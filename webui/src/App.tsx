@@ -1327,7 +1327,9 @@ function Shell({
 
   const persistReaderState = useCallback((chatId: string, nextState: ReaderState) => {
     const persisted = saveReaderState(chatId, nextState);
-    setReaderPersistenceFailed(!persisted);
+    if (chatId === activeReaderChatIdRef.current) {
+      setReaderPersistenceFailed(!persisted);
+    }
   }, []);
 
   const onReaderChange = useCallback((patch: Partial<ReaderState>) => {

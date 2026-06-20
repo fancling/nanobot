@@ -617,6 +617,135 @@ describe("App layout", () => {
     expect(screen.queryByText("Imported book")).not.toBeInTheDocument();
   });
 
+  it("does not show a persistence warning for the active reader when a background import save fails", async () => {
+    let resolveImport: ((value: Awaited<ReturnType<typeof importEpubDocument>>) => void) | null = null;
+    importEpubDocumentMock.mockReturnValueOnce(new Promise((resolve) => {
+      resolveImport = resolve;
+    }));
+    window.localStorage.setItem(
+      `${READER_STATE_STORAGE_PREFIX}book-a`,
+      JSON.stringify({
+        version: 1,
+        documentId: "book-a",
+        title: "Reader A",
+        rawText: "Book A text.",
+        focusedParagraphIndex: 0,
+        selectedText: "",
+        note: "",
+        question: "",
+        mode: "slow_reading",
+        collapsed: false,
+        documentKind: "epub",
+        readerSession: true,
+      }),
+    );
+    window.localStorage.setItem(
+      `${READER_STATE_STORAGE_PREFIX}book-b`,
+      JSON.stringify({
+        version: 1,
+        documentId: "book-b",
+        title: "Reader B",
+        rawText: "Book B text.",
+        focusedParagraphIndex: 0,
+        selectedText: "",
+        note: "",
+        question: "",
+        mode: "slow_reading",
+        collapsed: false,
+        documentKind: "epub",
+        readerSession: true,
+      }),
+    );
+    mockSessions = [
+      {
+        key: "websocket:book-a",
+        channel: "websocket",
+        chatId: "book-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        title: "Reader A",
+        preview: "Reader A",
+      },
+      {
+        key: "websocket:book-b",
+        channel: "websocket",
+        chatId: "book-b",
+        createdAt: "2026-04-16T10:05:00Z",
+        updatedAt: "2026-04-16T10:05:00Z",
+        title: "Reader B",
+        preview: "Reader B",
+      },
+    ];
+    const realLocalStorage = window.localStorage;
+    const failingStorage: Storage = {
+      get length() {
+        return realLocalStorage.length;
+      },
+      clear: () => realLocalStorage.clear(),
+      getItem: (key) => realLocalStorage.getItem(key),
+      key: (index) => realLocalStorage.key(index),
+      removeItem: (key) => realLocalStorage.removeItem(key),
+      setItem: (key, value) => {
+        if (key === `${READER_STATE_STORAGE_PREFIX}book-a`) {
+          throw new Error("quota exceeded");
+        }
+        realLocalStorage.setItem(key, value);
+      },
+    };
+    const localStorageDescriptor = Object.getOwnPropertyDescriptor(window, "localStorage");
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      get: () => failingStorage,
+    });
+
+    try {
+      render(<App />);
+
+      await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+      const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+      fireEvent.click(within(sidebar).getByRole("button", { name: /^Reader A$/ }));
+
+      const file = new File(["epub"], "new.epub", { type: "application/epub+zip" });
+      const readerMain = await screen.findByRole("main", { name: /reader page/i });
+      fireEvent.change(within(readerMain).getByLabelText("Import EPUB"), { target: { files: [file] } });
+
+      fireEvent.click(within(sidebar).getByRole("button", { name: /^Reader B$/ }));
+      await waitFor(() =>
+        expect(window.location.hash).toBe("#/reader?chat=websocket%3Abook-b"),
+      );
+
+      await act(async () => {
+        resolveImport?.({
+          documentId: "imported-book",
+          title: "Imported book",
+          rawText: "Imported text.",
+          documentKind: "epub",
+          readerSession: true,
+          sourceFileName: "new.epub",
+          sections: [],
+          activeSectionIndex: 0,
+        });
+      });
+
+      await waitFor(() =>
+        expect(screen.getByRole("heading", { name: "Reader B" })).toBeInTheDocument(),
+      );
+      expect(window.location.hash).toBe("#/reader?chat=websocket%3Abook-b");
+      expect(
+        screen.queryByText("Reader draft persistence is unavailable in this browser context."),
+      ).not.toBeInTheDocument();
+      expect(
+        JSON.parse(window.localStorage.getItem(`${READER_STATE_STORAGE_PREFIX}book-a`) ?? "null"),
+      ).toMatchObject({
+        title: "Reader A",
+      });
+    } finally {
+      if (localStorageDescriptor) {
+        Object.defineProperty(window, "localStorage", localStorageDescriptor);
+      }
+    }
+  });
+
   it("does not steal the route when a blank Reader import resolves after leaving the page", async () => {
     let resolveImport: ((value: Awaited<ReturnType<typeof importEpubDocument>>) => void) | null = null;
     importEpubDocumentMock.mockReturnValueOnce(new Promise((resolve) => {
