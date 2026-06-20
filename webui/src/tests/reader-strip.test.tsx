@@ -41,13 +41,14 @@ describe("ReaderStrip", () => {
     );
 
     await screen.findByDisplayValue("Saved essay");
-    expect(screen.getByDisplayValue("Saved note")).toBeInTheDocument();
+    expect(screen.getByText("2 passages ready")).toBeInTheDocument();
     expect(setItemSpy).not.toHaveBeenCalledWith(
       storageKey,
       expect.stringContaining("\"title\":\"\""),
     );
     await waitFor(() => {
       expect(window.localStorage.getItem(storageKey)).toContain("\"title\":\"Saved essay\"");
+      expect(window.localStorage.getItem(storageKey)).toContain("\"note\":\"Saved note\"");
     });
   });
 
@@ -63,7 +64,7 @@ describe("ReaderStrip", () => {
       note: "B note",
       question: "",
       mode: "slow_reading",
-      collapsed: false,
+      collapsed: true,
       documentKind: "markdown",
       readerModeOpen: false,
     };
@@ -84,7 +85,7 @@ describe("ReaderStrip", () => {
       />,
     );
 
-    await screen.findByDisplayValue("Chat B essay");
+    await screen.findByText("Chat B essay");
     expect(setItemSpy).not.toHaveBeenCalledWith(
       chatBKey,
       expect.stringContaining("\"title\":\"Chat A"),
@@ -134,5 +135,34 @@ describe("ReaderStrip", () => {
     expect(
       await screen.findByText(/reader draft persistence is unavailable/i),
     ).toBeInTheDocument();
+  });
+
+  it("opens immersive reader mode from saved reader text", async () => {
+    const savedState: ReaderState = {
+      version: 1,
+      documentId: "doc-saved",
+      title: "Saved essay",
+      rawText: "Saved intro.\n\nSaved focus.",
+      focusedParagraphIndex: 0,
+      selectedText: "",
+      note: "",
+      question: "",
+      mode: "slow_reading",
+      collapsed: true,
+      documentKind: "markdown",
+      readerModeOpen: false,
+    };
+    window.localStorage.setItem(
+      `${READER_STATE_STORAGE_PREFIX}chat-reader`,
+      JSON.stringify(savedState),
+    );
+
+    render(<ReaderStrip chatId="chat-reader" onSendReading={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /open reader/i }));
+    fireEvent.click(screen.getByRole("button", { name: /enter reader mode/i }));
+
+    expect(screen.getByRole("main", { name: /reader document/i })).toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: /reader companion/i })).toBeInTheDocument();
   });
 });

@@ -1426,11 +1426,15 @@ describe("ThreadShell", () => {
     fireEvent.change(screen.getByLabelText(/reading text/i), {
       target: { value: "Before.\n\nFocused passage.\n\nAfter." },
     });
-    fireEvent.click(screen.getByRole("button", { name: /Focused passage/i }));
-    fireEvent.change(screen.getByLabelText(/reading note/i), {
+    fireEvent.click(screen.getByRole("button", { name: /enter reader mode/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Focus paragraph 2/i }));
+    fireEvent.change(screen.getByLabelText(/Question about focused paragraph/i), {
+      target: { value: "" },
+    });
+    fireEvent.change(screen.getByLabelText(/Note for this paragraph/i), {
       target: { value: "This feels connected." },
     });
-    fireEvent.click(screen.getByRole("button", { name: /chat about this passage/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Send note with paragraph/i }));
 
     await waitFor(() => {
       expect(client.sendMessage).toHaveBeenCalledWith(

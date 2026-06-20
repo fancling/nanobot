@@ -1,18 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
-import { BookOpen, ChevronDown, ChevronUp, MessageCircle, Plus } from "lucide-react";
+import { BookOpen, ChevronDown, ChevronUp, Upload } from "lucide-react";
 
+import { ReaderMode } from "@/components/thread/reader/ReaderMode";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  buildReadingSnapshot,
   loadReaderStateResult,
   parseReaderParagraphs,
   saveReaderState,
   type ReaderState,
 } from "@/lib/reading";
+import { importEpubDocument } from "@/lib/readerEpub";
 import type { ReadingSnapshot } from "@/lib/types";
-import { cn } from "@/lib/utils";
 
 interface ReaderStripProps {
   chatId: string | null;
@@ -38,6 +38,8 @@ function blankState(): ReaderState {
     focusedParagraphIndex: 0,
     mode: "slow_reading",
     collapsed: true,
+    documentKind: "markdown",
+    readerModeOpen: false,
   };
 }
 
@@ -94,9 +96,6 @@ export function ReaderStrip({
   }, [chatId, reader.chatId, reader.persistenceFailed, state]);
 
   const paragraphs = useMemo(() => parseReaderParagraphs(state.rawText), [state.rawText]);
-  const activeParagraphIndex = paragraphs.length > 0
-    ? Math.max(0, Math.min(state.focusedParagraphIndex, paragraphs.length - 1))
-    : 0;
 
   if (!chatId) return null;
 
@@ -107,33 +106,18 @@ export function ReaderStrip({
     }));
   };
 
-  const handleSend = () => {
-    if (disabled) return;
-    if (paragraphs.length === 0) {
-      setInlineError("Add some text before sending.");
-      return;
-    }
-
-    const focusedParagraph = paragraphs[activeParagraphIndex] ?? paragraphs[0];
-    if (!focusedParagraph) {
-      setInlineError("Add some text before sending.");
-      return;
-    }
-
-    const nextState: ReaderState = {
-      ...state,
-      focusedParagraphIndex: focusedParagraph.index,
-    };
-    const snapshot = buildReadingSnapshot(nextState);
-    const content = state.question.trim() || "聊聊这一段";
-
-    setReader((current) => ({
-      ...current,
-      value: nextState,
-    }));
-    setInlineError(null);
-    onSendReading(content, snapshot);
-  };
+  if (state.readerModeOpen) {
+    return (
+      <ReaderMode
+        state={state}
+        disabled={disabled}
+        persistenceFailed={reader.persistenceFailed}
+        onChange={updateState}
+        onClose={() => updateState({ readerModeOpen: false })}
+        onSendReading={onSendReading}
+      />
+    );
+  }
 
   return (
     <div className="border-t border-border/60 bg-background/95 px-4 py-3">
@@ -176,67 +160,64 @@ export function ReaderStrip({
               updateState({ rawText: event.target.value });
             }}
           />
-          {paragraphs.length > 0 ? (
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-muted-foreground">
+              {paragraphs.length > 0
+                ? `${paragraphs.length} passages ready`
+                : "Paste text or import an EPUB to begin."}
+            </p>
             <div className="flex flex-wrap gap-2">
-              {paragraphs.map((paragraph, index) => {
-                const active = index === activeParagraphIndex;
-                return (
-                  <button
-                    key={paragraph.id}
-                    type="button"
-                    aria-label={paragraph.text}
-                    className={cn(
-                      "max-w-full rounded-md border px-2.5 py-1.5 text-left text-sm transition-colors",
-                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                      active
-                        ? "border-primary bg-primary/10 text-foreground"
-                        : "border-border/70 bg-background hover:bg-accent hover:text-accent-foreground",
-                    )}
-                    onClick={() => {
-                      setInlineError(null);
-                      updateState({ focusedParagraphIndex: paragraph.index });
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                asChild
+              >
+                <label>
+                  <Upload className="h-4 w-4" aria-hidden />
+                  <span>Import EPUB</span>
+                  <input
+                    aria-label="Import EPUB"
+                    type="file"
+                    accept=".epub,application/epub+zip"
+                    className="sr-only"
+                    onChange={async (event) => {
+                      const file = event.target.files?.[0];
+                      event.currentTarget.value = "";
+                      if (!file) return;
+                      try {
+                        const imported = await importEpubDocument(file);
+                        setInlineError(null);
+                        updateState({
+                          ...imported,
+                          focusedParagraphIndex: 0,
+                          selectedText: "",
+                          note: "",
+                          question: "",
+                          collapsed: false,
+                        });
+                      } catch (error) {
+                        setInlineError(
+                          error instanceof Error
+                            ? error.message
+                            : "Unable to import EPUB.",
+                        );
+                      }
                     }}
-                  >
-                    <span className="line-clamp-2">{paragraph.text}</span>
-                  </button>
-                );
-              })}
+                  />
+                </label>
+              </Button>
+              <Button
+                type="button"
+                className="gap-1.5"
+                disabled={disabled || paragraphs.length === 0}
+                onClick={() => updateState({ readerModeOpen: true, collapsed: false })}
+              >
+                <BookOpen className="h-4 w-4" aria-hidden />
+                <span>Enter reader mode</span>
+              </Button>
             </div>
-          ) : (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              disabled
-            >
-              <Plus className="h-4 w-4" aria-hidden />
-              <span>Add a passage</span>
-            </Button>
-          )}
-          <Textarea
-            aria-label="Reading note"
-            placeholder="Note"
-            className="min-h-[72px] resize-y"
-            value={state.note}
-            onChange={(event) => updateState({ note: event.target.value })}
-          />
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Input
-              aria-label="Reading question"
-              placeholder="Question"
-              value={state.question}
-              onChange={(event) => updateState({ question: event.target.value })}
-            />
-            <Button
-              type="button"
-              className="gap-1.5 sm:self-start"
-              onClick={handleSend}
-              disabled={disabled}
-            >
-              <MessageCircle className="h-4 w-4" aria-hidden />
-              <span>Chat about this passage</span>
-            </Button>
           </div>
           {inlineError ? (
             <p className="text-xs text-destructive">{inlineError}</p>
