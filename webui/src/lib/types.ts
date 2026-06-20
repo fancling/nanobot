@@ -930,6 +930,37 @@ export interface FilePreviewPayload {
   truncated: boolean;
 }
 
+export interface ReadingSnapshot {
+  version: 1;
+  scene: "reading";
+  document: {
+    id: string;
+    title: string;
+    kind: "markdown" | "text" | string;
+  };
+  location: {
+    paragraph_index: number;
+    paragraph_count: number;
+    progress_label?: string | null;
+  };
+  focus: {
+    focused_text: string;
+    selected_text?: string | null;
+    before: string;
+    after: string;
+    user_note: string;
+    current_question: string;
+  };
+  reading_state: {
+    mode: "slow_reading" | string;
+    engagement: string;
+  };
+  prediction: {
+    likely_need: string;
+    bad_response_risk: string;
+  };
+}
+
 export type Outbound =
   | { type: "new_chat"; workspace_scope?: WorkspaceScopePayload }
   | { type: "fork_chat"; source_chat_id: string; before_user_index: number; title?: string }
@@ -946,6 +977,7 @@ export type Outbound =
       mcp_presets?: OutboundMcpPresetMention[];
       workspace_scope?: WorkspaceScopePayload;
       turn_id?: string;
+      reading_snapshot?: ReadingSnapshot;
       /** Marks messages sent by the embedded WebUI, without changing the
        * generic websocket protocol for other clients. */
       webui?: true;

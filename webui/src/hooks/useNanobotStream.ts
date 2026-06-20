@@ -17,6 +17,7 @@ import type {
   OutboundMcpPresetMention,
   OutboundMedia,
   GoalStateWsPayload,
+  ReadingSnapshot,
   ToolProgressEvent,
   UIImage,
   UIFileEdit,
@@ -424,6 +425,7 @@ export interface SendOptions {
   cliApps?: OutboundCliAppMention[];
   mcpPresets?: OutboundMcpPresetMention[];
   workspaceScope?: WorkspaceScopePayload | null;
+  readingSnapshot?: ReadingSnapshot;
 }
 
 export function useNanobotStream(

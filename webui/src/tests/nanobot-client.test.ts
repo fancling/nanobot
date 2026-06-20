@@ -832,4 +832,42 @@ describe("NanobotClient", () => {
     expect(seen).toContain("reconnecting");
     expect(FakeSocket.instances.length).toBeGreaterThan(1);
   });
+
+  it("sends reading_snapshot on message frames", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+
+    client.sendMessage("chat-reading", "聊聊这一段", undefined, {
+      readingSnapshot: {
+        version: 1,
+        scene: "reading",
+        document: { id: "doc-1", title: "Essay", kind: "markdown" },
+        location: { paragraph_index: 0, paragraph_count: 1, progress_label: "single passage" },
+        focus: {
+          focused_text: "Focused passage.",
+          selected_text: null,
+          before: "",
+          after: "",
+          user_note: "Note",
+          current_question: "",
+        },
+        reading_state: { mode: "slow_reading", engagement: "actively_reflecting" },
+        prediction: {
+          likely_need: "respond to the reflection",
+          bad_response_risk: "avoid generic summary",
+        },
+      },
+    });
+
+    const sent = JSON.parse(lastSocket().sent.at(-1) ?? "{}");
+    expect(sent.reading_snapshot).toMatchObject({
+      scene: "reading",
+      focus: { focused_text: "Focused passage." },
+    });
+  });
 });

@@ -1,3 +1,5 @@
+import type { ReadingSnapshot } from "@/lib/types";
+
 export const READER_STATE_STORAGE_PREFIX = "nanobot.webui.readerShell.v1:";
 
 export interface ReaderParagraph {
@@ -17,37 +19,6 @@ export interface ReaderState {
   question: string;
   mode: "slow_reading";
   collapsed: boolean;
-}
-
-interface ReadingSnapshot {
-  version: 1;
-  scene: "reading";
-  document: {
-    id: string;
-    title: string;
-    kind: "markdown";
-  };
-  location: {
-    paragraph_index: number;
-    paragraph_count: number;
-    progress_label: "single passage" | "early document" | "middle document" | "late document";
-  };
-  focus: {
-    focused_text: string;
-    selected_text: string | null;
-    before: string;
-    after: string;
-    user_note: string;
-    current_question: string;
-  };
-  reading_state: {
-    mode: ReaderState["mode"];
-    engagement: "focused_reading" | "actively_reflecting";
-  };
-  prediction: {
-    likely_need: string;
-    bad_response_risk: string;
-  };
 }
 
 const TITLE_MAX_CHARS = 240;
