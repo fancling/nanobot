@@ -23,11 +23,11 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
+from nanobot.reading_snapshot import ReadingSnapshotError, normalize_reading_snapshot
 from nanobot.security.workspace_access import (
     WORKSPACE_SCOPE_METADATA_KEY,
     WorkspaceScopeError,
 )
-from nanobot.reading_snapshot import ReadingSnapshotError, normalize_reading_snapshot
 from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.webui_turns import websocket_turn_wall_started_at
 from nanobot.utils.media_decode import (
@@ -779,7 +779,7 @@ class WebSocketChannel(BaseChannel):
                     "aspect_ratio": aspect_ratio if isinstance(aspect_ratio, str) else None,
                 }
             raw_reading_snapshot = envelope.get("reading_snapshot")
-            if raw_reading_snapshot is not None:
+            if metadata.get("webui") is True and raw_reading_snapshot is not None:
                 try:
                     metadata["reading_snapshot"] = normalize_reading_snapshot(
                         raw_reading_snapshot,

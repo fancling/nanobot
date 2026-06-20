@@ -391,6 +391,7 @@ async def test_webui_message_envelope_rejects_malformed_reading_snapshot(
     channel = _ch(bus)
     conn = AsyncMock()
     conn.remote_address = ("127.0.0.1", 50123)
+    channel._handle_message = AsyncMock()
 
     await channel._dispatch_envelope(
         conn,
@@ -410,6 +411,37 @@ async def test_webui_message_envelope_rejects_malformed_reading_snapshot(
     assert payload["detail"] == "reading_snapshot_rejected"
     assert payload["reason"]
     bus.publish_inbound.assert_not_awaited()
+    channel._handle_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_webui_message_envelope_rejects_non_object_reading_snapshot(
+    bus: MagicMock,
+) -> None:
+    channel = _ch(bus)
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+    channel._handle_message = AsyncMock()
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {
+            "type": "message",
+            "chat_id": "reading-chat",
+            "content": "聊聊这一段",
+            "webui": True,
+            "reading_snapshot": [],
+        },
+    )
+
+    conn.send.assert_awaited()
+    payload = json.loads(conn.send.await_args.args[0])
+    assert payload["event"] == "error"
+    assert payload["detail"] == "reading_snapshot_rejected"
+    assert payload["reason"]
+    bus.publish_inbound.assert_not_awaited()
+    channel._handle_message.assert_not_awaited()
 
 
 @pytest.mark.asyncio
