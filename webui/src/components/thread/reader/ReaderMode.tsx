@@ -32,6 +32,9 @@ export function ReaderMode({
   );
   const activeSection = sections[activeSectionIndex] ?? null;
   const activeRawText = activeSection?.rawText ?? state.rawText;
+  const activeState = activeSection
+    ? { ...state, rawText: activeRawText, activeSectionIndex }
+    : state;
   const paragraphCount = useMemo(() => parseReaderParagraphs(activeRawText).length, [activeRawText]);
   const focusedParagraphIndex = paragraphCount > 0
     ? Math.max(0, Math.min(state.focusedParagraphIndex, paragraphCount - 1))
@@ -102,7 +105,7 @@ export function ReaderMode({
         />
       </div>
       <ReaderCompanionRail
-        state={state}
+        state={activeState}
         disabled={disabled}
         persistenceFailed={persistenceFailed}
         onChange={onChange}

@@ -95,6 +95,35 @@ describe("ReaderMode", () => {
     });
   });
 
+  it("keeps the companion rail focused on the active section on initial render", () => {
+    render(
+      <ReaderMode
+        state={state({
+          rawText: "Full book opening.\n\nFull book middle.\n\nFull book ending.",
+          focusedParagraphIndex: 1,
+          activeSectionIndex: 1,
+          sections: [
+            { id: "s-1", title: "Opening", rawText: "Opening section.", paragraphCount: 1 },
+            { id: "s-2", title: "Middle", rawText: "Middle section.", paragraphCount: 1 },
+            { id: "s-3", title: "Ending", rawText: "Ending section.", paragraphCount: 1 },
+          ],
+        })}
+        disabled={false}
+        persistenceFailed={false}
+        onChange={vi.fn()}
+        onClose={vi.fn()}
+        onSendReading={vi.fn()}
+      />,
+    );
+
+    const companionRail = screen.getByRole("complementary", { name: /reader companion/i });
+    expect(within(companionRail).getByText("Middle section.")).toBeInTheDocument();
+    expect(within(companionRail).queryByText("Full book middle.")).not.toBeInTheDocument();
+    expect(
+      within(screen.getByRole("main", { name: /reader document/i })).getByText("Middle section."),
+    ).toBeInTheDocument();
+  });
+
   it("clicking a paragraph updates the focused paragraph", () => {
     const onChange = vi.fn();
     render(
