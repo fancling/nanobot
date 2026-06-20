@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import i18n from "@/i18n";
 import { READER_STATE_STORAGE_PREFIX } from "@/lib/reading";
+import { importEpubDocument } from "@/lib/readerEpub";
 import type { ChatSummary, SessionAutomationJob } from "@/lib/types";
 
 const connectSpy = vi.fn();
@@ -18,6 +19,7 @@ const sessionUpdateHandlers = new Set<(chatId: string, scope?: string) => void>(
 let mockSessions: ChatSummary[] = [];
 const HERO_GREETING_PATTERN =
   /What should we work on\?|Where should we start\?|What are we building today\?|What should we tackle together\?/;
+const importEpubDocumentMock = vi.mocked(importEpubDocument);
 
 function setNavigatorPlatform(platform: string): void {
   Object.defineProperty(window.navigator, "platform", {
@@ -148,7 +150,21 @@ vi.mock("@/hooks/useSessions", async (importOriginal) => {
         loading: false,
         error: null,
         refresh: refreshSpy,
-        createChat: createChatSpy,
+        createChat: async (scope?: unknown) => {
+          const chatId = await createChatSpy(scope);
+          setSessions((prev: ChatSummary[]) => [
+            ...prev,
+            {
+              key: `websocket:${chatId}`,
+              channel: "websocket",
+              chatId,
+              createdAt: "2026-04-16T10:00:00Z",
+              updatedAt: "2026-04-16T10:00:00Z",
+              preview: "",
+            },
+          ]);
+          return chatId;
+        },
         forkChat: async () => "fork-chat",
         getSessionAutomations: getSessionAutomationsSpy,
         deleteChat: async (key: string, options?: { deleteAutomations?: boolean }) => {
@@ -161,6 +177,10 @@ vi.mock("@/hooks/useSessions", async (importOriginal) => {
     },
   };
 });
+
+vi.mock("@/lib/readerEpub", () => ({
+  importEpubDocument: vi.fn(),
+}));
 
 vi.mock("@/hooks/useTheme", async () => {
   const React = await import("react");
@@ -231,6 +251,7 @@ describe("App layout", () => {
     getSessionAutomationsSpy.mockReset().mockResolvedValue([]);
     toggleThemeSpy.mockReset();
     attachSpy.mockReset();
+    importEpubDocumentMock.mockReset();
     runStatusHandlers.clear();
     sessionUpdateHandlers.clear();
     window.history.replaceState(null, "", "/");
@@ -365,8 +386,52 @@ describe("App layout", () => {
     const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
     fireEvent.click(within(sidebar).getByRole("button", { name: "Reader" }));
 
-    expect(await screen.findByRole("main", { name: /reader page/i })).toBeInTheDocument();
+    const readerMain = await screen.findByRole("main", { name: /reader page/i });
+    expect(readerMain).toBeInTheDocument();
     expect(window.location.hash).toBe("#/reader");
+    expect(
+      within(readerMain).getAllByRole("button", { name: "Import EPUB" })
+        .some((button) => !button.hasAttribute("disabled")),
+    ).toBe(true);
+  });
+
+  it("creates a reader session when importing from the sidebar Reader page", async () => {
+    createChatSpy.mockResolvedValueOnce("book-chat");
+    importEpubDocumentMock.mockResolvedValueOnce({
+      documentId: "book-1",
+      title: "Book",
+      rawText: "Book text.",
+      documentKind: "epub",
+      readerSession: true,
+      sourceFileName: "book.epub",
+      sections: [],
+      activeSectionIndex: 0,
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Reader" }));
+
+    const readerMain = await screen.findByRole("main", { name: /reader page/i });
+    const importInput = within(readerMain).getByLabelText("Import EPUB");
+    const file = new File(["epub"], "book.epub", { type: "application/epub+zip" });
+    fireEvent.change(importInput, { target: { files: [file] } });
+
+    await waitFor(() => expect(createChatSpy).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(window.location.hash).toBe("#/reader?chat=websocket%3Abook-chat"),
+    );
+    await waitFor(() =>
+      expect(JSON.parse(
+        window.localStorage.getItem(`${READER_STATE_STORAGE_PREFIX}book-chat`) ?? "null",
+      )).toMatchObject({
+        title: "Book",
+        readerSession: true,
+        documentKind: "epub",
+      }),
+    );
   });
 
   it("routes reader-backed sessions to the Reader page", async () => {
@@ -407,6 +472,131 @@ describe("App layout", () => {
 
     expect(await screen.findByRole("main", { name: /reader page/i })).toBeInTheDocument();
     expect(window.location.hash).toBe("#/reader?chat=websocket%3Abook-chat");
+  });
+
+  it("redirects non-reader reader deep links back to the normal chat route", async () => {
+    mockSessions = [
+      {
+        key: "websocket:chat-a",
+        channel: "websocket",
+        chatId: "chat-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        preview: "Normal chat",
+      },
+    ];
+    window.history.replaceState(
+      null,
+      "",
+      `/#/reader?chat=${encodeURIComponent("websocket:chat-a")}`,
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(window.location.hash).toBe(`#/chat/${encodeURIComponent("websocket:chat-a")}`),
+    );
+    expect(screen.queryByRole("main", { name: /reader page/i })).not.toBeInTheDocument();
+  });
+
+  it("does not overwrite the visible reader state when an import resolves after switching sessions", async () => {
+    let resolveImport: ((value: Awaited<ReturnType<typeof importEpubDocument>>) => void) | null = null;
+    importEpubDocumentMock.mockReturnValueOnce(new Promise((resolve) => {
+      resolveImport = resolve;
+    }));
+    window.localStorage.setItem(
+      `${READER_STATE_STORAGE_PREFIX}book-a`,
+      JSON.stringify({
+        version: 1,
+        documentId: "book-a",
+        title: "Reader A",
+        rawText: "Book A text.",
+        focusedParagraphIndex: 0,
+        selectedText: "",
+        note: "",
+        question: "",
+        mode: "slow_reading",
+        collapsed: false,
+        documentKind: "epub",
+        readerSession: true,
+      }),
+    );
+    window.localStorage.setItem(
+      `${READER_STATE_STORAGE_PREFIX}book-b`,
+      JSON.stringify({
+        version: 1,
+        documentId: "book-b",
+        title: "Reader B",
+        rawText: "Book B text.",
+        focusedParagraphIndex: 0,
+        selectedText: "",
+        note: "",
+        question: "",
+        mode: "slow_reading",
+        collapsed: false,
+        documentKind: "epub",
+        readerSession: true,
+      }),
+    );
+    mockSessions = [
+      {
+        key: "websocket:book-a",
+        channel: "websocket",
+        chatId: "book-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        title: "Reader A",
+        preview: "Reader A",
+      },
+      {
+        key: "websocket:book-b",
+        channel: "websocket",
+        chatId: "book-b",
+        createdAt: "2026-04-16T10:05:00Z",
+        updatedAt: "2026-04-16T10:05:00Z",
+        title: "Reader B",
+        preview: "Reader B",
+      },
+    ];
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: /^Reader A$/ }));
+
+    const file = new File(["epub"], "new.epub", { type: "application/epub+zip" });
+    const readerMain = await screen.findByRole("main", { name: /reader page/i });
+    fireEvent.change(within(readerMain).getByLabelText("Import EPUB"), { target: { files: [file] } });
+
+    fireEvent.click(within(sidebar).getByRole("button", { name: /^Reader B$/ }));
+    await waitFor(() =>
+      expect(window.location.hash).toBe("#/reader?chat=websocket%3Abook-b"),
+    );
+
+    await act(async () => {
+      resolveImport?.({
+        documentId: "imported-book",
+        title: "Imported book",
+        rawText: "Imported text.",
+        documentKind: "epub",
+        readerSession: true,
+        sourceFileName: "new.epub",
+        sections: [],
+        activeSectionIndex: 0,
+      });
+    });
+
+    await waitFor(() =>
+      expect(JSON.parse(
+        window.localStorage.getItem(`${READER_STATE_STORAGE_PREFIX}book-a`) ?? "null",
+      )).toMatchObject({
+        title: "Imported book",
+      }),
+    );
+    expect(window.location.hash).toBe("#/reader?chat=websocket%3Abook-b");
+    expect(screen.queryByText("Imported book")).not.toBeInTheDocument();
   });
 
   it("opens Automations from the main sidebar", async () => {

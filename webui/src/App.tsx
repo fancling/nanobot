@@ -626,6 +626,8 @@ function Shell({
   const [readerPersistenceFailed, setReaderPersistenceFailed] = useState(false);
   const runningChatIdsRef = useRef<Set<string>>(new Set());
   const activeChatIdRef = useRef<string | null>(null);
+  const activeReaderChatIdRef = useRef<string | null>(null);
+  const readerImportTicketRef = useRef(0);
   const hostSidebarPreviewCloseTimerRef = useRef<number | null>(null);
   const effectiveRuntimeSurface =
     settingsSnapshot?.surface ?? settingsSnapshot?.runtime_surface ?? runtimeSurface;
@@ -693,7 +695,13 @@ function Shell({
   const runningChatIdList = useMemo(() => Array.from(runningChatIds), [runningChatIds]);
   const updatedChatIdList = useMemo(() => Array.from(updatedChatIds), [updatedChatIds]);
   const activeChatId = activeSession?.chatId ?? null;
-  const activeReaderChatId = view === "reader" ? activeSession?.chatId ?? null : null;
+  const activeReaderLoadResult = useMemo(() => {
+    if (view !== "reader" || !activeSession?.chatId) return null;
+    return loadReaderStateResult(activeSession.chatId);
+  }, [activeSession?.chatId, view]);
+  const activeReaderChatId = view === "reader" && isReaderSessionState(activeReaderLoadResult?.state)
+    ? activeSession?.chatId ?? null
+    : null;
   useEffect(() => {
     activeChatIdRef.current = activeChatId;
     if (!activeChatId) return;
@@ -722,15 +730,28 @@ function Shell({
   const activeChatRunning = activeChatId ? runningChatIds.has(activeChatId) : false;
 
   useEffect(() => {
+    activeReaderChatIdRef.current = activeReaderChatId;
+  }, [activeReaderChatId]);
+
+  useEffect(() => {
     if (!activeReaderChatId) {
       setReaderState(null);
       setReaderPersistenceFailed(false);
       return;
     }
-    const loaded = loadReaderStateResult(activeReaderChatId);
-    setReaderState(loaded.state);
-    setReaderPersistenceFailed(loaded.storageFailed);
-  }, [activeReaderChatId]);
+    setReaderState(activeReaderLoadResult?.state ?? null);
+    setReaderPersistenceFailed(activeReaderLoadResult?.storageFailed ?? false);
+  }, [activeReaderChatId, activeReaderLoadResult]);
+
+  useEffect(() => {
+    if (view !== "reader" || !activeSession?.key || !activeSession.chatId) return;
+    if (isReaderSessionState(activeReaderLoadResult?.state)) return;
+    navigate({
+      view: "chat",
+      activeKey: activeSession.key,
+      settingsSection: "overview",
+    }, { replace: true });
+  }, [activeReaderLoadResult?.state, activeSession?.chatId, activeSession?.key, navigate, view]);
 
   const refreshWorkspaces = useCallback(async () => {
     try {
@@ -1295,9 +1316,18 @@ function Shell({
   }, [activeReaderChatId, persistReaderState, readerState]);
 
   const onReaderImportEpub = useCallback(async (file: File) => {
-    if (!activeReaderChatId) return;
+    const importTicket = readerImportTicketRef.current + 1;
+    readerImportTicketRef.current = importTicket;
+    const intendedChatId = activeReaderChatIdRef.current;
+    const startedWithoutReaderTarget = intendedChatId == null;
     try {
       const imported = await importEpubDocument(file);
+      let targetChatId = intendedChatId;
+      if (!targetChatId) {
+        const newChatId = await onCreateChat();
+        if (!newChatId) return;
+        targetChatId = newChatId;
+      }
       const nextState = {
         ...(readerState ?? blankReaderState()),
         ...imported,
@@ -1307,12 +1337,28 @@ function Shell({
         question: "",
         collapsed: false,
       } satisfies ReaderState;
-      setReaderState(nextState);
-      persistReaderState(activeReaderChatId, nextState);
+      persistReaderState(targetChatId, nextState);
+      const currentRoute = readShellRoute();
+      const canRetargetCreatedSession =
+        currentRoute.view === "reader"
+        || (currentRoute.view === "chat" && currentRoute.activeKey === `websocket:${targetChatId}`);
+      if (startedWithoutReaderTarget && canRetargetCreatedSession) {
+        navigate({
+          view: "reader",
+          activeKey: `websocket:${targetChatId}`,
+          settingsSection: "overview",
+        });
+      }
+      if (
+        readerImportTicketRef.current === importTicket
+        && activeReaderChatIdRef.current === targetChatId
+      ) {
+        setReaderState(nextState);
+      }
     } catch (error) {
       console.error("Failed to import EPUB", error);
     }
-  }, [activeReaderChatId, persistReaderState, readerState]);
+  }, [navigate, onCreateChat, persistReaderState, readerState]);
 
   const onRestart = useCallback(() => {
     const chatId = activeSession?.chatId ?? client.defaultChatId;
@@ -1692,7 +1738,7 @@ function Shell({
               <div className="absolute inset-0 flex flex-col">
                 <ReaderPage
                   state={readerState}
-                  disabled={!activeReaderChatId}
+                  disabled={false}
                   persistenceFailed={readerPersistenceFailed}
                   onChange={onReaderChange}
                   onImportEpub={onReaderImportEpub}
