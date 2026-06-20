@@ -665,7 +665,7 @@ export function ThreadShell({
           onDismiss={dismissStreamError}
         />
       ) : null}
-      {historyKey ? (
+      {session && !showHeroComposer ? (
         <ReaderStrip
           chatId={chatId}
           disabled={isStreaming || booting}

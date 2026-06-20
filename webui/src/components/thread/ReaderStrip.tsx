@@ -20,6 +20,11 @@ interface ReaderStripProps {
   onSendReading: (content: string, snapshot: ReadingSnapshot) => void;
 }
 
+interface ReaderStripState {
+  chatId: string | null;
+  value: ReaderState;
+}
+
 function blankState(): ReaderState {
   return {
     version: 1,
@@ -40,23 +45,33 @@ export function ReaderStrip({
   disabled = false,
   onSendReading,
 }: ReaderStripProps) {
-  const [state, setState] = useState<ReaderState>(blankState);
+  const [reader, setReader] = useState<ReaderStripState>(() => ({
+    chatId,
+    value: chatId ? loadReaderState(chatId) ?? blankState() : blankState(),
+  }));
   const [inlineError, setInlineError] = useState<string | null>(null);
+  const state = reader.value;
 
   useEffect(() => {
     if (!chatId) {
-      setState(blankState());
+      setReader({
+        chatId: null,
+        value: blankState(),
+      });
       setInlineError(null);
       return;
     }
-    setState(loadReaderState(chatId) ?? blankState());
+    setReader({
+      chatId,
+      value: loadReaderState(chatId) ?? blankState(),
+    });
     setInlineError(null);
   }, [chatId]);
 
   useEffect(() => {
-    if (!chatId) return;
+    if (!chatId || reader.chatId !== chatId) return;
     saveReaderState(chatId, state);
-  }, [chatId, state]);
+  }, [chatId, reader.chatId, state]);
 
   const paragraphs = useMemo(() => parseReaderParagraphs(state.rawText), [state.rawText]);
   const activeParagraphIndex = paragraphs.length > 0
@@ -66,7 +81,10 @@ export function ReaderStrip({
   if (!chatId) return null;
 
   const updateState = (patch: Partial<ReaderState>) => {
-    setState((current) => ({ ...current, ...patch }));
+    setReader((current) => ({
+      ...current,
+      value: { ...current.value, ...patch },
+    }));
   };
 
   const handleSend = () => {
@@ -89,7 +107,10 @@ export function ReaderStrip({
     const snapshot = buildReadingSnapshot(nextState);
     const content = state.question.trim() || "聊聊这一段";
 
-    setState(nextState);
+    setReader((current) => ({
+      ...current,
+      value: nextState,
+    }));
     setInlineError(null);
     onSendReading(content, snapshot);
   };

@@ -1388,9 +1388,12 @@ describe("ThreadShell", () => {
 
   it("sends a reading snapshot from the reader strip", async () => {
     const client = makeClient();
+    window.localStorage.clear();
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
       if (url.includes("/api/sessions/")) {
-        return httpJson(transcriptFromSimpleMessages([]));
+        return httpJson(transcriptFromSimpleMessages([
+          { role: "assistant", content: "Existing thread" },
+        ]));
       }
       if (url.includes("/api/settings")) {
         return httpJson(modelSettings("gpt-test", "openai_codex"));
@@ -1415,8 +1418,9 @@ describe("ThreadShell", () => {
       />
     )));
 
+    await screen.findByText("Existing thread");
     fireEvent.click(await screen.findByRole("button", { name: /open reader/i }));
-    fireEvent.change(screen.getByLabelText(/reading title/i), {
+    fireEvent.change(await screen.findByLabelText(/reading title/i), {
       target: { value: "Essay" },
     });
     fireEvent.change(screen.getByLabelText(/reading text/i), {
@@ -1447,5 +1451,40 @@ describe("ThreadShell", () => {
         }),
       );
     });
+  });
+
+  it("does not render the reader strip in hero mode for an empty conversation", async () => {
+    const client = makeClient();
+    window.localStorage.clear();
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.includes("/api/sessions/")) {
+        return httpJson(transcriptFromSimpleMessages([]));
+      }
+      if (url.includes("/api/settings")) {
+        return httpJson(modelSettings("gpt-test", "openai_codex"));
+      }
+      if (url.includes("/api/commands")) {
+        return httpJson({ commands: [] });
+      }
+      if (url.includes("/api/cli-apps")) {
+        return httpJson({ apps: [] });
+      }
+      if (url.includes("/api/mcp/presets")) {
+        return httpJson({ presets: [] });
+      }
+      return httpJson({});
+    }));
+
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("chat-empty-reading")}
+        title="Empty reading chat"
+        onToggleSidebar={() => {}}
+      />,
+    ));
+
+    await screen.findByText(HERO_GREETING_PATTERN);
+    expect(screen.queryByRole("button", { name: /open reader/i })).not.toBeInTheDocument();
   });
 });

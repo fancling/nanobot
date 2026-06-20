@@ -769,4 +769,49 @@ describe("ThreadViewport", () => {
       }),
     );
   });
+
+  it("keeps the bottom anchor when switching from an empty view to a threaded conversation", async () => {
+    const scrollIntoView = vi.fn();
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+
+    try {
+      const { rerender } = render(
+        <ThreadViewport
+          messages={emptyMessages}
+          isStreaming={false}
+          conversationKey={null}
+          emptyState={<div>empty</div>}
+          composer={<div>hero composer</div>}
+        />,
+      );
+
+      scrollIntoView.mockClear();
+
+      rerender(
+        <ThreadViewport
+          messages={[
+            {
+              id: "a1",
+              role: "assistant",
+              content: "loaded answer",
+              createdAt: 1,
+            },
+          ]}
+          isStreaming={false}
+          conversationKey="chat-a"
+          composer={<div>thread composer</div>}
+        />,
+      );
+
+      await waitFor(() =>
+        expect(scrollIntoView).toHaveBeenCalledWith({
+          block: "end",
+          behavior: "auto",
+        }),
+      );
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+    }
+  });
 });
