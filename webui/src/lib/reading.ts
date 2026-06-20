@@ -42,7 +42,7 @@ function normalizeText(value: unknown): string {
 }
 
 function normalizeInt(value: unknown, fallback: number): number {
-  return Number.isInteger(value) ? value : fallback;
+  return typeof value === "number" && Number.isInteger(value) ? value : fallback;
 }
 
 function predictNeed(question: string): string {
