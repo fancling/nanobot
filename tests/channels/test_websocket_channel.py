@@ -464,6 +464,7 @@ async def test_webui_message_rejects_reading_snapshot_before_scope_persistence(
         ),
     )
     channel._handle_message = AsyncMock()
+    channel._save_envelope_media = MagicMock(return_value=(["/tmp/rejected-media"], None))
     conn = AsyncMock()
     conn.remote_address = ("127.0.0.1", 50123)
 
@@ -479,6 +480,7 @@ async def test_webui_message_rejects_reading_snapshot_before_scope_persistence(
                 "project_path": str(project),
                 "access_mode": "full",
             },
+            "media": [{"kind": "inline"}],
             "reading_snapshot": {"version": 1, "scene": "chat"},
         },
     )
@@ -487,6 +489,7 @@ async def test_webui_message_rejects_reading_snapshot_before_scope_persistence(
     assert payload["event"] == "error"
     assert payload["detail"] == "reading_snapshot_rejected"
     assert sessions.read_session_file("websocket:reading-chat") is None
+    channel._save_envelope_media.assert_not_called()
     bus.publish_inbound.assert_not_awaited()
     channel._handle_message.assert_not_awaited()
 

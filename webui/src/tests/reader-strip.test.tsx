@@ -1,12 +1,16 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ReaderStrip } from "@/components/thread/ReaderStrip";
 import { READER_STATE_STORAGE_PREFIX, type ReaderState } from "@/lib/reading";
 
 describe("ReaderStrip", () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
     window.localStorage.clear();
+  });
+
+  afterEach(() => {
     vi.restoreAllMocks();
   });
 
@@ -90,6 +94,29 @@ describe("ReaderStrip", () => {
     vi.spyOn(window, "localStorage", "get").mockImplementation(() => {
       throw new Error("storage blocked");
     });
+
+    render(
+      <ReaderStrip
+        chatId="chat-reader"
+        onSendReading={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /open reader/i }));
+
+    expect(
+      await screen.findByText(/reader draft persistence is unavailable/i),
+    ).toBeInTheDocument();
+  });
+
+  it("shows a non-blocking warning when saving the draft fails", async () => {
+    const fakeStorage = {
+      getItem: vi.fn(() => null),
+      setItem: vi.fn(() => {
+        throw new Error("storage blocked");
+      }),
+    } as unknown as Storage;
+    vi.spyOn(window, "localStorage", "get").mockReturnValue(fakeStorage);
 
     render(
       <ReaderStrip

@@ -731,18 +731,6 @@ class WebSocketChannel(BaseChannel):
                         detail="image_rejected", reason="malformed",
                     )
                     return
-                media_paths, reason = self._save_envelope_media(raw_media)
-                if reason is not None:
-                    await self._send_event(
-                        connection, "error",
-                        detail="image_rejected", reason=reason,
-                    )
-                    return
-
-            # Allow image-only turns (content may be empty when media is attached).
-            if not content.strip() and not media_paths:
-                await self._send_event(connection, "error", detail="missing content")
-                return
 
             metadata: dict[str, Any] = {"remote": getattr(connection, "remote_address", None)}
             if envelope.get("webui") is True:
@@ -775,6 +763,20 @@ class WebSocketChannel(BaseChannel):
                         reason=str(exc),
                     )
                     return
+
+            if raw_media is not None:
+                media_paths, reason = self._save_envelope_media(raw_media)
+                if reason is not None:
+                    await self._send_event(
+                        connection, "error",
+                        detail="image_rejected", reason=reason,
+                    )
+                    return
+
+            # Allow image-only turns (content may be empty when media is attached).
+            if not content.strip() and not media_paths:
+                await self._send_event(connection, "error", detail="missing content")
+                return
 
             scope = await self._workspace_scope_or_error(
                 connection,
