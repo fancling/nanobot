@@ -74,6 +74,17 @@ interface ChatListProps {
   emptyLabel?: string;
 }
 
+function loadReaderMarkerLabels(sessions: ChatSummary[]): Map<string, string> {
+  const labels = new Map<string, string>();
+  for (const session of sessions) {
+    const readerState = loadReaderState(session.chatId);
+    if (readerState?.readerSession !== true) continue;
+    const title = readerState.title.trim();
+    labels.set(session.chatId, title);
+  }
+  return labels;
+}
+
 export const ChatList = memo(function ChatList({
   sessions,
   activeKey,
@@ -153,6 +164,7 @@ export const ChatList = memo(function ChatList({
     [limitedGroups],
   );
   const hiddenSessionCount = Math.max(0, totalSessionCount - visibleSessionCount);
+  const readerMarkerLabels = useMemo(() => loadReaderMarkerLabels(sessions), [sessions]);
 
   useEffect(() => {
     setVisibleLimit(INITIAL_VISIBLE_SESSIONS);
@@ -250,9 +262,9 @@ export const ChatList = memo(function ChatList({
                       : updated.has(s.chatId) && !active
                         ? "updated"
                         : null;
-                    const readerState = loadReaderState(s.chatId);
-                    const readerLabel = readerState?.title?.trim() || title;
-                    const isReaderSession = readerState?.readerSession === true;
+                    const readerTitle = readerMarkerLabels.get(s.chatId);
+                    const isReaderSession = readerMarkerLabels.has(s.chatId);
+                    const readerLabel = readerTitle || title;
                     return (
                       <li key={s.key} className="min-w-0">
                         <div
@@ -303,6 +315,7 @@ export const ChatList = memo(function ChatList({
                           </button>
                           {isReaderSession ? (
                             <span
+                              role="img"
                               aria-label={`Reader session: ${readerLabel}`}
                               className={cn(
                                 "inline-flex h-5 shrink-0 items-center justify-center rounded-md border border-sidebar-border/65 px-1.5 text-[11px] font-medium text-muted-foreground/80",

@@ -493,6 +493,51 @@ describe("App layout", () => {
     expect(window.location.hash).toBe("#/reader?chat=websocket%3Abook-chat");
   });
 
+  it("keeps the sidebar session list rendering when reader storage reads are blocked", async () => {
+    mockSessions = [
+      {
+        key: "websocket:book-chat",
+        channel: "websocket",
+        chatId: "book-chat",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        title: "Book",
+        preview: "Book",
+      },
+    ];
+    const realLocalStorage = window.localStorage;
+    const blockingStorage: Storage = {
+      get length() {
+        return realLocalStorage.length;
+      },
+      clear: () => realLocalStorage.clear(),
+      getItem: () => {
+        throw new Error("storage blocked");
+      },
+      key: (index) => realLocalStorage.key(index),
+      removeItem: (key) => realLocalStorage.removeItem(key),
+      setItem: (key, value) => realLocalStorage.setItem(key, value),
+    };
+    const localStorageDescriptor = Object.getOwnPropertyDescriptor(window, "localStorage");
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      get: () => blockingStorage,
+    });
+
+    try {
+      render(<App />);
+
+      await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+      const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+      expect(within(sidebar).getByRole("button", { name: /^Book$/ })).toBeInTheDocument();
+      expect(within(sidebar).queryByLabelText(/Reader session: Book/i)).not.toBeInTheDocument();
+    } finally {
+      if (localStorageDescriptor) {
+        Object.defineProperty(window, "localStorage", localStorageDescriptor);
+      }
+    }
+  });
+
   it("redirects non-reader reader deep links back to the normal chat route", async () => {
     mockSessions = [
       {

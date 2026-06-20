@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ChatList } from "@/components/ChatList";
+import * as reading from "@/lib/reading";
 import type { ChatSummary } from "@/lib/types";
 
 function session(overrides: Partial<ChatSummary>): ChatSummary {
@@ -245,6 +246,57 @@ describe("ChatList", () => {
     const updated = screen.getAllByLabelText("New activity");
     expect(updated).toHaveLength(1);
     expect(updated[0].firstElementChild).toHaveClass("h-2", "w-2");
+  });
+
+  it("memoizes reader marker lookups across rerenders for the same sessions input", () => {
+    const sessions = [
+      session({
+        chatId: "book",
+        title: "Book",
+      }),
+      session({
+        chatId: "plain",
+        title: "Plain",
+      }),
+    ];
+    const loadReaderStateSpy = vi.spyOn(reading, "loadReaderState");
+    loadReaderStateSpy.mockImplementation((chatId: string) => (
+      chatId === "book"
+        ? {
+          version: 1,
+          documentId: "book-1",
+          title: "Book",
+          rawText: "Book text.",
+          focusedParagraphIndex: 0,
+          selectedText: "",
+          note: "",
+          question: "",
+          mode: "slow_reading",
+          collapsed: false,
+          documentKind: "epub",
+          readerSession: true,
+        }
+        : null
+    ));
+
+    const props = {
+      sessions,
+      activeKey: null,
+      onSelect: vi.fn(),
+      onRequestDelete: vi.fn(),
+      onTogglePin: vi.fn(),
+      onRequestRename: vi.fn(),
+      onToggleArchive: vi.fn(),
+    };
+
+    const { rerender } = render(<ChatList {...props} />);
+    expect(screen.getByLabelText("Reader session: Book")).toBeInTheDocument();
+    expect(loadReaderStateSpy).toHaveBeenCalledTimes(2);
+
+    rerender(<ChatList {...props} activeKey="websocket:plain" />);
+
+    expect(loadReaderStateSpy).toHaveBeenCalledTimes(2);
+    loadReaderStateSpy.mockRestore();
   });
 
   it("folds long default workspace chats and can show all", () => {
