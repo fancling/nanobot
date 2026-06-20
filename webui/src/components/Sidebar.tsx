@@ -25,6 +25,7 @@ import { cn } from "@/lib/utils";
 interface SidebarProps {
   sessions: ChatSummary[];
   activeKey: string | null;
+  readerMarkerVersion?: number;
   loading: boolean;
   onNewChat: () => void;
   onSelect: (key: string) => void;
@@ -203,6 +204,7 @@ export function Sidebar(props: SidebarProps) {
           <ChatList
             sessions={props.sessions}
             activeKey={props.activeKey}
+            readerMarkerVersion={props.readerMarkerVersion}
             loading={props.loading}
             emptyLabel={t("chat.noSessions")}
             onSelect={props.onSelect}

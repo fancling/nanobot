@@ -48,6 +48,7 @@ const ACTION_MENU_ITEM_CLASS = "grid w-[7.75rem] grid-cols-[1rem_minmax(0,1fr)] 
 interface ChatListProps {
   sessions: ChatSummary[];
   activeKey: string | null;
+  readerMarkerVersion?: number;
   onSelect: (key: string) => void;
   onRequestDelete: (key: string, label: string) => void;
   onTogglePin: (key: string) => void;
@@ -88,6 +89,7 @@ function loadReaderMarkerLabels(sessions: ChatSummary[]): Map<string, string> {
 export const ChatList = memo(function ChatList({
   sessions,
   activeKey,
+  readerMarkerVersion = 0,
   onSelect,
   onRequestDelete,
   onTogglePin,
@@ -164,7 +166,10 @@ export const ChatList = memo(function ChatList({
     [limitedGroups],
   );
   const hiddenSessionCount = Math.max(0, totalSessionCount - visibleSessionCount);
-  const readerMarkerLabels = useMemo(() => loadReaderMarkerLabels(sessions), [sessions]);
+  const readerMarkerLabels = useMemo(
+    () => loadReaderMarkerLabels(sessions),
+    [readerMarkerVersion, sessions],
+  );
 
   useEffect(() => {
     setVisibleLimit(INITIAL_VISIBLE_SESSIONS);

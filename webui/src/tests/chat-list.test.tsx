@@ -248,7 +248,7 @@ describe("ChatList", () => {
     expect(updated[0].firstElementChild).toHaveClass("h-2", "w-2");
   });
 
-  it("memoizes reader marker lookups across rerenders for the same sessions input", () => {
+  it("refreshes reader markers only when the reader marker version changes", () => {
     const sessions = [
       session({
         chatId: "book",
@@ -259,29 +259,16 @@ describe("ChatList", () => {
         title: "Plain",
       }),
     ];
+    let bookReaderState: reading.ReaderState | null = null;
     const loadReaderStateSpy = vi.spyOn(reading, "loadReaderState");
     loadReaderStateSpy.mockImplementation((chatId: string) => (
-      chatId === "book"
-        ? {
-          version: 1,
-          documentId: "book-1",
-          title: "Book",
-          rawText: "Book text.",
-          focusedParagraphIndex: 0,
-          selectedText: "",
-          note: "",
-          question: "",
-          mode: "slow_reading",
-          collapsed: false,
-          documentKind: "epub",
-          readerSession: true,
-        }
-        : null
+      chatId === "book" ? bookReaderState : null
     ));
 
     const props = {
       sessions,
       activeKey: null,
+      readerMarkerVersion: 0,
       onSelect: vi.fn(),
       onRequestDelete: vi.fn(),
       onTogglePin: vi.fn(),
@@ -290,12 +277,39 @@ describe("ChatList", () => {
     };
 
     const { rerender } = render(<ChatList {...props} />);
-    expect(screen.getByLabelText("Reader session: Book")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Reader session: Book")).not.toBeInTheDocument();
+    expect(loadReaderStateSpy).toHaveBeenCalledTimes(2);
+
+    bookReaderState = {
+      version: 1,
+      documentId: "book-1",
+      title: "Book",
+      rawText: "Book text.",
+      focusedParagraphIndex: 0,
+      selectedText: "",
+      note: "",
+      question: "",
+      mode: "slow_reading",
+      collapsed: false,
+      documentKind: "epub",
+      readerSession: true,
+    };
+    rerender(<ChatList {...props} activeKey="websocket:plain" />);
+
+    expect(screen.queryByLabelText("Reader session: Book")).not.toBeInTheDocument();
     expect(loadReaderStateSpy).toHaveBeenCalledTimes(2);
 
     rerender(<ChatList {...props} activeKey="websocket:plain" />);
+    rerender(
+      <ChatList
+        {...props}
+        activeKey="websocket:plain"
+        readerMarkerVersion={1}
+      />,
+    );
 
-    expect(loadReaderStateSpy).toHaveBeenCalledTimes(2);
+    expect(screen.getByLabelText("Reader session: Book")).toBeInTheDocument();
+    expect(loadReaderStateSpy).toHaveBeenCalledTimes(4);
     loadReaderStateSpy.mockRestore();
   });
 

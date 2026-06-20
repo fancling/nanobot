@@ -600,6 +600,7 @@ function Shell({
     useState<boolean>(readSidebarOpen);
   const [hostSidebarPreviewOpen, setHostSidebarPreviewOpen] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [readerMarkerVersion, setReaderMarkerVersion] = useState(0);
   const [sessionSearchOpen, setSessionSearchOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<{
     key: string;
@@ -1327,6 +1328,9 @@ function Shell({
 
   const persistReaderState = useCallback((chatId: string, nextState: ReaderState) => {
     const persisted = saveReaderState(chatId, nextState);
+    if (persisted) {
+      setReaderMarkerVersion((version) => version + 1);
+    }
     if (chatId === activeReaderChatIdRef.current) {
       setReaderPersistenceFailed(!persisted);
     }
@@ -1575,6 +1579,7 @@ function Shell({
   const sidebarProps = {
     sessions,
     activeKey,
+    readerMarkerVersion,
     loading,
     onNewChat,
     onSelect: onSelectChat,
