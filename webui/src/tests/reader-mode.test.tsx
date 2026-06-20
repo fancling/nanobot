@@ -43,7 +43,14 @@ describe("ReaderMode", () => {
     );
 
     expect(screen.getByRole("main", { name: /reader document/i })).toBeInTheDocument();
-    expect(screen.getByRole("complementary", { name: /reader companion/i })).toBeInTheDocument();
+    const companionRail = screen.getByRole("complementary", { name: /reader companion/i });
+    expect(companionRail).toBeInTheDocument();
+    expect(companionRail).toHaveClass("max-h-[45vh]", "min-h-0", "lg:max-h-none");
+    expect(
+      within(companionRail).getByLabelText(/Question about focused paragraph/i).closest(
+        ".overflow-y-auto",
+      ),
+    ).toHaveClass("flex-1", "overflow-y-auto");
     expect(screen.getByLabelText(/agent presence/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Focus paragraph 2/i })).toBeInTheDocument();
   });

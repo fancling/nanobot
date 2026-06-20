@@ -66,7 +66,7 @@ export function ReaderCompanionRail({
   return (
     <aside
       aria-label="Reader companion"
-      className="flex w-full shrink-0 flex-col border-t border-border bg-muted/20 lg:w-80 lg:border-l lg:border-t-0"
+      className="flex max-h-[45vh] min-h-0 w-full shrink-0 flex-col border-t border-border bg-muted/20 lg:max-h-none lg:w-80 lg:border-l lg:border-t-0"
     >
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <div className="flex min-w-0 items-center gap-3">
