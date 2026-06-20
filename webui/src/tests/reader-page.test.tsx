@@ -40,8 +40,8 @@ describe("ReaderPage", () => {
     );
 
     expect(screen.getByRole("main", { name: /reader page/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Import EPUB/i })).toBeInTheDocument();
-    expect(screen.getByText(/Import a book to start a reader session/i)).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /Import EPUB/i })).toHaveLength(2);
+    expect(screen.getByText("Import a book to start a reader session.")).toBeInTheDocument();
   });
 
   it("sends reader questions from the active book", () => {

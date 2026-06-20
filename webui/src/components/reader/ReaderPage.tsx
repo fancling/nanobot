@@ -50,34 +50,17 @@ export function ReaderPage({
           </div>
         </div>
 
-        {state ? (
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              className="gap-2"
-              disabled={disabled}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <Upload className="h-4 w-4" aria-hidden />
-              <span>Import EPUB</span>
-            </Button>
-            <input
-              ref={fileInputRef}
-              aria-label="Import EPUB"
-              type="file"
-              accept=".epub,application/epub+zip"
-              className="sr-only"
-              disabled={disabled}
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                event.currentTarget.value = "";
-                if (!file) return;
-                onImportEpub(file);
-              }}
-            />
-          </div>
-        ) : (
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="gap-2"
+            disabled={disabled}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Upload className="h-4 w-4" aria-hidden />
+            <span>Import EPUB</span>
+          </Button>
           <input
             ref={fileInputRef}
             aria-label="Import EPUB"
@@ -92,7 +75,7 @@ export function ReaderPage({
               onImportEpub(file);
             }}
           />
-        )}
+        </div>
       </header>
 
       {state ? (
@@ -112,7 +95,7 @@ export function ReaderPage({
             </div>
             <div className="space-y-2">
               <h1 className="text-2xl font-semibold text-foreground">
-                Import a book to start a reader session
+                Import a book to start a reader session.
               </h1>
               <p className="text-sm leading-6 text-muted-foreground">
                 Open an EPUB to review sections, focus passages, and send questions from a standalone reader page.
