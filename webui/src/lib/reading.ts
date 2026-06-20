@@ -10,6 +10,13 @@ export interface ReaderParagraph {
 
 export type ReaderDocumentKind = "text" | "markdown" | "epub";
 
+export interface ReaderSection {
+  id: string;
+  title: string;
+  rawText: string;
+  paragraphCount: number;
+}
+
 export interface ReaderState {
   version: 1;
   documentId: string;
@@ -23,6 +30,10 @@ export interface ReaderState {
   collapsed: boolean;
   documentKind?: ReaderDocumentKind;
   readerModeOpen?: boolean;
+  readerSession?: boolean;
+  sourceFileName?: string;
+  sections?: ReaderSection[];
+  activeSectionIndex?: number;
 }
 
 export interface ReaderStateLoadResult {
@@ -58,6 +69,33 @@ function normalizeDocumentKind(value: unknown): ReaderDocumentKind {
   return value === "text" || value === "markdown" || value === "epub"
     ? value
     : "markdown";
+}
+
+function normalizeReaderSections(value: unknown): ReaderSection[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+
+  const sections = value.filter((section): section is ReaderSection => {
+    if (typeof section !== "object" || section === null) return false;
+    const maybe = section as Record<string, unknown>;
+    return (
+      typeof maybe.id === "string"
+      && maybe.id.length > 0
+      && typeof maybe.title === "string"
+      && maybe.title.length > 0
+      && typeof maybe.rawText === "string"
+      && maybe.rawText.trim().length > 0
+      && typeof maybe.paragraphCount === "number"
+      && Number.isInteger(maybe.paragraphCount)
+      && maybe.paragraphCount >= 0
+    );
+  }).map((section) => ({
+    id: section.id,
+    title: section.title,
+    rawText: section.rawText,
+    paragraphCount: section.paragraphCount,
+  }));
+
+  return sections.length > 0 ? sections : undefined;
 }
 
 function predictNeed(question: string): string {
@@ -102,11 +140,26 @@ export function parseReaderParagraphs(rawText: string): ReaderParagraph[] {
   }));
 }
 
+export function getActiveReaderSection(state: ReaderState): ReaderSection | null {
+  const sections = Array.isArray(state.sections) ? state.sections : [];
+  if (sections.length === 0) return null;
+  const index = Math.max(0, Math.min(normalizeInt(state.activeSectionIndex, 0), sections.length - 1));
+  return sections[index] ?? null;
+}
+
+export function getActiveReaderText(state: ReaderState): string {
+  return getActiveReaderSection(state)?.rawText ?? state.rawText;
+}
+
+export function isReaderSessionState(state: ReaderState | null): boolean {
+  return state?.readerSession === true;
+}
+
 export function buildReadingSnapshot(state: ReaderState): ReadingSnapshot {
   const normalizedTitle = normalizeText(state.title);
   const normalizedQuestion = normalizeText(state.question);
   const normalizedNote = normalizeText(state.note);
-  const normalizedRaw = normalizeText(state.rawText);
+  const normalizedRaw = normalizeText(getActiveReaderText(state));
   const normalizedSelected = normalizeText(state.selectedText);
 
   const paragraphs = parseReaderParagraphs(normalizedRaw);
@@ -204,6 +257,10 @@ export function loadReaderStateResult(chatId: string): ReaderStateLoadResult {
       return { state: null, storageFailed: false };
     }
 
+    const readerSession = maybe.readerSession === true;
+    const sourceFileName = normalizeText(maybe.sourceFileName);
+    const sections = normalizeReaderSections(maybe.sections);
+
     return {
       state: {
         version: 1,
@@ -221,6 +278,10 @@ export function loadReaderStateResult(chatId: string): ReaderStateLoadResult {
         collapsed: maybe.collapsed === true,
         documentKind: normalizeDocumentKind(maybe.documentKind),
         readerModeOpen: maybe.readerModeOpen === true,
+        readerSession,
+        sourceFileName: sourceFileName || undefined,
+        sections,
+        activeSectionIndex: normalizeInt(maybe.activeSectionIndex, 0),
       },
       storageFailed: false,
     };

@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildReadingSnapshot,
+  getActiveReaderText,
+  isReaderSessionState,
   loadReaderState,
   parseReaderParagraphs,
   READER_STATE_STORAGE_PREFIX,
@@ -12,12 +14,18 @@ import { importEpubDocument } from "@/lib/readerEpub";
 const epubMocks = vi.hoisted(() => ({
   bookLoad: vi.fn(),
   itemLoad: vi.fn(),
+  secondItemLoad: vi.fn(),
   rawItemLoad: vi.fn(),
   itemUnload: vi.fn(),
+  secondItemUnload: vi.fn(),
   chapterMarkup: `<html><body>
     <h1>Chapter One</h1>
     <p>First EPUB paragraph.</p><p>Second EPUB paragraph.</p>
     <ul><li>Listed thought.</li></ul>
+  </body></html>`,
+  secondChapterMarkup: `<html><body>
+    <h1>Chapter Two</h1>
+    <p>Second chapter.</p><p>More text.</p>
   </body></html>`,
 }));
 
@@ -40,6 +48,13 @@ vi.mock("epubjs", () => ({
             }),
             unload: epubMocks.itemUnload,
           },
+          {
+            load: epubMocks.secondItemLoad.mockImplementation(async (request: (url: string) => Promise<unknown>) => {
+              await request("chapter-two.xhtml");
+              return new DOMParser().parseFromString(epubMocks.secondChapterMarkup, "text/html");
+            }),
+            unload: epubMocks.secondItemUnload,
+          },
         ],
       }),
     },
@@ -52,12 +67,18 @@ describe("reading utilities", () => {
     vi.restoreAllMocks();
     epubMocks.bookLoad.mockReset();
     epubMocks.itemLoad.mockReset();
+    epubMocks.secondItemLoad.mockReset();
     epubMocks.rawItemLoad.mockReset();
     epubMocks.itemUnload.mockReset();
+    epubMocks.secondItemUnload.mockReset();
     epubMocks.chapterMarkup = `<html><body>
       <h1>Chapter One</h1>
       <p>First EPUB paragraph.</p><p>Second EPUB paragraph.</p>
       <ul><li>Listed thought.</li></ul>
+    </body></html>`;
+    epubMocks.secondChapterMarkup = `<html><body>
+      <h1>Chapter Two</h1>
+      <p>Second chapter.</p><p>More text.</p>
     </body></html>`;
   });
 
@@ -274,20 +295,80 @@ describe("reading utilities", () => {
     expect(state?.readerModeOpen).toBe(false);
   });
 
+  it("loads reader session metadata and uses the active section for snapshots", () => {
+    const state = {
+      version: 1,
+      documentId: "book-1",
+      title: "Book",
+      rawText: "Chapter one.\n\nSecond paragraph.",
+      focusedParagraphIndex: 1,
+      selectedText: "",
+      note: "",
+      question: "Why this?",
+      mode: "slow_reading" as const,
+      collapsed: false,
+      documentKind: "epub" as const,
+      readerModeOpen: false,
+      readerSession: true,
+      sourceFileName: "book.epub",
+      activeSectionIndex: 1,
+      sections: [
+        { id: "s-1", title: "Opening", rawText: "Opening text.", paragraphCount: 1 },
+        {
+          id: "s-2",
+          title: "Chapter one",
+          rawText: "Chapter one.\n\nSecond paragraph.",
+          paragraphCount: 2,
+        },
+      ],
+    };
+
+    expect(isReaderSessionState(state)).toBe(true);
+    expect(getActiveReaderText(state)).toBe("Chapter one.\n\nSecond paragraph.");
+    expect(buildReadingSnapshot(state)).toMatchObject({
+      document: { id: "book-1", title: "Book", kind: "epub" },
+      location: { paragraph_index: 1, paragraph_count: 2 },
+      focus: { focused_text: "Second paragraph.", current_question: "Why this?" },
+    });
+  });
+
   it("imports EPUB files into the shared reader document model", async () => {
+    epubMocks.chapterMarkup = `<html><body>
+      <p>First chapter.</p>
+    </body></html>`;
+    epubMocks.secondChapterMarkup = `<html><body>
+      <p>Second chapter.</p><p>More text.</p>
+    </body></html>`;
     const file = new File(["epub bytes"], "book.epub", { type: "application/epub+zip" });
 
     const document = await importEpubDocument(file);
 
     expect(document.title).toBe("Mock EPUB");
     expect(document.documentKind).toBe("epub");
-    expect(document.rawText).toBe(
-      "Chapter One\n\nFirst EPUB paragraph.\n\nSecond EPUB paragraph.\n\nListed thought.",
-    );
+    expect(document.readerSession).toBe(true);
+    expect(document.sourceFileName).toBe("book.epub");
+    expect(document.activeSectionIndex).toBe(0);
+    expect(document.sections).toEqual([
+      {
+        id: "section-0",
+        title: "Chapter 1",
+        rawText: "First chapter.",
+        paragraphCount: 1,
+      },
+      {
+        id: "section-1",
+        title: "Chapter 2",
+        rawText: "Second chapter.\n\nMore text.",
+        paragraphCount: 2,
+      },
+    ]);
+    expect(document.rawText).toBe("First chapter.");
     expect(epubMocks.rawItemLoad).not.toHaveBeenCalled();
     expect(epubMocks.itemLoad).toHaveBeenCalledOnce();
+    expect(epubMocks.secondItemLoad).toHaveBeenCalledOnce();
     expect(epubMocks.bookLoad).toHaveBeenCalledWith("chapter-one.xhtml");
     expect(epubMocks.itemUnload).toHaveBeenCalledOnce();
+    expect(epubMocks.secondItemUnload).toHaveBeenCalledOnce();
   });
 
   it("preserves EPUB paragraph breaks between adjacent div blocks", async () => {

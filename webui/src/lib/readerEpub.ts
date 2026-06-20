@@ -1,12 +1,17 @@
 import ePub from "epubjs";
 
-import type { ReaderDocumentKind } from "@/lib/reading";
+import type { ReaderDocumentKind, ReaderSection } from "@/lib/reading";
+import { parseReaderParagraphs } from "@/lib/reading";
 
 export interface ImportedReaderDocument {
   documentId: string;
   title: string;
   rawText: string;
   documentKind: ReaderDocumentKind;
+  readerSession: true;
+  sourceFileName: string;
+  sections: ReaderSection[];
+  activeSectionIndex: 0;
 }
 
 function normalizeWhitespace(value: string): string {
@@ -148,29 +153,39 @@ export async function importEpubDocument(file: File): Promise<ImportedReaderDocu
   const book = ePub(buffer);
   const [metadata, spine] = await Promise.all([book.loaded.metadata, book.loaded.spine]);
   const title = metadata.title?.trim() || file.name.replace(/\.epub$/i, "") || "Untitled EPUB";
-  const parts: string[] = [];
+  const sections: ReaderSection[] = [];
+  let sectionIndex = 0;
 
   for (const item of loadableSections(spine)) {
     try {
       const loaded = await item.load(book.load.bind(book));
-      const text = normalizeWhitespace(textFromLoadedContent(loaded));
-      if (text) {
-        parts.push(text);
+      const rawText = normalizeWhitespace(textFromLoadedContent(loaded));
+      if (rawText) {
+        sections.push({
+          id: `section-${sectionIndex}`,
+          title: `Chapter ${sectionIndex + 1}`,
+          rawText,
+          paragraphCount: parseReaderParagraphs(rawText).length,
+        });
+        sectionIndex += 1;
       }
     } finally {
       item.unload?.();
     }
   }
 
-  const rawText = normalizeWhitespace(parts.join("\n\n"));
-  if (!rawText) {
+  if (sections.length === 0) {
     throw new Error("No readable text found in EPUB.");
   }
 
   return {
     documentId: crypto.randomUUID(),
     title,
-    rawText,
+    rawText: sections[0].rawText,
     documentKind: "epub",
+    readerSession: true,
+    sourceFileName: file.name,
+    sections,
+    activeSectionIndex: 0,
   };
 }
