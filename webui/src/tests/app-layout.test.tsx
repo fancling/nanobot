@@ -599,6 +599,95 @@ describe("App layout", () => {
     expect(screen.queryByText("Imported book")).not.toBeInTheDocument();
   });
 
+  it("does not steal the route when a blank Reader import resolves after leaving the page", async () => {
+    let resolveImport: ((value: Awaited<ReturnType<typeof importEpubDocument>>) => void) | null = null;
+    importEpubDocumentMock.mockReturnValueOnce(new Promise((resolve) => {
+      resolveImport = resolve;
+    }));
+    mockSessions = [
+      {
+        key: "websocket:chat-a",
+        channel: "websocket",
+        chatId: "chat-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        preview: "Normal chat",
+      },
+    ];
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Reader" }));
+
+    const readerMain = await screen.findByRole("main", { name: /reader page/i });
+    const file = new File(["epub"], "book.epub", { type: "application/epub+zip" });
+    fireEvent.change(within(readerMain).getByLabelText("Import EPUB"), { target: { files: [file] } });
+
+    fireEvent.click(within(sidebar).getByRole("button", { name: /^Normal chat$/ }));
+    await waitFor(() =>
+      expect(window.location.hash).toBe(`#/chat/${encodeURIComponent("websocket:chat-a")}`),
+    );
+
+    await act(async () => {
+      resolveImport?.({
+        documentId: "book-1",
+        title: "Book",
+        rawText: "Book text.",
+        documentKind: "epub",
+        readerSession: true,
+        sourceFileName: "book.epub",
+        sections: [],
+        activeSectionIndex: 0,
+      });
+    });
+
+    expect(createChatSpy).not.toHaveBeenCalled();
+    expect(window.location.hash).toBe(`#/chat/${encodeURIComponent("websocket:chat-a")}`);
+    expect(screen.queryByText("Book")).not.toBeInTheDocument();
+  });
+
+  it("keeps explicit reader deep links visible when storage access fails", async () => {
+    mockSessions = [
+      {
+        key: "websocket:chat-a",
+        channel: "websocket",
+        chatId: "chat-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        preview: "Normal chat",
+      },
+    ];
+    window.history.replaceState(
+      null,
+      "",
+      `/#/reader?chat=${encodeURIComponent("websocket:chat-a")}`,
+    );
+    const localStorageDescriptor = Object.getOwnPropertyDescriptor(window, "localStorage");
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      get() {
+        throw new Error("storage blocked");
+      },
+    });
+
+    try {
+      render(<App />);
+
+      await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+      expect(await screen.findByRole("main", { name: /reader page/i })).toBeInTheDocument();
+      expect(window.location.hash).toBe(`#/reader?chat=${encodeURIComponent("websocket:chat-a")}`);
+      expect(
+        screen.getByText("Reader draft persistence is unavailable in this browser context."),
+      ).toBeInTheDocument();
+    } finally {
+      if (localStorageDescriptor) {
+        Object.defineProperty(window, "localStorage", localStorageDescriptor);
+      }
+    }
+  });
+
   it("opens Automations from the main sidebar", async () => {
     mockFetchRoutes({
       "/api/settings": baseSettingsPayload(),

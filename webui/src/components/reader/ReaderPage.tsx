@@ -82,6 +82,11 @@ export function ReaderPage({
           {importInput}
         </div>
       </header>
+      {persistenceFailed ? (
+        <p className="px-4 py-2 text-xs text-muted-foreground">
+          Reader draft persistence is unavailable in this browser context.
+        </p>
+      ) : null}
       <ReaderMode
         state={state}
         disabled={disabled}
@@ -92,7 +97,7 @@ export function ReaderPage({
       />
     </div>
   ) : (
-    <main aria-label="Reader page" className={shellClassName}>
+    <div className={shellClassName}>
       <header className="flex items-center justify-between gap-3 border-b border-border bg-muted/20 px-4 py-3">
         <div className="flex min-w-0 items-center gap-2">
           <Button
@@ -151,8 +156,13 @@ export function ReaderPage({
             <Upload className="h-4 w-4" aria-hidden />
             <span>Import EPUB</span>
           </Button>
+          {persistenceFailed ? (
+            <p className="text-xs text-muted-foreground">
+              Reader draft persistence is unavailable in this browser context.
+            </p>
+          ) : null}
         </div>
       </section>
-    </main>
+    </div>
   );
 }

@@ -699,8 +699,9 @@ function Shell({
     if (view !== "reader" || !activeSession?.chatId) return null;
     return loadReaderStateResult(activeSession.chatId);
   }, [activeSession?.chatId, view]);
-  const activeReaderChatId = view === "reader" && isReaderSessionState(activeReaderLoadResult?.state)
-    ? activeSession?.chatId ?? null
+  const activeReaderChatId = view === "reader" && activeSession?.chatId
+    && (isReaderSessionState(activeReaderLoadResult?.state) || activeReaderLoadResult?.storageFailed)
+    ? activeSession.chatId
     : null;
   useEffect(() => {
     activeChatIdRef.current = activeChatId;
@@ -745,13 +746,21 @@ function Shell({
 
   useEffect(() => {
     if (view !== "reader" || !activeSession?.key || !activeSession.chatId) return;
+    if (activeReaderLoadResult?.storageFailed) return;
     if (isReaderSessionState(activeReaderLoadResult?.state)) return;
     navigate({
       view: "chat",
       activeKey: activeSession.key,
       settingsSection: "overview",
     }, { replace: true });
-  }, [activeReaderLoadResult?.state, activeSession?.chatId, activeSession?.key, navigate, view]);
+  }, [
+    activeReaderLoadResult?.state,
+    activeReaderLoadResult?.storageFailed,
+    activeSession?.chatId,
+    activeSession?.key,
+    navigate,
+    view,
+  ]);
 
   const refreshWorkspaces = useCallback(async () => {
     try {
@@ -1320,13 +1329,28 @@ function Shell({
     readerImportTicketRef.current = importTicket;
     const intendedChatId = activeReaderChatIdRef.current;
     const startedWithoutReaderTarget = intendedChatId == null;
+    const startedRouteHash = readShellRoute();
     try {
       const imported = await importEpubDocument(file);
       let targetChatId = intendedChatId;
       if (!targetChatId) {
-        const newChatId = await onCreateChat();
+        const currentRoute = readShellRoute();
+        const stillOnSameBlankReaderRoute =
+          startedWithoutReaderTarget
+          && startedRouteHash.view === "reader"
+          && startedRouteHash.activeKey == null
+          && currentRoute.view === "reader"
+          && currentRoute.activeKey == null;
+        if (!stillOnSameBlankReaderRoute) return;
+        const newChatId = await createChat(activeWorkspaceScope);
         if (!newChatId) return;
         targetChatId = newChatId;
+        if (activeWorkspaceScope) {
+          setWorkspaceOverrides((current) => ({
+            ...current,
+            [newChatId]: normalizeWorkspaceScope(activeWorkspaceScope),
+          }));
+        }
       }
       const nextState = {
         ...(readerState ?? blankReaderState()),
@@ -1358,7 +1382,7 @@ function Shell({
     } catch (error) {
       console.error("Failed to import EPUB", error);
     }
-  }, [navigate, onCreateChat, persistReaderState, readerState]);
+  }, [activeWorkspaceScope, createChat, navigate, persistReaderState, readerState]);
 
   const onRestart = useCallback(() => {
     const chatId = activeSession?.chatId ?? client.defaultChatId;
@@ -1699,7 +1723,7 @@ function Shell({
             onSelect={onSelectSearchResult}
           />
         <main
-          aria-label={view === "reader" && readerState ? "Reader page" : undefined}
+          aria-label={view === "reader" ? "Reader page" : undefined}
           className={cn(
             "relative flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background",
             showHostChrome && hostSidebarOpen && "border-l border-border/55",
