@@ -3,6 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ReaderStrip } from "@/components/thread/ReaderStrip";
 import { READER_STATE_STORAGE_PREFIX, type ReaderState } from "@/lib/reading";
+import { importEpubDocument } from "@/lib/readerEpub";
+
+vi.mock("@/lib/readerEpub", () => ({
+  importEpubDocument: vi.fn(),
+}));
+
+const importEpubDocumentMock = vi.mocked(importEpubDocument);
 
 describe("ReaderStrip", () => {
   beforeEach(() => {
@@ -164,5 +171,101 @@ describe("ReaderStrip", () => {
 
     expect(screen.getByRole("main", { name: /reader document/i })).toBeInTheDocument();
     expect(screen.getByRole("complementary", { name: /reader companion/i })).toBeInTheDocument();
+  });
+
+  it("renders reader mode in a fixed portal layer", async () => {
+    const savedState: ReaderState = {
+      version: 1,
+      documentId: "doc-saved",
+      title: "Saved essay",
+      rawText: "Saved intro.\n\nSaved focus.",
+      focusedParagraphIndex: 0,
+      selectedText: "",
+      note: "",
+      question: "",
+      mode: "slow_reading",
+      collapsed: true,
+      documentKind: "markdown",
+      readerModeOpen: false,
+    };
+    window.localStorage.setItem(
+      `${READER_STATE_STORAGE_PREFIX}chat-reader`,
+      JSON.stringify(savedState),
+    );
+    const host = document.createElement("section");
+    document.body.append(host);
+
+    render(<ReaderStrip chatId="chat-reader" onSendReading={vi.fn()} />, {
+      container: host,
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: /open reader/i }));
+    fireEvent.click(screen.getByRole("button", { name: /enter reader mode/i }));
+
+    const portal = screen.getByTestId("reader-mode-portal");
+    expect(portal).toBeInTheDocument();
+    expect(portal).toHaveClass("fixed");
+    expect(portal).toContainElement(screen.getByRole("main", { name: /reader document/i }));
+    expect(host).not.toContainElement(portal);
+  });
+
+  it("ignores deferred EPUB import results after switching chats", async () => {
+    let resolveImport:
+      | ((value: Awaited<ReturnType<typeof importEpubDocument>>) => void)
+      | null = null;
+    importEpubDocumentMock.mockReturnValue(new Promise((resolve) => {
+      resolveImport = resolve;
+    }));
+
+    const { rerender } = render(
+      <ReaderStrip
+        chatId="chat-a"
+        onSendReading={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /open reader/i }));
+    const importButton = screen.getByRole("button", { name: /import epub/i });
+    expect(importButton).toBeInTheDocument();
+    const fileInput = screen.getByLabelText(/import epub/i);
+    fireEvent.change(fileInput, {
+      target: { files: [new File(["epub"], "book.epub", { type: "application/epub+zip" })] },
+    });
+
+    rerender(
+      <ReaderStrip
+        chatId="chat-b"
+        onSendReading={vi.fn()}
+      />,
+    );
+
+    resolveImport?.({
+      documentId: "epub-doc",
+      title: "Chat A EPUB",
+      rawText: "Imported for A.",
+      documentKind: "epub",
+    });
+
+    await waitFor(() => expect(importEpubDocumentMock).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("button", { name: /open reader/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /open reader/i }));
+    expect(screen.getByLabelText(/reading title/i)).toHaveValue("");
+    expect(screen.getByLabelText(/reading text/i)).toHaveValue("");
+    expect(screen.queryByText("Chat A EPUB")).not.toBeInTheDocument();
+    expect(screen.queryByText(/unable to import epub/i)).not.toBeInTheDocument();
+  });
+
+  it("uses a real import button and disables it with the strip", () => {
+    render(
+      <ReaderStrip
+        chatId="chat-reader"
+        disabled
+        onSendReading={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /open reader/i }));
+
+    expect(screen.getByRole("button", { name: /import epub/i })).toBeDisabled();
+    expect(screen.getByLabelText(/import epub/i)).toBeDisabled();
   });
 });

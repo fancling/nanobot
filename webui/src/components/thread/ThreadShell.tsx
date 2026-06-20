@@ -289,6 +289,7 @@ export function ThreadShell({
   const [filePreviewPath, setFilePreviewPath] = useState<string | null>(null);
   const [filePreviewClosing, setFilePreviewClosing] = useState(false);
   const [filePreviewWidth, setFilePreviewWidth] = useState(FILE_PREVIEW_DEFAULT_WIDTH);
+  const [readerModeOpen, setReaderModeOpen] = useState(false);
   const shellRef = useRef<HTMLElement | null>(null);
   const filePreviewWidthRef = useRef(FILE_PREVIEW_DEFAULT_WIDTH);
   const filePreviewCloseTimerRef = useRef<number | null>(null);
@@ -645,6 +646,10 @@ export function ThreadShell({
     };
   }, [filePreviewPath]);
 
+  useEffect(() => {
+    setReaderModeOpen(false);
+  }, [chatId]);
+
   const handleForkFromMessage = useCallback(
     async (beforeUserIndex: number) => {
       if (!chatId || !onForkChat) return;
@@ -669,40 +674,43 @@ export function ThreadShell({
         <ReaderStrip
           chatId={chatId}
           disabled={isStreaming || booting}
+          onReaderModeOpenChange={setReaderModeOpen}
           onSendReading={handleReadingSend}
         />
       ) : null}
       {session ? (
-        <ThreadComposer
-          onSend={handleThreadSend}
-          disabled={!chatId}
-          isStreaming={isStreaming}
-          placeholder={
-            showHeroComposer
-              ? t("thread.composer.placeholderHero")
-              : t("thread.composer.placeholderThread")
-          }
-          modelLabel={modelBadgeLabel}
-          modelProvider={modelBadge.provider}
-          modelProviderLabel={modelBadge.providerLabel}
-          modelNeedsSetup={modelBadge.needsSetup}
-          onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
-          variant={showHeroComposer ? "hero" : "thread"}
-          slashCommands={slashCommands}
-          cliApps={cliApps}
-          mcpPresets={mcpPresets}
-          onStop={stop}
-          onTranscribeAudio={transcribeAudio}
-          runStartedAt={runStartedAt}
-          goalState={goalState}
-          workspaceScope={workspaceScope}
-          workspaceDefaultScope={workspaceDefaultScope}
-          workspaceControls={workspaceControls}
-          workspaceScopeDisabled={workspaceScopeDisabled}
-          workspaceError={workspaceError}
-          onWorkspaceScopeChange={onWorkspaceScopeChange}
-          pendingQueueKey={chatId}
-        />
+        !readerModeOpen ? (
+          <ThreadComposer
+            onSend={handleThreadSend}
+            disabled={!chatId}
+            isStreaming={isStreaming}
+            placeholder={
+              showHeroComposer
+                ? t("thread.composer.placeholderHero")
+                : t("thread.composer.placeholderThread")
+            }
+            modelLabel={modelBadgeLabel}
+            modelProvider={modelBadge.provider}
+            modelProviderLabel={modelBadge.providerLabel}
+            modelNeedsSetup={modelBadge.needsSetup}
+            onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
+            variant={showHeroComposer ? "hero" : "thread"}
+            slashCommands={slashCommands}
+            cliApps={cliApps}
+            mcpPresets={mcpPresets}
+            onStop={stop}
+            onTranscribeAudio={transcribeAudio}
+            runStartedAt={runStartedAt}
+            goalState={goalState}
+            workspaceScope={workspaceScope}
+            workspaceDefaultScope={workspaceDefaultScope}
+            workspaceControls={workspaceControls}
+            workspaceScopeDisabled={workspaceScopeDisabled}
+            workspaceError={workspaceError}
+            onWorkspaceScopeChange={onWorkspaceScopeChange}
+            pendingQueueKey={chatId}
+          />
+        ) : null
       ) : (
         <ThreadComposer
           onSend={handleWelcomeSend}

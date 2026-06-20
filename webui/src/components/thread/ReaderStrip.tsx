@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { BookOpen, ChevronDown, ChevronUp, Upload } from "lucide-react";
 
 import { ReaderMode } from "@/components/thread/reader/ReaderMode";
@@ -17,6 +18,7 @@ import type { ReadingSnapshot } from "@/lib/types";
 interface ReaderStripProps {
   chatId: string | null;
   disabled?: boolean;
+  onReaderModeOpenChange?: (open: boolean) => void;
   onSendReading: (content: string, snapshot: ReadingSnapshot) => void;
 }
 
@@ -46,8 +48,11 @@ function blankState(): ReaderState {
 export function ReaderStrip({
   chatId,
   disabled = false,
+  onReaderModeOpenChange,
   onSendReading,
 }: ReaderStripProps) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const latestChatIdRef = useRef<string | null>(chatId);
   const [reader, setReader] = useState<ReaderStripState>(() => ({
     chatId,
     ...(() => {
@@ -63,6 +68,8 @@ export function ReaderStrip({
   }));
   const [inlineError, setInlineError] = useState<string | null>(null);
   const state = reader.value;
+
+  latestChatIdRef.current = chatId;
 
   useEffect(() => {
     if (!chatId) {
@@ -97,6 +104,11 @@ export function ReaderStrip({
 
   const paragraphs = useMemo(() => parseReaderParagraphs(state.rawText), [state.rawText]);
 
+  useEffect(() => {
+    onReaderModeOpenChange?.(Boolean(state.readerModeOpen));
+    return () => onReaderModeOpenChange?.(false);
+  }, [onReaderModeOpenChange, state.readerModeOpen]);
+
   if (!chatId) return null;
 
   const updateState = (patch: Partial<ReaderState>) => {
@@ -106,41 +118,47 @@ export function ReaderStrip({
     }));
   };
 
-  if (state.readerModeOpen) {
-    return (
-      <ReaderMode
-        state={state}
-        disabled={disabled}
-        persistenceFailed={reader.persistenceFailed}
-        onChange={updateState}
-        onClose={() => updateState({ readerModeOpen: false })}
-        onSendReading={onSendReading}
-      />
-    );
-  }
-
   return (
-    <div className="border-t border-border/60 bg-background/95 px-4 py-3">
-      <Button
-        type="button"
-        variant="ghost"
-        className="flex h-auto w-full items-center justify-between rounded-lg border border-border/70 px-3 py-2 text-left"
-        aria-label={state.collapsed ? "Open reader" : "Collapse reader"}
-        aria-expanded={!state.collapsed}
-        onClick={() => updateState({ collapsed: !state.collapsed })}
-      >
-        <span className="flex min-w-0 items-center gap-2">
-          <BookOpen className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-          <span className="truncate text-sm font-medium">
-            {state.title.trim() || "Reader"}
+    <>
+      {state.readerModeOpen && typeof document !== "undefined"
+        ? createPortal(
+          <div
+            data-testid="reader-mode-portal"
+            className="fixed inset-0 z-50 flex min-h-screen bg-background"
+          >
+            <ReaderMode
+              state={state}
+              disabled={disabled}
+              persistenceFailed={reader.persistenceFailed}
+              onChange={updateState}
+              onClose={() => updateState({ readerModeOpen: false })}
+              onSendReading={onSendReading}
+            />
+          </div>,
+          document.body,
+        )
+        : null}
+      <div className="border-t border-border/60 bg-background/95 px-4 py-3">
+        <Button
+          type="button"
+          variant="ghost"
+          className="flex h-auto w-full items-center justify-between rounded-lg border border-border/70 px-3 py-2 text-left"
+          aria-label={state.collapsed ? "Open reader" : "Collapse reader"}
+          aria-expanded={!state.collapsed}
+          onClick={() => updateState({ collapsed: !state.collapsed })}
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            <BookOpen className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+            <span className="truncate text-sm font-medium">
+              {state.title.trim() || "Reader"}
+            </span>
           </span>
-        </span>
-        {state.collapsed ? (
-          <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-        ) : (
-          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-        )}
-      </Button>
+          {state.collapsed ? (
+            <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+          ) : (
+            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+          )}
+        </Button>
 
       {!state.collapsed ? (
         <div className="mt-3 space-y-3 rounded-lg border border-border/70 bg-muted/20 p-3">
@@ -172,42 +190,54 @@ export function ReaderStrip({
                 variant="outline"
                 size="sm"
                 className="gap-1.5"
-                asChild
+                disabled={disabled}
+                onClick={() => fileInputRef.current?.click()}
               >
-                <label>
-                  <Upload className="h-4 w-4" aria-hidden />
-                  <span>Import EPUB</span>
-                  <input
-                    aria-label="Import EPUB"
-                    type="file"
-                    accept=".epub,application/epub+zip"
-                    className="sr-only"
-                    onChange={async (event) => {
-                      const file = event.target.files?.[0];
-                      event.currentTarget.value = "";
-                      if (!file) return;
-                      try {
-                        const imported = await importEpubDocument(file);
-                        setInlineError(null);
-                        updateState({
-                          ...imported,
-                          focusedParagraphIndex: 0,
-                          selectedText: "",
-                          note: "",
-                          question: "",
-                          collapsed: false,
-                        });
-                      } catch (error) {
-                        setInlineError(
-                          error instanceof Error
-                            ? error.message
-                            : "Unable to import EPUB.",
-                        );
-                      }
-                    }}
-                  />
-                </label>
+                <Upload className="h-4 w-4" aria-hidden />
+                <span>Import EPUB</span>
               </Button>
+              <input
+                ref={fileInputRef}
+                aria-label="Import EPUB"
+                type="file"
+                accept=".epub,application/epub+zip"
+                className="sr-only"
+                disabled={disabled}
+                onChange={async (event) => {
+                  const file = event.target.files?.[0];
+                  const startingChatId = chatId;
+                  event.currentTarget.value = "";
+                  if (!file || !startingChatId) return;
+                  try {
+                    const imported = await importEpubDocument(file);
+                    if (latestChatIdRef.current !== startingChatId) return;
+                    setInlineError(null);
+                    setReader((current) => (
+                      current.chatId === startingChatId
+                        ? {
+                          ...current,
+                          value: {
+                            ...current.value,
+                            ...imported,
+                            focusedParagraphIndex: 0,
+                            selectedText: "",
+                            note: "",
+                            question: "",
+                            collapsed: false,
+                          },
+                        }
+                        : current
+                    ));
+                  } catch (error) {
+                    if (latestChatIdRef.current !== startingChatId) return;
+                    setInlineError(
+                      error instanceof Error
+                        ? error.message
+                        : "Unable to import EPUB.",
+                    );
+                  }
+                }}
+              />
               <Button
                 type="button"
                 className="gap-1.5"
@@ -229,6 +259,7 @@ export function ReaderStrip({
           ) : null}
         </div>
       ) : null}
-    </div>
+      </div>
+    </>
   );
 }

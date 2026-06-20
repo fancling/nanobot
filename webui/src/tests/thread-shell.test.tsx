@@ -1457,6 +1457,60 @@ describe("ThreadShell", () => {
     });
   });
 
+  it("lifts reader mode out of the composer dock and restores the composer on close", async () => {
+    const client = makeClient();
+    window.localStorage.clear();
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.includes("/api/sessions/")) {
+        return httpJson(transcriptFromSimpleMessages([
+          { role: "assistant", content: "Existing thread" },
+        ]));
+      }
+      if (url.includes("/api/settings")) {
+        return httpJson(modelSettings("gpt-test", "openai_codex"));
+      }
+      if (url.includes("/api/commands")) {
+        return httpJson({ commands: [] });
+      }
+      if (url.includes("/api/cli-apps")) {
+        return httpJson({ apps: [] });
+      }
+      if (url.includes("/api/mcp/presets")) {
+        return httpJson({ presets: [] });
+      }
+      return httpJson({});
+    }));
+
+    render(wrap(client, (
+      <ThreadShell
+        session={session("chat-reader-portal")}
+        title="Reading chat"
+        onToggleSidebar={() => {}}
+      />
+    )));
+
+    await screen.findByText("Existing thread");
+    fireEvent.click(await screen.findByRole("button", { name: /open reader/i }));
+    fireEvent.change(screen.getByLabelText(/reading text/i), {
+      target: { value: "Before.\n\nFocused passage." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /enter reader mode/i }));
+
+    const composerDock = screen.getByTestId("thread-composer-dock");
+    const portal = screen.getByTestId("reader-mode-portal");
+    expect(portal).toContainElement(screen.getByRole("main", { name: /reader document/i }));
+    expect(composerDock).not.toContainElement(portal);
+    expect(composerDock).not.toContainElement(screen.getByRole("main", { name: /reader document/i }));
+    expect(screen.queryByRole("textbox", { name: "Message input" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /close reader/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("reader-mode-portal")).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("textbox", { name: "Message input" })).toBeInTheDocument();
+  });
+
   it("does not render the reader strip in hero mode for an empty conversation", async () => {
     const client = makeClient();
     window.localStorage.clear();
