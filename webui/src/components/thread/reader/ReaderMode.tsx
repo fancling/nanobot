@@ -36,11 +36,13 @@ export function ReaderMode({
   const previousActiveSectionKeyRef = useRef<string | null>(null);
   const sectionIdentityChanged = previousActiveSectionKeyRef.current !== null
     && previousActiveSectionKeyRef.current !== activeSectionKey;
+  const activeFocusedParagraphIndex = sectionIdentityChanged ? 0 : state.focusedParagraphIndex;
   const activeState = activeSection
     ? {
         ...state,
         rawText: activeRawText,
         activeSectionIndex,
+        focusedParagraphIndex: activeFocusedParagraphIndex,
         ...(sectionIdentityChanged
           ? { selectedText: "", note: "", question: "" }
           : {}),
@@ -48,7 +50,7 @@ export function ReaderMode({
     : state;
   const paragraphCount = useMemo(() => parseReaderParagraphs(activeRawText).length, [activeRawText]);
   const focusedParagraphIndex = paragraphCount > 0
-    ? Math.max(0, Math.min(state.focusedParagraphIndex, paragraphCount - 1))
+    ? Math.max(0, Math.min(activeFocusedParagraphIndex, paragraphCount - 1))
     : 0;
   const canNavigateSections = sections.length > 1;
 
@@ -59,11 +61,21 @@ export function ReaderMode({
     }
     if (previousActiveSectionKeyRef.current !== activeSectionKey) {
       previousActiveSectionKeyRef.current = activeSectionKey;
-      if (state.selectedText || state.note || state.question) {
-        onChange({ selectedText: "", note: "", question: "" });
+      if (
+        state.focusedParagraphIndex !== 0
+        || state.selectedText
+        || state.note
+        || state.question
+      ) {
+        onChange({
+          focusedParagraphIndex: 0,
+          selectedText: "",
+          note: "",
+          question: "",
+        });
       }
     }
-  }, [activeSectionKey, onChange, state.note, state.question, state.selectedText]);
+  }, [activeSectionKey, onChange, state.focusedParagraphIndex, state.note, state.question, state.selectedText]);
 
   const handleSectionChange = (nextIndex: number) => {
     const nextSection = sections[nextIndex];

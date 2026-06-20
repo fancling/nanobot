@@ -139,12 +139,13 @@ describe("ReaderMode", () => {
           documentId: "book-1",
           rawText: "Full book opening.\n\nFull book middle.\n\nFull book ending.",
           activeSectionIndex: 0,
+          focusedParagraphIndex: 2,
           note: "Saved note for section A",
           question: "Saved question for section A",
           selectedText: "Selected in section A",
           sections: [
             { id: "s-1", title: "Opening", rawText: "Opening section.", paragraphCount: 1 },
-            { id: "s-2", title: "Middle", rawText: "Middle section.", paragraphCount: 1 },
+            { id: "s-2", title: "Middle", rawText: "Middle first.\n\nMiddle second.", paragraphCount: 2 },
           ],
         })}
         disabled={false}
@@ -165,13 +166,13 @@ describe("ReaderMode", () => {
           documentId: "book-1",
           rawText: "Full book opening.\n\nFull book middle.\n\nFull book ending.",
           activeSectionIndex: 1,
-          focusedParagraphIndex: 0,
+          focusedParagraphIndex: 2,
           selectedText: "Selected in section A",
           note: "Saved note for section A",
           question: "Saved question for section A",
           sections: [
             { id: "s-1", title: "Opening", rawText: "Opening section.", paragraphCount: 1 },
-            { id: "s-2", title: "Middle", rawText: "Middle section.", paragraphCount: 1 },
+            { id: "s-2", title: "Middle", rawText: "Middle first.\n\nMiddle second.", paragraphCount: 2 },
           ],
         })}
         disabled={false}
@@ -182,15 +183,20 @@ describe("ReaderMode", () => {
       />,
     );
 
-    expect(within(screen.getByRole("main", { name: /reader document/i })).getByText("Middle section.")).toBeInTheDocument();
+    expect(within(screen.getByRole("main", { name: /reader document/i })).getByText("Middle first.")).toBeInTheDocument();
     expect(
-      within(screen.getByRole("complementary", { name: /reader companion/i })).getByText("Middle section."),
+      within(screen.getByRole("complementary", { name: /reader companion/i })).getByText("Middle first."),
     ).toBeInTheDocument();
     expect(screen.queryByText(/Selected text/i)).not.toBeInTheDocument();
     expect(screen.getByLabelText(/Question about focused paragraph/i)).toHaveValue("");
     expect(screen.getByLabelText(/Note for this paragraph/i)).toHaveValue("");
     expect(screen.getByLabelText(/agent presence/i)).toHaveClass("opacity-80");
+    expect(screen.getByRole("button", { name: /Focus paragraph 1/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
     expect(onChange).toHaveBeenCalledWith({
+      focusedParagraphIndex: 0,
       selectedText: "",
       note: "",
       question: "",
@@ -212,7 +218,7 @@ describe("ReaderMode", () => {
       "聊聊这一段",
       expect.objectContaining({
         focus: expect.objectContaining({
-          focused_text: "Middle section.",
+          focused_text: "Middle first.",
         }),
       }),
     );
