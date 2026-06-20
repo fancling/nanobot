@@ -719,7 +719,7 @@ function Shell({
     return loadReaderStateResult(activeSession.chatId);
   }, [activeSession?.chatId, view]);
   const activeReaderChatId = view === "reader" && activeSession?.chatId
-    && (isReaderSessionState(activeReaderLoadResult?.state) || activeReaderLoadResult?.storageFailed)
+    && (isReaderSessionState(activeReaderLoadResult?.state ?? null) || activeReaderLoadResult?.storageFailed)
     ? activeSession.chatId
     : null;
   useEffect(() => {
@@ -772,7 +772,7 @@ function Shell({
   useEffect(() => {
     if (view !== "reader" || !activeSession?.key || !activeSession.chatId) return;
     if (activeReaderLoadResult?.storageFailed) return;
-    if (isReaderSessionState(activeReaderLoadResult?.state)) return;
+    if (isReaderSessionState(activeReaderLoadResult?.state ?? null)) return;
     navigate({
       view: "chat",
       activeKey: activeSession.key,
