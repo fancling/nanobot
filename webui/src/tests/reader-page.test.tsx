@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ReaderPage } from "@/components/reader/ReaderPage";
 import type { ReaderState } from "@/lib/reading";
@@ -26,14 +26,20 @@ function state(overrides: Partial<ReaderState> = {}): ReaderState {
 }
 
 describe("ReaderPage", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("renders an empty reader page without an active book", () => {
+    const inputClickSpy = vi.spyOn(HTMLInputElement.prototype, "click");
+    const onImportEpub = vi.fn();
     render(
       <ReaderPage
         state={null}
         disabled={false}
         persistenceFailed={false}
         onChange={vi.fn()}
-        onImportEpub={vi.fn()}
+        onImportEpub={onImportEpub}
         onSendReading={vi.fn()}
         onBackToChat={vi.fn()}
       />,
@@ -42,6 +48,16 @@ describe("ReaderPage", () => {
     expect(screen.getByRole("main", { name: /reader page/i })).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /Import EPUB/i })).toHaveLength(2);
     expect(screen.getByText("Import a book to start a reader session.")).toBeInTheDocument();
+
+    const importButtons = screen.getAllByRole("button", { name: /Import EPUB/i });
+    fireEvent.click(importButtons[0]);
+    fireEvent.click(importButtons[1]);
+    expect(inputClickSpy).toHaveBeenCalledTimes(2);
+
+    const input = screen.getByLabelText("Import EPUB") as HTMLInputElement;
+    const file = new File(["epub"], "sample.epub", { type: "application/epub+zip" });
+    fireEvent.change(input, { target: { files: [file] } });
+    expect(onImportEpub).toHaveBeenCalledWith(file);
   });
 
   it("sends reader questions from the active book", () => {
