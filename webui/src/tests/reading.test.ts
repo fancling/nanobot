@@ -4,6 +4,7 @@ import {
   buildReadingSnapshot,
   getActiveReaderText,
   isReaderSessionState,
+  loadReaderSessionChatIdSet,
   loadReaderState,
   loadReaderStateResult,
   parseReaderParagraphs,
@@ -339,6 +340,73 @@ describe("reading utilities", () => {
       { id: "section-0", title: "Chapter 1", rawText: "First chapter.", paragraphCount: 1 },
       { id: "section-1", title: "Chapter 2", rawText: "Second chapter.", paragraphCount: 1 },
     ]);
+  });
+
+  it("loads reader session chat ids with one storage scan", () => {
+    window.localStorage.setItem(
+      `${READER_STATE_STORAGE_PREFIX}chat-book`,
+      JSON.stringify({
+        version: 1,
+        documentId: "book-1",
+        title: "Book",
+        rawText: "First chapter.",
+        focusedParagraphIndex: 0,
+        selectedText: "",
+        note: "",
+        question: "",
+        mode: "slow_reading",
+        collapsed: false,
+        readerSession: true,
+      }),
+    );
+    window.localStorage.setItem(
+      `${READER_STATE_STORAGE_PREFIX}chat-plain`,
+      JSON.stringify({
+        version: 1,
+        documentId: "plain-1",
+        title: "Plain",
+        rawText: "Plain text.",
+        focusedParagraphIndex: 0,
+        selectedText: "",
+        note: "",
+        question: "",
+        mode: "slow_reading",
+        collapsed: false,
+        readerSession: false,
+      }),
+    );
+    window.localStorage.setItem("other-key", JSON.stringify({ hello: "world" }));
+
+    const getItemSpy = vi.spyOn(window.localStorage, "getItem");
+    const keySpy = vi.spyOn(window.localStorage, "key");
+
+    expect(loadReaderSessionChatIdSet()).toEqual(new Set(["chat-book"]));
+    expect(keySpy).toHaveBeenCalledTimes(window.localStorage.length);
+    expect(getItemSpy).toHaveBeenCalledTimes(2);
+    expect(getItemSpy).toHaveBeenCalledWith(`${READER_STATE_STORAGE_PREFIX}chat-book`);
+    expect(getItemSpy).toHaveBeenCalledWith(`${READER_STATE_STORAGE_PREFIX}chat-plain`);
+  });
+
+  it("returns an empty reader session chat id set when a reader entry is malformed", () => {
+    window.localStorage.setItem(
+      `${READER_STATE_STORAGE_PREFIX}chat-book`,
+      JSON.stringify({
+        version: 1,
+        documentId: "book-1",
+        title: "Book",
+        rawText: "First chapter.",
+        focusedParagraphIndex: 0,
+        selectedText: "",
+        note: "",
+        question: "",
+        mode: "slow_reading",
+        collapsed: false,
+        readerSession: true,
+      }),
+    );
+    window.localStorage.setItem(`${READER_STATE_STORAGE_PREFIX}chat-bad`, "{invalid-json");
+
+    expect(loadReaderSessionChatIdSet()).toEqual(new Set());
   });
 
   it("loads reader session metadata and uses the active section for snapshots", () => {

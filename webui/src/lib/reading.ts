@@ -127,6 +127,43 @@ function storageAvailable(): Storage | null {
   }
 }
 
+function parseReaderStatePayload(parsed: unknown): ReaderState | null {
+  if (typeof parsed !== "object" || parsed === null) {
+    return null;
+  }
+  const maybe = parsed as Record<string, unknown>;
+
+  if (maybe.version !== 1 || typeof maybe.rawText !== "string") {
+    return null;
+  }
+
+  const readerSession = maybe.readerSession === true;
+  const sourceFileName = normalizeText(maybe.sourceFileName);
+  const sections = normalizeReaderSections(maybe.sections);
+
+  return {
+    version: 1,
+    documentId:
+      typeof maybe.documentId === "string"
+        ? maybe.documentId
+        : "",
+    title: normalizeText(maybe.title),
+    rawText: maybe.rawText,
+    focusedParagraphIndex: normalizeInt(maybe.focusedParagraphIndex, 0),
+    selectedText: normalizeText(maybe.selectedText),
+    note: normalizeText(maybe.note),
+    question: normalizeText(maybe.question),
+    mode: maybe.mode === "slow_reading" ? maybe.mode : "slow_reading",
+    collapsed: maybe.collapsed === true,
+    documentKind: normalizeDocumentKind(maybe.documentKind),
+    readerModeOpen: maybe.readerModeOpen === true,
+    readerSession,
+    sourceFileName: sourceFileName || undefined,
+    sections,
+    activeSectionIndex: normalizeInt(maybe.activeSectionIndex, 0),
+  };
+}
+
 export function parseReaderParagraphs(rawText: string): ReaderParagraph[] {
   const normalized = rawText.replace(/\r\n/g, "\n");
   const blocks = normalized.split(/\n\s*\n/g)
@@ -247,42 +284,10 @@ export function loadReaderStateResult(chatId: string): ReaderStateLoadResult {
     const raw = storage.getItem(key);
     if (!raw) return { state: null, storageFailed: false };
 
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null) {
-      return { state: null, storageFailed: false };
-    }
-    const maybe = parsed as Record<string, unknown>;
-
-    if (maybe.version !== 1 || typeof maybe.rawText !== "string") {
-      return { state: null, storageFailed: false };
-    }
-
-    const readerSession = maybe.readerSession === true;
-    const sourceFileName = normalizeText(maybe.sourceFileName);
-    const sections = normalizeReaderSections(maybe.sections);
+    const state = parseReaderStatePayload(JSON.parse(raw));
 
     return {
-      state: {
-        version: 1,
-        documentId:
-          typeof maybe.documentId === "string"
-            ? maybe.documentId
-            : "",
-        title: normalizeText(maybe.title),
-        rawText: maybe.rawText,
-        focusedParagraphIndex: normalizeInt(maybe.focusedParagraphIndex, 0),
-        selectedText: normalizeText(maybe.selectedText),
-        note: normalizeText(maybe.note),
-        question: normalizeText(maybe.question),
-        mode: maybe.mode === "slow_reading" ? maybe.mode : "slow_reading",
-        collapsed: maybe.collapsed === true,
-        documentKind: normalizeDocumentKind(maybe.documentKind),
-        readerModeOpen: maybe.readerModeOpen === true,
-        readerSession,
-        sourceFileName: sourceFileName || undefined,
-        sections,
-        activeSectionIndex: normalizeInt(maybe.activeSectionIndex, 0),
-      },
+      state,
       storageFailed: false,
     };
   } catch {
@@ -292,4 +297,38 @@ export function loadReaderStateResult(chatId: string): ReaderStateLoadResult {
 
 export function loadReaderState(chatId: string): ReaderState | null {
   return loadReaderStateResult(chatId).state;
+}
+
+export function loadReaderSessionChatIdSet(): Set<string> {
+  const storage = storageAvailable();
+  if (!storage) return new Set();
+
+  const readerSessionChatIds = new Set<string>();
+
+  try {
+    for (let index = 0; index < storage.length; index += 1) {
+      const key = storage.key(index);
+      if (!key?.startsWith(READER_STATE_STORAGE_PREFIX)) {
+        continue;
+      }
+
+      const raw = storage.getItem(key);
+      if (!raw) {
+        continue;
+      }
+
+      const state = parseReaderStatePayload(JSON.parse(raw));
+      if (!state) {
+        return new Set();
+      }
+
+      if (state.readerSession === true) {
+        readerSessionChatIds.add(key.slice(READER_STATE_STORAGE_PREFIX.length));
+      }
+    }
+  } catch {
+    return new Set();
+  }
+
+  return readerSessionChatIds;
 }

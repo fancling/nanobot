@@ -36,7 +36,7 @@ import {
   visibleSessionsForGroup,
   type ChatGroupLabels,
 } from "@/lib/chat-groups";
-import { loadReaderState } from "@/lib/reading";
+import { loadReaderSessionChatIdSet } from "@/lib/reading";
 import { cn } from "@/lib/utils";
 import type { ChatSummary, SidebarDensity, SidebarSortMode } from "@/lib/types";
 
@@ -75,15 +75,8 @@ interface ChatListProps {
   emptyLabel?: string;
 }
 
-function loadReaderMarkerLabels(sessions: ChatSummary[]): Map<string, string> {
-  const labels = new Map<string, string>();
-  for (const session of sessions) {
-    const readerState = loadReaderState(session.chatId);
-    if (readerState?.readerSession !== true) continue;
-    const title = readerState.title.trim();
-    labels.set(session.chatId, title);
-  }
-  return labels;
+function loadReaderSessionMarkers(): Set<string> {
+  return loadReaderSessionChatIdSet();
 }
 
 export const ChatList = memo(function ChatList({
@@ -166,8 +159,8 @@ export const ChatList = memo(function ChatList({
     [limitedGroups],
   );
   const hiddenSessionCount = Math.max(0, totalSessionCount - visibleSessionCount);
-  const readerMarkerLabels = useMemo(
-    () => loadReaderMarkerLabels(sessions),
+  const readerSessionChatIds = useMemo(
+    () => loadReaderSessionMarkers(),
     [readerMarkerVersion, sessions],
   );
 
@@ -267,9 +260,8 @@ export const ChatList = memo(function ChatList({
                       : updated.has(s.chatId) && !active
                         ? "updated"
                         : null;
-                    const readerTitle = readerMarkerLabels.get(s.chatId);
-                    const isReaderSession = readerMarkerLabels.has(s.chatId);
-                    const readerLabel = readerTitle || title;
+                    const isReaderSession = readerSessionChatIds.has(s.chatId);
+                    const readerLabel = title;
                     return (
                       <li key={s.key} className="min-w-0">
                         <div

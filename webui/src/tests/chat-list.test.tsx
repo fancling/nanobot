@@ -249,6 +249,7 @@ describe("ChatList", () => {
   });
 
   it("refreshes reader markers only when the reader marker version changes", () => {
+    window.localStorage.clear();
     const sessions = [
       session({
         chatId: "book",
@@ -259,11 +260,8 @@ describe("ChatList", () => {
         title: "Plain",
       }),
     ];
-    let bookReaderState: reading.ReaderState | null = null;
-    const loadReaderStateSpy = vi.spyOn(reading, "loadReaderState");
-    loadReaderStateSpy.mockImplementation((chatId: string) => (
-      chatId === "book" ? bookReaderState : null
-    ));
+    const getItemSpy = vi.spyOn(window.localStorage, "getItem");
+    const keySpy = vi.spyOn(window.localStorage, "key");
 
     const props = {
       sessions,
@@ -278,9 +276,10 @@ describe("ChatList", () => {
 
     const { rerender } = render(<ChatList {...props} />);
     expect(screen.queryByLabelText("Reader session: Book")).not.toBeInTheDocument();
-    expect(loadReaderStateSpy).toHaveBeenCalledTimes(2);
+    expect(getItemSpy).toHaveBeenCalledTimes(0);
+    expect(keySpy).toHaveBeenCalledTimes(0);
 
-    bookReaderState = {
+    window.localStorage.setItem(`${reading.READER_STATE_STORAGE_PREFIX}book`, JSON.stringify({
       version: 1,
       documentId: "book-1",
       title: "Book",
@@ -293,11 +292,12 @@ describe("ChatList", () => {
       collapsed: false,
       documentKind: "epub",
       readerSession: true,
-    };
+    }));
     rerender(<ChatList {...props} activeKey="websocket:plain" />);
 
     expect(screen.queryByLabelText("Reader session: Book")).not.toBeInTheDocument();
-    expect(loadReaderStateSpy).toHaveBeenCalledTimes(2);
+    expect(getItemSpy).toHaveBeenCalledTimes(0);
+    expect(keySpy).toHaveBeenCalledTimes(0);
 
     rerender(<ChatList {...props} activeKey="websocket:plain" />);
     rerender(
@@ -309,8 +309,29 @@ describe("ChatList", () => {
     );
 
     expect(screen.getByLabelText("Reader session: Book")).toBeInTheDocument();
-    expect(loadReaderStateSpy).toHaveBeenCalledTimes(4);
-    loadReaderStateSpy.mockRestore();
+    expect(getItemSpy).toHaveBeenCalledTimes(1);
+    expect(getItemSpy).toHaveBeenCalledWith(`${reading.READER_STATE_STORAGE_PREFIX}book`);
+    expect(keySpy).toHaveBeenCalledTimes(window.localStorage.length);
+
+    rerender(
+      <ChatList
+        {...props}
+        activeKey="websocket:book"
+        readerMarkerVersion={1}
+      />,
+    );
+    expect(getItemSpy).toHaveBeenCalledTimes(1);
+    expect(keySpy).toHaveBeenCalledTimes(window.localStorage.length);
+
+    rerender(
+      <ChatList
+        {...props}
+        activeKey="websocket:book"
+        readerMarkerVersion={2}
+      />,
+    );
+    expect(getItemSpy).toHaveBeenCalledTimes(2);
+    expect(keySpy).toHaveBeenCalledTimes(window.localStorage.length * 2);
   });
 
   it("folds long default workspace chats and can show all", () => {
