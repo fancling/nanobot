@@ -12,6 +12,7 @@ import { importEpubDocument } from "@/lib/readerEpub";
 const epubMocks = vi.hoisted(() => ({
   bookLoad: vi.fn(),
   itemLoad: vi.fn(),
+  rawItemLoad: vi.fn(),
   itemUnload: vi.fn(),
   chapterMarkup: `<html><body>
     <h1>Chapter One</h1>
@@ -27,6 +28,11 @@ vi.mock("epubjs", () => ({
       metadata: Promise.resolve({ title: "Mock EPUB" }),
       spine: Promise.resolve({
         items: [
+          {
+            load: epubMocks.rawItemLoad,
+          },
+        ],
+        spineItems: [
           {
             load: epubMocks.itemLoad.mockImplementation(async (request: (url: string) => Promise<unknown>) => {
               await request("chapter-one.xhtml");
@@ -46,6 +52,7 @@ describe("reading utilities", () => {
     vi.restoreAllMocks();
     epubMocks.bookLoad.mockReset();
     epubMocks.itemLoad.mockReset();
+    epubMocks.rawItemLoad.mockReset();
     epubMocks.itemUnload.mockReset();
     epubMocks.chapterMarkup = `<html><body>
       <h1>Chapter One</h1>
@@ -277,6 +284,7 @@ describe("reading utilities", () => {
     expect(document.rawText).toBe(
       "Chapter One\n\nFirst EPUB paragraph.\n\nSecond EPUB paragraph.\n\nListed thought.",
     );
+    expect(epubMocks.rawItemLoad).not.toHaveBeenCalled();
     expect(epubMocks.itemLoad).toHaveBeenCalledOnce();
     expect(epubMocks.bookLoad).toHaveBeenCalledWith("chapter-one.xhtml");
     expect(epubMocks.itemUnload).toHaveBeenCalledOnce();

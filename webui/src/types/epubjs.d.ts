@@ -10,7 +10,10 @@ declare module "epubjs" {
     load: EpubRequestFunction;
     loaded: {
       metadata: Promise<{ title?: string | null }>;
-      spine: Promise<{ items?: EpubSpineItem[] }>;
+      spine: Promise<{
+        spineItems?: EpubSpineItem[];
+        items?: unknown[];
+      }>;
     };
   }
 

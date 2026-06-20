@@ -55,6 +55,10 @@ const BLOCK_BOUNDARY_ELEMENTS = new Set([
 ]);
 
 type LoadedEpubContent = Document | Element | { body?: { textContent?: string | null } };
+type EpubSection = {
+  load: (request: (...args: unknown[]) => Promise<unknown>) => Promise<LoadedEpubContent>;
+  unload?: () => void;
+};
 
 function isDocument(value: LoadedEpubContent): value is Document {
   return typeof value === "object" && value !== null && "nodeType" in value && value.nodeType === 9;
@@ -124,6 +128,21 @@ function textFromLoadedContent(content: Document | Element | { body?: { textCont
   return "";
 }
 
+function loadableSections(spine: { spineItems?: EpubSection[]; items?: unknown[] }): EpubSection[] {
+  if (Array.isArray(spine.spineItems)) {
+    return spine.spineItems;
+  }
+  if (!Array.isArray(spine.items)) {
+    return [];
+  }
+  return spine.items.filter((item): item is EpubSection => (
+    typeof item === "object"
+    && item !== null
+    && "load" in item
+    && typeof item.load === "function"
+  ));
+}
+
 export async function importEpubDocument(file: File): Promise<ImportedReaderDocument> {
   const buffer = await file.arrayBuffer();
   const book = ePub(buffer);
@@ -131,7 +150,7 @@ export async function importEpubDocument(file: File): Promise<ImportedReaderDocu
   const title = metadata.title?.trim() || file.name.replace(/\.epub$/i, "") || "Untitled EPUB";
   const parts: string[] = [];
 
-  for (const item of spine.items ?? []) {
+  for (const item of loadableSections(spine)) {
     try {
       const loaded = await item.load(book.load.bind(book));
       const text = normalizeWhitespace(textFromLoadedContent(loaded));
