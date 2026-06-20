@@ -41,6 +41,10 @@ export function ReaderCompanionRail({
     setNoteDraft(state.note);
   }, [state.documentId, state.note]);
 
+  useEffect(() => {
+    setSelectionQuestion("");
+  }, [state.selectedText]);
+
   const send = (question: string, selectedText = state.selectedText, note = noteDraft) => {
     if (!focused || disabled) return;
     const nextState: ReaderState = {

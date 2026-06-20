@@ -1,7 +1,9 @@
+import { useMemo } from "react";
+
 import { ReaderAgentPresence } from "@/components/thread/reader/ReaderAgentPresence";
 import { ReaderCompanionRail } from "@/components/thread/reader/ReaderCompanionRail";
 import { ReaderDocument } from "@/components/thread/reader/ReaderDocument";
-import type { ReaderState } from "@/lib/reading";
+import { parseReaderParagraphs, type ReaderState } from "@/lib/reading";
 import type { ReadingSnapshot } from "@/lib/types";
 
 interface ReaderModeProps {
@@ -21,12 +23,17 @@ export function ReaderMode({
   onClose,
   onSendReading,
 }: ReaderModeProps) {
+  const paragraphCount = useMemo(() => parseReaderParagraphs(state.rawText).length, [state.rawText]);
+  const focusedParagraphIndex = paragraphCount > 0
+    ? Math.max(0, Math.min(state.focusedParagraphIndex, paragraphCount - 1))
+    : 0;
+
   return (
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-background lg:flex-row">
       <ReaderDocument
         title={state.title}
         rawText={state.rawText}
-        focusedParagraphIndex={state.focusedParagraphIndex}
+        focusedParagraphIndex={focusedParagraphIndex}
         onFocusParagraph={(focusedParagraphIndex) => {
           onChange({ focusedParagraphIndex, selectedText: "" });
         }}

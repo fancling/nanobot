@@ -229,6 +229,10 @@ describe("ReaderMode", () => {
     expect(
       within(screen.getByRole("complementary", { name: /reader companion/i })).getByText("After."),
     ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Focus paragraph 3/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
     fireEvent.change(screen.getByLabelText(/Question about focused paragraph/i), {
       target: { value: "Why the ending?" },
     });
@@ -278,5 +282,48 @@ describe("ReaderMode", () => {
         }),
       );
     });
+  });
+
+  it("resets the selection question when selected text changes in the same document", () => {
+    const onSendReading = vi.fn();
+    const { rerender } = render(
+      <ReaderMode
+        state={state({ focusedParagraphIndex: 1, selectedText: "Selected A" })}
+        disabled={false}
+        persistenceFailed={false}
+        onChange={vi.fn()}
+        onClose={vi.fn()}
+        onSendReading={onSendReading}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText(/Question about selection/i), {
+      target: { value: "Question for selected A" },
+    });
+
+    rerender(
+      <ReaderMode
+        state={state({ focusedParagraphIndex: 1, selectedText: "Selected B" })}
+        disabled={false}
+        persistenceFailed={false}
+        onChange={vi.fn()}
+        onClose={vi.fn()}
+        onSendReading={onSendReading}
+      />,
+    );
+
+    expect(screen.getByLabelText(/Question about selection/i)).toHaveValue("");
+    fireEvent.click(screen.getByRole("button", { name: /Ask about selection/i }));
+
+    expect(onSendReading).not.toHaveBeenCalledWith("Question for selected A", expect.anything());
+    expect(onSendReading).toHaveBeenCalledWith(
+      "解释我选中的这段",
+      expect.objectContaining({
+        focus: expect.objectContaining({
+          selected_text: "Selected B",
+          current_question: "解释我选中的这段",
+        }),
+      }),
+    );
   });
 });
