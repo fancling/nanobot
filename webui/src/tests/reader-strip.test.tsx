@@ -173,6 +173,44 @@ describe("ReaderStrip", () => {
     expect(screen.getByRole("complementary", { name: /reader companion/i })).toBeInTheDocument();
   });
 
+  it("does not restore reader mode open state from saved reader state", async () => {
+    const storageKey = `${READER_STATE_STORAGE_PREFIX}chat-reader`;
+    const savedState: ReaderState = {
+      version: 1,
+      documentId: "doc-saved",
+      title: "Saved essay",
+      rawText: "Saved intro.\n\nSaved focus.",
+      focusedParagraphIndex: 0,
+      selectedText: "",
+      note: "",
+      question: "",
+      mode: "slow_reading",
+      collapsed: false,
+      documentKind: "markdown",
+      readerModeOpen: true,
+    };
+    window.localStorage.setItem(storageKey, JSON.stringify(savedState));
+    const onReaderModeOpenChange = vi.fn();
+
+    render(
+      <ReaderStrip
+        chatId="chat-reader"
+        onReaderModeOpenChange={onReaderModeOpenChange}
+        onSendReading={vi.fn()}
+      />,
+    );
+
+    await screen.findByDisplayValue("Saved essay");
+    expect(screen.queryByTestId("reader-mode-portal")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: /reading text/i })).toHaveValue(
+      "Saved intro.\n\nSaved focus.",
+    );
+    await waitFor(() => {
+      expect(window.localStorage.getItem(storageKey)).toContain("\"readerModeOpen\":false");
+    });
+    expect(onReaderModeOpenChange).toHaveBeenLastCalledWith(false);
+  });
+
   it("renders reader mode in a fixed portal layer", async () => {
     const savedState: ReaderState = {
       version: 1,

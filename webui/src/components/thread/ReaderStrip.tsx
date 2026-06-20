@@ -45,6 +45,13 @@ function blankState(): ReaderState {
   };
 }
 
+function transientReaderState(state: ReaderState): ReaderState {
+  return {
+    ...state,
+    readerModeOpen: false,
+  };
+}
+
 export function ReaderStrip({
   chatId,
   disabled = false,
@@ -62,7 +69,7 @@ export function ReaderStrip({
       const loaded = loadReaderStateResult(chatId);
       return {
         persistenceFailed: loaded.storageFailed,
-        value: loaded.state ?? blankState(),
+        value: loaded.state ? transientReaderState(loaded.state) : blankState(),
       };
     })(),
   }));
@@ -85,14 +92,14 @@ export function ReaderStrip({
     setReader({
       chatId,
       persistenceFailed: loaded.storageFailed,
-      value: loaded.state ?? blankState(),
+      value: loaded.state ? transientReaderState(loaded.state) : blankState(),
     });
     setInlineError(null);
   }, [chatId]);
 
   useEffect(() => {
     if (!chatId || reader.chatId !== chatId) return;
-    const persisted = saveReaderState(chatId, state);
+    const persisted = saveReaderState(chatId, transientReaderState(state));
     if (!persisted && !reader.persistenceFailed) {
       setReader((current) => (
         current.chatId === chatId

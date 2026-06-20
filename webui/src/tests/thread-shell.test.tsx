@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { CLI_APPS_CHANGED_EVENT } from "@/lib/cli-app-events";
+import { READER_STATE_STORAGE_PREFIX, type ReaderState } from "@/lib/reading";
 import { ClientProvider } from "@/providers/ClientProvider";
 import type { CliAppsPayload, SettingsPayload, UIMessage } from "@/lib/types";
 
@@ -1509,6 +1510,66 @@ describe("ThreadShell", () => {
       expect(screen.queryByTestId("reader-mode-portal")).not.toBeInTheDocument();
     });
     expect(screen.getByRole("textbox", { name: "Message input" })).toBeInTheDocument();
+  });
+
+  it("does not suppress the composer from persisted reader mode open state", async () => {
+    const client = makeClient();
+    window.localStorage.clear();
+    const savedState: ReaderState = {
+      version: 1,
+      documentId: "doc-saved",
+      title: "Saved essay",
+      rawText: "Before.\n\nFocused passage.",
+      focusedParagraphIndex: 0,
+      selectedText: "",
+      note: "",
+      question: "",
+      mode: "slow_reading",
+      collapsed: false,
+      documentKind: "markdown",
+      readerModeOpen: true,
+    };
+    window.localStorage.setItem(
+      `${READER_STATE_STORAGE_PREFIX}chat-reader-stale-open`,
+      JSON.stringify(savedState),
+    );
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.includes("/api/sessions/")) {
+        return httpJson(transcriptFromSimpleMessages([
+          { role: "assistant", content: "Existing thread" },
+        ]));
+      }
+      if (url.includes("/api/settings")) {
+        return httpJson(modelSettings("gpt-test", "openai_codex"));
+      }
+      if (url.includes("/api/commands")) {
+        return httpJson({ commands: [] });
+      }
+      if (url.includes("/api/cli-apps")) {
+        return httpJson({ apps: [] });
+      }
+      if (url.includes("/api/mcp/presets")) {
+        return httpJson({ presets: [] });
+      }
+      return httpJson({});
+    }));
+
+    render(wrap(client, (
+      <ThreadShell
+        session={session("chat-reader-stale-open")}
+        title="Reading chat"
+        onToggleSidebar={() => {}}
+      />
+    )));
+
+    await screen.findByText("Existing thread");
+    expect(screen.queryByTestId("reader-mode-portal")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Message input" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /enter reader mode/i }));
+
+    expect(screen.getByTestId("reader-mode-portal")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Message input" })).not.toBeInTheDocument();
   });
 
   it("does not render the reader strip in hero mode for an empty conversation", async () => {
