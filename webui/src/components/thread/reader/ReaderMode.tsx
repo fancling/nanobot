@@ -49,6 +49,8 @@ export function ReaderMode({
       rawText: nextSection.rawText,
       focusedParagraphIndex: 0,
       selectedText: "",
+      note: "",
+      question: "",
     });
   };
 

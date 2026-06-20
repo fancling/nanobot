@@ -51,6 +51,8 @@ describe("ReaderMode", () => {
         ".overflow-y-auto",
       ),
     ).toHaveClass("flex-1", "overflow-y-auto");
+    expect(screen.queryByRole("button", { name: /Previous section/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Next section/i })).not.toBeInTheDocument();
     expect(screen.getByLabelText(/agent presence/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Focus paragraph 2/i })).toBeInTheDocument();
   });
@@ -84,6 +86,8 @@ describe("ReaderMode", () => {
       rawText: "Opening.",
       focusedParagraphIndex: 0,
       selectedText: "",
+      note: "",
+      question: "",
     });
 
     fireEvent.click(screen.getByRole("button", { name: /Next section/i }));
@@ -92,6 +96,8 @@ describe("ReaderMode", () => {
       rawText: "Ending.",
       focusedParagraphIndex: 0,
       selectedText: "",
+      note: "",
+      question: "",
     });
   });
 
@@ -132,6 +138,9 @@ describe("ReaderMode", () => {
           documentId: "book-1",
           rawText: "Full book opening.\n\nFull book middle.\n\nFull book ending.",
           activeSectionIndex: 0,
+          note: "Saved note for section A",
+          question: "Saved question for section A",
+          selectedText: "Selected in section A",
           sections: [
             { id: "s-1", title: "Opening", rawText: "Opening section.", paragraphCount: 1 },
             { id: "s-2", title: "Middle", rawText: "Middle section.", paragraphCount: 1 },
@@ -145,6 +154,10 @@ describe("ReaderMode", () => {
       />,
     );
 
+    expect(screen.getByLabelText(/Question about focused paragraph/i)).toHaveValue("");
+    expect(screen.getByLabelText(/Note for this paragraph/i)).toHaveValue("Saved note for section A");
+    expect(screen.getByLabelText(/agent presence/i)).toHaveClass("opacity-100");
+
     fireEvent.change(screen.getByLabelText(/Question about focused paragraph/i), {
       target: { value: "Draft for section A" },
     });
@@ -155,6 +168,7 @@ describe("ReaderMode", () => {
           documentId: "book-1",
           rawText: "Full book opening.\n\nFull book middle.\n\nFull book ending.",
           activeSectionIndex: 1,
+          selectedText: "",
           focusedParagraphIndex: 0,
           sections: [
             { id: "s-1", title: "Opening", rawText: "Opening section.", paragraphCount: 1 },
@@ -173,10 +187,22 @@ describe("ReaderMode", () => {
     expect(
       within(screen.getByRole("complementary", { name: /reader companion/i })).getByText("Middle section."),
     ).toBeInTheDocument();
+    expect(screen.getByLabelText(/Question about focused paragraph/i)).toHaveValue("");
+    expect(screen.getByLabelText(/Note for this paragraph/i)).toHaveValue("");
+    expect(screen.getByLabelText(/agent presence/i)).toHaveClass("opacity-80");
 
     fireEvent.click(screen.getByRole("button", { name: /Ask about paragraph/i }));
 
     expect(onSendReading).not.toHaveBeenCalledWith("Draft for section A", expect.anything());
+    expect(onSendReading).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        focus: expect.objectContaining({
+          current_question: "Saved question for section A",
+          user_note: "Saved note for section A",
+        }),
+      }),
+    );
     expect(onSendReading).toHaveBeenCalledWith(
       "聊聊这一段",
       expect.objectContaining({
