@@ -165,6 +165,23 @@ vi.mock("@/hooks/useSessions", async (importOriginal) => {
           ]);
           return chatId;
         },
+        createChatGuarded: async (scope: unknown, shouldCommit: () => boolean) => {
+          const chatId = await createChatSpy(scope);
+          if (!shouldCommit()) return null;
+          setSessions((prev: ChatSummary[]) => [
+            ...prev,
+            {
+              key: `websocket:${chatId}`,
+              channel: "websocket",
+              chatId,
+              createdAt: "2026-04-16T10:00:00Z",
+              updatedAt: "2026-04-16T10:00:00Z",
+              title: chatId,
+              preview: "",
+            },
+          ]);
+          return chatId;
+        },
         forkChat: async () => "fork-chat",
         getSessionAutomations: getSessionAutomationsSpy,
         deleteChat: async (key: string, options?: { deleteAutomations?: boolean }) => {
@@ -759,6 +776,7 @@ describe("App layout", () => {
     expect(window.location.hash).toBe(`#/chat/${encodeURIComponent("websocket:chat-a")}`);
     expect(window.localStorage.getItem(`${READER_STATE_STORAGE_PREFIX}late-book-chat`)).toBeNull();
     expect(screen.queryByText("Book")).not.toBeInTheDocument();
+    expect(within(sidebar).queryByRole("button", { name: "late-book-chat" })).not.toBeInTheDocument();
   });
 
   it("falls back to the blank Reader page for missing reader deep links", async () => {

@@ -262,6 +262,27 @@ describe("useSessions", () => {
     expect(result.current.sessions[0]?.workspaceScope).toEqual(workspaceScope);
   });
 
+  it("skips optimistic insertion when guarded chat creation resolves stale", async () => {
+    vi.mocked(api.listSessions).mockResolvedValue([]);
+    const client = fakeClient();
+    client.newChat.mockResolvedValue("chat-stale");
+
+    const { result } = renderHook(() => useSessions(), {
+      wrapper: wrap(client),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let createdChatId: string | null = "sentinel";
+    await act(async () => {
+      createdChatId = await result.current.createChatGuarded(undefined, () => false);
+    });
+
+    expect(client.newChat).toHaveBeenCalledWith(60_000, undefined);
+    expect(createdChatId).toBeNull();
+    expect(result.current.sessions).toEqual([]);
+  });
+
   it("passes through WebUI transcript user media as images and media", async () => {
     vi.mocked(api.fetchWebuiThread).mockResolvedValue({
       schemaVersion: 3,

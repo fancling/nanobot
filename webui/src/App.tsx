@@ -581,6 +581,7 @@ function Shell({
     loading,
     refresh,
     createChat,
+    createChatGuarded,
     forkChat,
     deleteChat,
     getSessionAutomations,
@@ -1358,7 +1359,10 @@ function Shell({
       let targetChatId = intendedChatId;
       if (!targetChatId) {
         if (!canContinueBlankReaderImport()) return;
-        const newChatId = await createChat(activeWorkspaceScope);
+        const newChatId = await createChatGuarded(
+          activeWorkspaceScope,
+          canContinueBlankReaderImport,
+        );
         if (!newChatId) return;
         if (!canContinueBlankReaderImport()) return;
         targetChatId = newChatId;
@@ -1399,7 +1403,7 @@ function Shell({
     } catch (error) {
       console.error("Failed to import EPUB", error);
     }
-  }, [activeWorkspaceScope, createChat, navigate, persistReaderState, readerState]);
+  }, [activeWorkspaceScope, createChatGuarded, navigate, persistReaderState, readerState]);
 
   const onRestart = useCallback(() => {
     const chatId = activeSession?.chatId ?? client.defaultChatId;

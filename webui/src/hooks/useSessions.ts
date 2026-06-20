@@ -49,6 +49,10 @@ export function useSessions(): {
   error: string | null;
   refresh: () => Promise<void>;
   createChat: (workspaceScope?: WorkspaceScopePayload | null) => Promise<string>;
+  createChatGuarded: (
+    workspaceScope: WorkspaceScopePayload | null | undefined,
+    shouldCommit: () => boolean,
+  ) => Promise<string | null>;
   forkChat: (sourceChatId: string, beforeUserIndex: number, title?: string) => Promise<string>;
   deleteChat: (
     key: string,
@@ -100,8 +104,10 @@ export function useSessions(): {
     });
   }, [client, refresh]);
 
-  const createChat = useCallback(async (workspaceScope?: WorkspaceScopePayload | null): Promise<string> => {
-    const chatId = await client.newChat(CHAT_CREATE_TIMEOUT_MS, workspaceScope);
+  const insertOptimisticSession = useCallback((
+    chatId: string,
+    workspaceScope?: WorkspaceScopePayload | null,
+  ) => {
     const key = `websocket:${chatId}`;
     optimisticKeysRef.current.add(key);
     // Optimistic insert; a subsequent refresh will replace it with the
@@ -119,8 +125,23 @@ export function useSessions(): {
       },
       ...prev.filter((s) => s.key !== key),
     ]);
+  }, []);
+
+  const createChatGuarded = useCallback(async (
+    workspaceScope: WorkspaceScopePayload | null | undefined,
+    shouldCommit: () => boolean,
+  ): Promise<string | null> => {
+    const chatId = await client.newChat(CHAT_CREATE_TIMEOUT_MS, workspaceScope);
+    if (!shouldCommit()) return null;
+    insertOptimisticSession(chatId, workspaceScope);
     return chatId;
-  }, [client]);
+  }, [client, insertOptimisticSession]);
+
+  const createChat = useCallback(async (workspaceScope?: WorkspaceScopePayload | null): Promise<string> => {
+    const chatId = await client.newChat(CHAT_CREATE_TIMEOUT_MS, workspaceScope);
+    insertOptimisticSession(chatId, workspaceScope);
+    return chatId;
+  }, [client, insertOptimisticSession]);
 
   const forkChat = useCallback(async (
     sourceChatId: string,
@@ -173,6 +194,7 @@ export function useSessions(): {
     error,
     refresh,
     createChat,
+    createChatGuarded,
     forkChat,
     deleteChat,
     getSessionAutomations,
