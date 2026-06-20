@@ -7,6 +7,27 @@ import {
   READER_STATE_STORAGE_PREFIX,
   saveReaderState,
 } from "@/lib/reading";
+import { importEpubDocument } from "@/lib/readerEpub";
+
+vi.mock("epubjs", () => ({
+  default: vi.fn(() => ({
+    loaded: {
+      metadata: Promise.resolve({ title: "Mock EPUB" }),
+      spine: Promise.resolve({
+        items: [
+          {
+            load: vi.fn(async () => ({
+              body: {
+                textContent: "First EPUB paragraph.\n\nSecond EPUB paragraph.",
+              },
+            })),
+            unload: vi.fn(),
+          },
+        ],
+      }),
+    },
+  })),
+}));
 
 describe("reading utilities", () => {
   beforeEach(() => {
@@ -225,5 +246,16 @@ describe("reading utilities", () => {
 
     expect(state?.documentKind).toBe("markdown");
     expect(state?.readerModeOpen).toBe(false);
+  });
+
+  it("imports EPUB files into the shared reader document model", async () => {
+    const file = new File(["epub bytes"], "book.epub", { type: "application/epub+zip" });
+
+    const document = await importEpubDocument(file);
+
+    expect(document.title).toBe("Mock EPUB");
+    expect(document.documentKind).toBe("epub");
+    expect(document.rawText).toContain("First EPUB paragraph.");
+    expect(document.rawText).toContain("Second EPUB paragraph.");
   });
 });
