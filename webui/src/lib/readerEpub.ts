@@ -178,10 +178,12 @@ export async function importEpubDocument(file: File): Promise<ImportedReaderDocu
     throw new Error("No readable text found in EPUB.");
   }
 
+  const rawText = normalizeWhitespace(sections.map((section) => section.rawText).join("\n\n"));
+
   return {
     documentId: crypto.randomUUID(),
     title,
-    rawText: sections[0].rawText,
+    rawText,
     documentKind: "epub",
     readerSession: true,
     sourceFileName: file.name,

@@ -5,6 +5,7 @@ import {
   getActiveReaderText,
   isReaderSessionState,
   loadReaderState,
+  loadReaderStateResult,
   parseReaderParagraphs,
   READER_STATE_STORAGE_PREFIX,
   saveReaderState,
@@ -295,6 +296,51 @@ describe("reading utilities", () => {
     expect(state?.readerModeOpen).toBe(false);
   });
 
+  it("restores reader session metadata from localStorage", () => {
+    const key = `${READER_STATE_STORAGE_PREFIX}chat-session`;
+    window.localStorage.setItem(
+      key,
+      JSON.stringify({
+        version: 1,
+        documentId: "book-1",
+        title: "Book",
+        rawText: "First chapter.\n\nSecond chapter.",
+        focusedParagraphIndex: 0,
+        selectedText: "",
+        note: "",
+        question: "",
+        mode: "slow_reading",
+        collapsed: false,
+        documentKind: "epub",
+        readerModeOpen: true,
+        readerSession: true,
+        sourceFileName: "book.epub",
+        activeSectionIndex: 1,
+        sections: [
+          { id: "section-0", title: "Chapter 1", rawText: "First chapter.", paragraphCount: 1 },
+          {
+            id: "section-1",
+            title: "Chapter 2",
+            rawText: "Second chapter.",
+            paragraphCount: 1,
+          },
+        ],
+      }),
+    );
+
+    const result = loadReaderStateResult("chat-session");
+
+    expect(result.storageFailed).toBe(false);
+    expect(result.state).not.toBeNull();
+    expect(result.state?.readerSession).toBe(true);
+    expect(result.state?.sourceFileName).toBe("book.epub");
+    expect(result.state?.activeSectionIndex).toBe(1);
+    expect(result.state?.sections).toEqual([
+      { id: "section-0", title: "Chapter 1", rawText: "First chapter.", paragraphCount: 1 },
+      { id: "section-1", title: "Chapter 2", rawText: "Second chapter.", paragraphCount: 1 },
+    ]);
+  });
+
   it("loads reader session metadata and uses the active section for snapshots", () => {
     const state = {
       version: 1,
@@ -362,13 +408,47 @@ describe("reading utilities", () => {
         paragraphCount: 2,
       },
     ]);
-    expect(document.rawText).toBe("First chapter.");
+    expect(document.rawText).toBe("First chapter.\n\nSecond chapter.\n\nMore text.");
     expect(epubMocks.rawItemLoad).not.toHaveBeenCalled();
     expect(epubMocks.itemLoad).toHaveBeenCalledOnce();
     expect(epubMocks.secondItemLoad).toHaveBeenCalledOnce();
     expect(epubMocks.bookLoad).toHaveBeenCalledWith("chapter-one.xhtml");
     expect(epubMocks.itemUnload).toHaveBeenCalledOnce();
     expect(epubMocks.secondItemUnload).toHaveBeenCalledOnce();
+  });
+
+  it("skips empty EPUB spine items and keeps the remaining content", async () => {
+    epubMocks.chapterMarkup = `<html><body>
+      <div>   </div>
+    </body></html>`;
+    epubMocks.secondChapterMarkup = `<html><body>
+      <p>Second chapter.</p><p>More text.</p>
+    </body></html>`;
+    const file = new File(["epub bytes"], "book.epub", { type: "application/epub+zip" });
+
+    const document = await importEpubDocument(file);
+
+    expect(document.sections).toEqual([
+      {
+        id: "section-0",
+        title: "Chapter 1",
+        rawText: "Second chapter.\n\nMore text.",
+        paragraphCount: 2,
+      },
+    ]);
+    expect(document.rawText).toBe("Second chapter.\n\nMore text.");
+  });
+
+  it("throws when every EPUB spine item is empty", async () => {
+    epubMocks.chapterMarkup = `<html><body>
+      <div>   </div>
+    </body></html>`;
+    epubMocks.secondChapterMarkup = `<html><body>
+      <div>\n\t</div>
+    </body></html>`;
+    const file = new File(["epub bytes"], "book.epub", { type: "application/epub+zip" });
+
+    await expect(importEpubDocument(file)).rejects.toThrow("No readable text found in EPUB.");
   });
 
   it("preserves EPUB paragraph breaks between adjacent div blocks", async () => {
