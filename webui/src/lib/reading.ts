@@ -283,8 +283,14 @@ export function loadReaderStateResult(chatId: string): ReaderStateLoadResult {
   try {
     const raw = storage.getItem(key);
     if (!raw) return { state: null, storageFailed: false };
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return { state: null, storageFailed: false };
+    }
 
-    const state = parseReaderStatePayload(JSON.parse(raw));
+    const state = parseReaderStatePayload(parsed);
 
     return {
       state,

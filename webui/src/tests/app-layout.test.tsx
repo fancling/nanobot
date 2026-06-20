@@ -532,7 +532,7 @@ describe("App layout", () => {
         preview: "Plain",
       },
     ];
-    const loadReaderStateSpy = vi.spyOn(reading, "loadReaderState");
+    const loadReaderSessionChatIdSetSpy = vi.spyOn(reading, "loadReaderSessionChatIdSet");
 
     render(<App />);
 
@@ -541,7 +541,7 @@ describe("App layout", () => {
     fireEvent.click(await within(sidebar).findByRole("button", { name: /^Book$/ }));
     const readerMain = await screen.findByRole("main", { name: /reader page/i });
 
-    const readsAfterOpen = loadReaderStateSpy.mock.calls.length;
+    const scansAfterOpen = loadReaderSessionChatIdSetSpy.mock.calls.length;
 
     fireEvent.click(within(readerMain).getByRole("button", { name: "Focus paragraph 2" }));
     await waitFor(() => {
@@ -553,7 +553,7 @@ describe("App layout", () => {
         question: "",
       });
     });
-    expect(loadReaderStateSpy).toHaveBeenCalledTimes(readsAfterOpen);
+    expect(loadReaderSessionChatIdSetSpy).toHaveBeenCalledTimes(scansAfterOpen);
 
     fireEvent.change(within(readerMain).getByLabelText("Note for this paragraph"), {
       target: { value: "Reader note" },
@@ -568,7 +568,7 @@ describe("App layout", () => {
         question: "聊聊这一段",
       });
     });
-    expect(loadReaderStateSpy).toHaveBeenCalledTimes(readsAfterOpen);
+    expect(loadReaderSessionChatIdSetSpy).toHaveBeenCalledTimes(scansAfterOpen);
 
     fireEvent.change(within(readerMain).getByLabelText("Question about focused paragraph"), {
       target: { value: "Why this paragraph?" },
@@ -583,9 +583,9 @@ describe("App layout", () => {
         question: "Why this paragraph?",
       });
     });
-    expect(loadReaderStateSpy).toHaveBeenCalledTimes(readsAfterOpen);
+    expect(loadReaderSessionChatIdSetSpy).toHaveBeenCalledTimes(scansAfterOpen);
 
-    loadReaderStateSpy.mockRestore();
+    loadReaderSessionChatIdSetSpy.mockRestore();
   });
 
   it("keeps the sidebar session list rendering when reader storage reads are blocked", async () => {
@@ -657,6 +657,36 @@ describe("App layout", () => {
       expect(window.location.hash).toBe(`#/chat/${encodeURIComponent("websocket:chat-a")}`),
     );
     expect(screen.queryByRole("main", { name: /reader page/i })).not.toBeInTheDocument();
+  });
+
+  it("redirects malformed reader deep links back to the normal chat route", async () => {
+    mockSessions = [
+      {
+        key: "websocket:chat-a",
+        channel: "websocket",
+        chatId: "chat-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        preview: "Normal chat",
+      },
+    ];
+    window.localStorage.setItem(`${READER_STATE_STORAGE_PREFIX}chat-a`, "{invalid-json");
+    window.history.replaceState(
+      null,
+      "",
+      `/#/reader?chat=${encodeURIComponent("websocket:chat-a")}`,
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(window.location.hash).toBe(`#/chat/${encodeURIComponent("websocket:chat-a")}`),
+    );
+    expect(screen.queryByRole("main", { name: /reader page/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Reader draft persistence is unavailable in this browser context."),
+    ).not.toBeInTheDocument();
   });
 
   it("does not overwrite the visible reader state when an import resolves after switching sessions", async () => {

@@ -342,6 +342,36 @@ describe("reading utilities", () => {
     ]);
   });
 
+  it("treats malformed reader payloads as invalid state without a storage failure", () => {
+    window.localStorage.setItem(`${READER_STATE_STORAGE_PREFIX}chat-session`, "{invalid-json");
+
+    expect(loadReaderStateResult("chat-session")).toEqual({
+      state: null,
+      storageFailed: false,
+    });
+  });
+
+  it("treats blocked storage access as a storage failure", () => {
+    const localStorageDescriptor = Object.getOwnPropertyDescriptor(window, "localStorage");
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      get() {
+        throw new Error("storage blocked");
+      },
+    });
+
+    try {
+      expect(loadReaderStateResult("chat-session")).toEqual({
+        state: null,
+        storageFailed: true,
+      });
+    } finally {
+      if (localStorageDescriptor) {
+        Object.defineProperty(window, "localStorage", localStorageDescriptor);
+      }
+    }
+  });
+
   it("loads reader session chat ids with one storage scan", () => {
     window.localStorage.setItem(
       `${READER_STATE_STORAGE_PREFIX}chat-book`,
