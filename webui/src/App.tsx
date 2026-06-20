@@ -115,6 +115,10 @@ function shellViewForSettingsSection(section: SettingsSectionKey): ShellView {
   return "settings";
 }
 
+function isExactBlankReaderRoute(route: ShellRoute): boolean {
+  return route.view === "reader" && route.activeKey == null;
+}
+
 function readShellRoute(): ShellRoute {
   if (typeof window === "undefined") return defaultShellRoute();
   const hash = window.location.hash.startsWith("#")
@@ -628,6 +632,8 @@ function Shell({
   const activeChatIdRef = useRef<string | null>(null);
   const activeReaderChatIdRef = useRef<string | null>(null);
   const readerImportTicketRef = useRef(0);
+  const blankReaderImportTokenRef = useRef(0);
+  const activeBlankReaderImportTokenRef = useRef<number | null>(null);
   const hostSidebarPreviewCloseTimerRef = useRef<number | null>(null);
   const effectiveRuntimeSurface =
     settingsSnapshot?.surface ?? settingsSnapshot?.runtime_surface ?? runtimeSurface;
@@ -733,6 +739,12 @@ function Shell({
   useEffect(() => {
     activeReaderChatIdRef.current = activeReaderChatId;
   }, [activeReaderChatId]);
+
+  useEffect(() => {
+    if (!isExactBlankReaderRoute({ view, activeKey, settingsSection: settingsInitialSection })) {
+      activeBlankReaderImportTokenRef.current = null;
+    }
+  }, [activeKey, settingsInitialSection, view]);
 
   useEffect(() => {
     if (!activeReaderChatId) {
@@ -1330,21 +1342,25 @@ function Shell({
     const intendedChatId = activeReaderChatIdRef.current;
     const startedWithoutReaderTarget = intendedChatId == null;
     const startedRouteHash = readShellRoute();
-    const isExactBlankReaderRoute = (route: ReturnType<typeof readShellRoute>) =>
-      route.view === "reader" && route.activeKey == null;
+    const blankReaderImportToken = startedWithoutReaderTarget && isExactBlankReaderRoute(startedRouteHash)
+      ? blankReaderImportTokenRef.current + 1
+      : null;
+    if (blankReaderImportToken != null) {
+      blankReaderImportTokenRef.current = blankReaderImportToken;
+      activeBlankReaderImportTokenRef.current = blankReaderImportToken;
+    }
+    const canContinueBlankReaderImport = () =>
+      blankReaderImportToken != null
+      && activeBlankReaderImportTokenRef.current === blankReaderImportToken
+      && isExactBlankReaderRoute(readShellRoute());
     try {
       const imported = await importEpubDocument(file);
       let targetChatId = intendedChatId;
       if (!targetChatId) {
-        const currentRoute = readShellRoute();
-        const stillOnSameBlankReaderRoute =
-          startedWithoutReaderTarget
-          && isExactBlankReaderRoute(startedRouteHash)
-          && isExactBlankReaderRoute(currentRoute);
-        if (!stillOnSameBlankReaderRoute) return;
+        if (!canContinueBlankReaderImport()) return;
         const newChatId = await createChat(activeWorkspaceScope);
         if (!newChatId) return;
-        if (!isExactBlankReaderRoute(readShellRoute())) return;
+        if (!canContinueBlankReaderImport()) return;
         targetChatId = newChatId;
         if (activeWorkspaceScope) {
           setWorkspaceOverrides((current) => ({

@@ -649,6 +649,59 @@ describe("App layout", () => {
     expect(screen.queryByText("Book")).not.toBeInTheDocument();
   });
 
+  it("does not resume a stale blank Reader import after leaving and returning to the blank Reader route", async () => {
+    let resolveImport: ((value: Awaited<ReturnType<typeof importEpubDocument>>) => void) | null = null;
+    importEpubDocumentMock.mockReturnValueOnce(new Promise((resolve) => {
+      resolveImport = resolve;
+    }));
+    mockSessions = [
+      {
+        key: "websocket:chat-a",
+        channel: "websocket",
+        chatId: "chat-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        preview: "Normal chat",
+      },
+    ];
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Reader" }));
+
+    const readerMain = await screen.findByRole("main", { name: /reader page/i });
+    const file = new File(["epub"], "book.epub", { type: "application/epub+zip" });
+    fireEvent.change(within(readerMain).getByLabelText("Import EPUB"), { target: { files: [file] } });
+
+    fireEvent.click(within(sidebar).getByRole("button", { name: /^Normal chat$/ }));
+    await waitFor(() =>
+      expect(window.location.hash).toBe(`#/chat/${encodeURIComponent("websocket:chat-a")}`),
+    );
+
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Reader" }));
+    await waitFor(() => expect(window.location.hash).toBe("#/reader"));
+
+    await act(async () => {
+      resolveImport?.({
+        documentId: "book-1",
+        title: "Book",
+        rawText: "Book text.",
+        documentKind: "epub",
+        readerSession: true,
+        sourceFileName: "book.epub",
+        sections: [],
+        activeSectionIndex: 0,
+      });
+    });
+
+    expect(createChatSpy).not.toHaveBeenCalled();
+    expect(window.location.hash).toBe("#/reader");
+    expect(screen.getByText("Import a book to start a reader session.")).toBeInTheDocument();
+    expect(screen.queryByText("Book")).not.toBeInTheDocument();
+  });
+
   it("does not bind a created reader chat after leaving the blank Reader route during chat creation", async () => {
     let resolveImport: ((value: Awaited<ReturnType<typeof importEpubDocument>>) => void) | null = null;
     let resolveCreateChat: ((value: string) => void) | null = null;
