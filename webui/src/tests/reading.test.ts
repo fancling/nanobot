@@ -25,6 +25,12 @@ describe("reading utilities", () => {
     ]);
   });
 
+  it("parses empty text into no paragraphs", () => {
+    const paragraphs = parseReaderParagraphs("  \n\n ");
+
+    expect(paragraphs).toEqual([]);
+  });
+
   it("builds a bounded reading snapshot around the focused paragraph", () => {
     const snapshot = buildReadingSnapshot({
       documentId: "doc-1",
@@ -46,6 +52,55 @@ describe("reading utilities", () => {
     expect(snapshot.focus.after).toBe("After.");
     expect(snapshot.focus.user_note).toBe("This feels connected.");
     expect(snapshot.focus.current_question).toBe("Why this turn?");
+  });
+
+  it("uses sane defaults for blank raw text", () => {
+    const snapshot = buildReadingSnapshot({
+      documentId: "doc-1",
+      title: "Essay",
+      rawText: "   ",
+      focusedParagraphIndex: 99,
+      selectedText: "",
+      note: "",
+      question: "",
+      mode: "slow_reading",
+    });
+
+    expect(snapshot.location.paragraph_count).toBe(1);
+    expect(snapshot.location.paragraph_index).toBe(0);
+    expect(snapshot.focus.focused_text).toBe("");
+  });
+
+  it("clamps focused paragraph index below zero to the first paragraph", () => {
+    const snapshot = buildReadingSnapshot({
+      documentId: "doc-1",
+      title: "Essay",
+      rawText: "Before.\n\nMiddle.\n\nAfter.",
+      focusedParagraphIndex: -5,
+      selectedText: "",
+      note: "",
+      question: "",
+      mode: "slow_reading",
+    });
+
+    expect(snapshot.location.paragraph_index).toBe(0);
+    expect(snapshot.focus.focused_text).toBe("Before.");
+  });
+
+  it("clamps focused paragraph index above range to the last paragraph", () => {
+    const snapshot = buildReadingSnapshot({
+      documentId: "doc-1",
+      title: "Essay",
+      rawText: "Before.\n\nMiddle.\n\nAfter.",
+      focusedParagraphIndex: 99,
+      selectedText: "",
+      note: "",
+      question: "",
+      mode: "slow_reading",
+    });
+
+    expect(snapshot.location.paragraph_index).toBe(2);
+    expect(snapshot.focus.focused_text).toBe("After.");
   });
 
   it("truncates long snapshot fields", () => {
@@ -88,5 +143,45 @@ describe("reading utilities", () => {
 
     expect(window.localStorage.getItem(`${READER_STATE_STORAGE_PREFIX}chat-1`)).toContain("Essay");
     expect(loadReaderState("chat-1")?.note).toBe("Note");
+  });
+
+  it("returns null on invalid raw storage payload", () => {
+    const key = `${READER_STATE_STORAGE_PREFIX}chat-1`;
+    window.localStorage.setItem(key, "{invalid-json");
+    expect(loadReaderState("chat-1")).toBeNull();
+  });
+
+  it("returns null when storage payload has wrong version", () => {
+    const key = `${READER_STATE_STORAGE_PREFIX}chat-1`;
+    window.localStorage.setItem(key, JSON.stringify({ version: 2, rawText: "Text" }));
+    expect(loadReaderState("chat-1")).toBeNull();
+  });
+
+  it("returns null when storage payload is not an object", () => {
+    const key = `${READER_STATE_STORAGE_PREFIX}chat-1`;
+    window.localStorage.setItem(key, JSON.stringify([]));
+    expect(loadReaderState("chat-1")).toBeNull();
+
+    window.localStorage.setItem(key, JSON.stringify(null));
+    expect(loadReaderState("chat-1")).toBeNull();
+  });
+
+  it("returns null when storage payload has non-string raw text", () => {
+    const key = `${READER_STATE_STORAGE_PREFIX}chat-1`;
+    window.localStorage.setItem(key, JSON.stringify({ version: 1, rawText: 42 }));
+    expect(loadReaderState("chat-1")).toBeNull();
+  });
+
+  it("restores missing optional fields with defaults", () => {
+    const key = `${READER_STATE_STORAGE_PREFIX}chat-1`;
+    window.localStorage.setItem(key, JSON.stringify({ version: 1, rawText: "Text" }));
+
+    const state = loadReaderState("chat-1");
+
+    expect(state).not.toBeNull();
+    expect(state?.title).toBe("");
+    expect(state?.focusedParagraphIndex).toBe(0);
+    expect(state?.mode).toBe("slow_reading");
+    expect(state?.collapsed).toBe(false);
   });
 });
