@@ -17,7 +17,42 @@ function normalizeWhitespace(value: string): string {
     .trim();
 }
 
-const READABLE_BLOCK_SELECTOR = "p,h1,h2,h3,h4,h5,h6,li,blockquote,pre";
+const BLOCK_BOUNDARY_ELEMENTS = new Set([
+  "ADDRESS",
+  "ARTICLE",
+  "ASIDE",
+  "BLOCKQUOTE",
+  "DD",
+  "DIV",
+  "DL",
+  "DT",
+  "FIGCAPTION",
+  "FIGURE",
+  "FOOTER",
+  "H1",
+  "H2",
+  "H3",
+  "H4",
+  "H5",
+  "H6",
+  "HEADER",
+  "HR",
+  "LI",
+  "MAIN",
+  "NAV",
+  "OL",
+  "P",
+  "PRE",
+  "SECTION",
+  "TABLE",
+  "TBODY",
+  "TD",
+  "TFOOT",
+  "TH",
+  "THEAD",
+  "TR",
+  "UL",
+]);
 
 type LoadedEpubContent = Document | Element | { body?: { textContent?: string | null } };
 
@@ -39,32 +74,49 @@ function readableRootFromContent(content: LoadedEpubContent): Element | null {
   return null;
 }
 
-function hasReadableBlockAncestor(block: Element, root: Element): boolean {
-  let ancestor = block.parentElement;
-  while (ancestor && ancestor !== root.parentElement) {
-    if (ancestor !== root && ancestor.matches(READABLE_BLOCK_SELECTOR)) {
-      return true;
-    }
-    if (ancestor === root) {
-      return false;
-    }
-    ancestor = ancestor.parentElement;
-  }
-  return false;
-}
-
 function textFromLoadedContent(content: Document | Element | { body?: { textContent?: string | null } }): string {
   const root = readableRootFromContent(content);
   if (root) {
-    const blocks = [
-      ...(root.matches(READABLE_BLOCK_SELECTOR) ? [root] : []),
-      ...Array.from(root.querySelectorAll(READABLE_BLOCK_SELECTOR)),
-    ].filter((block) => !hasReadableBlockAncestor(block, root));
-    const blockText = blocks.map((block) => normalizeWhitespace(block.textContent ?? "")).filter(Boolean);
-    if (blockText.length > 0) {
-      return blockText.join("\n\n");
-    }
-    return root.textContent ?? "";
+    const parts: string[] = [];
+    let current = "";
+
+    const flush = () => {
+      const text = normalizeWhitespace(current);
+      if (text) {
+        parts.push(text);
+      }
+      current = "";
+    };
+
+    const walk = (node: Node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        current += node.textContent ?? "";
+        return;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) {
+        return;
+      }
+
+      const element = node as Element;
+      const tagName = element.tagName.toUpperCase();
+      if (tagName === "BR") {
+        flush();
+        return;
+      }
+
+      const isBlockBoundary = BLOCK_BOUNDARY_ELEMENTS.has(tagName);
+      if (isBlockBoundary) {
+        flush();
+      }
+      element.childNodes.forEach(walk);
+      if (isBlockBoundary) {
+        flush();
+      }
+    };
+
+    walk(root);
+    flush();
+    return parts.length > 0 ? parts.join("\n\n") : (root.textContent ?? "");
   }
   if ("body" in content && content.body?.textContent) {
     return content.body.textContent;

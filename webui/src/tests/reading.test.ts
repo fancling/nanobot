@@ -13,6 +13,11 @@ const epubMocks = vi.hoisted(() => ({
   bookLoad: vi.fn(),
   itemLoad: vi.fn(),
   itemUnload: vi.fn(),
+  chapterMarkup: `<html><body>
+    <h1>Chapter One</h1>
+    <p>First EPUB paragraph.</p><p>Second EPUB paragraph.</p>
+    <ul><li>Listed thought.</li></ul>
+  </body></html>`,
 }));
 
 vi.mock("epubjs", () => ({
@@ -25,14 +30,7 @@ vi.mock("epubjs", () => ({
           {
             load: epubMocks.itemLoad.mockImplementation(async (request: (url: string) => Promise<unknown>) => {
               await request("chapter-one.xhtml");
-              return new DOMParser().parseFromString(
-                `<html><body>
-                  <h1>Chapter One</h1>
-                  <p>First EPUB paragraph.</p><p>Second EPUB paragraph.</p>
-                  <ul><li>Listed thought.</li></ul>
-                </body></html>`,
-                "text/html",
-              );
+              return new DOMParser().parseFromString(epubMocks.chapterMarkup, "text/html");
             }),
             unload: epubMocks.itemUnload,
           },
@@ -49,6 +47,11 @@ describe("reading utilities", () => {
     epubMocks.bookLoad.mockReset();
     epubMocks.itemLoad.mockReset();
     epubMocks.itemUnload.mockReset();
+    epubMocks.chapterMarkup = `<html><body>
+      <h1>Chapter One</h1>
+      <p>First EPUB paragraph.</p><p>Second EPUB paragraph.</p>
+      <ul><li>Listed thought.</li></ul>
+    </body></html>`;
   });
 
   it("parses plain text and markdown-like paragraphs", () => {
@@ -277,5 +280,29 @@ describe("reading utilities", () => {
     expect(epubMocks.itemLoad).toHaveBeenCalledOnce();
     expect(epubMocks.bookLoad).toHaveBeenCalledWith("chapter-one.xhtml");
     expect(epubMocks.itemUnload).toHaveBeenCalledOnce();
+  });
+
+  it("preserves EPUB paragraph breaks between adjacent div blocks", async () => {
+    epubMocks.chapterMarkup = `<html><body>
+      <div>First EPUB paragraph.</div><div>Second EPUB paragraph.</div>
+    </body></html>`;
+    const file = new File(["epub bytes"], "book.epub", { type: "application/epub+zip" });
+
+    const document = await importEpubDocument(file);
+
+    expect(document.rawText).toContain("First EPUB paragraph.\n\nSecond EPUB paragraph.");
+    expect(document.rawText).not.toContain("First EPUB paragraph.Second EPUB paragraph.");
+  });
+
+  it("preserves EPUB paragraph breaks for nested blockquote paragraphs", async () => {
+    epubMocks.chapterMarkup = `<html><body>
+      <blockquote><p>First EPUB paragraph.</p><p>Second EPUB paragraph.</p></blockquote>
+    </body></html>`;
+    const file = new File(["epub bytes"], "book.epub", { type: "application/epub+zip" });
+
+    const document = await importEpubDocument(file);
+
+    expect(document.rawText).toContain("First EPUB paragraph.\n\nSecond EPUB paragraph.");
+    expect(document.rawText).not.toContain("First EPUB paragraph.Second EPUB paragraph.");
   });
 });
