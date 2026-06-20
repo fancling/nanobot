@@ -61,10 +61,15 @@ describe("reading utilities", () => {
     });
 
     expect(snapshot.document.title.length).toBeLessThanOrEqual(243);
+    expect(snapshot.document.title.endsWith("...")).toBe(true);
     expect(snapshot.focus.focused_text.length).toBeLessThanOrEqual(1203);
+    expect(snapshot.focus.focused_text.endsWith("...")).toBe(true);
     expect(snapshot.focus.selected_text?.length).toBeLessThanOrEqual(803);
+    expect(snapshot.focus.selected_text?.endsWith("...")).toBe(true);
     expect(snapshot.focus.before.length).toBeLessThanOrEqual(603);
+    expect(snapshot.focus.before.endsWith("...")).toBe(true);
     expect(snapshot.focus.user_note.length).toBeLessThanOrEqual(803);
+    expect(snapshot.focus.user_note.endsWith("...")).toBe(true);
   });
 
   it("persists reader state by chat id", () => {

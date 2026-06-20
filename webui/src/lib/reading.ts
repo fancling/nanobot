@@ -19,7 +19,7 @@ export interface ReaderState {
   collapsed: boolean;
 }
 
-export interface ReadingSnapshot {
+interface ReadingSnapshot {
   version: 1;
   scene: "reading";
   document: {
