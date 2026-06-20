@@ -8,6 +8,8 @@ export interface ReaderParagraph {
   index: number;
 }
 
+export type ReaderDocumentKind = "text" | "markdown" | "epub";
+
 export interface ReaderState {
   version: 1;
   documentId: string;
@@ -19,6 +21,8 @@ export interface ReaderState {
   question: string;
   mode: "slow_reading";
   collapsed: boolean;
+  documentKind?: ReaderDocumentKind;
+  readerModeOpen?: boolean;
 }
 
 export interface ReaderStateLoadResult {
@@ -48,6 +52,12 @@ function normalizeText(value: unknown): string {
 
 function normalizeInt(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isInteger(value) ? value : fallback;
+}
+
+function normalizeDocumentKind(value: unknown): ReaderDocumentKind {
+  return value === "text" || value === "markdown" || value === "epub"
+    ? value
+    : "markdown";
 }
 
 function predictNeed(question: string): string {
@@ -138,7 +148,7 @@ export function buildReadingSnapshot(state: ReaderState): ReadingSnapshot {
     document: {
       id: state.documentId,
       title,
-      kind: "markdown",
+      kind: normalizeDocumentKind(state.documentKind),
     },
     location: {
       paragraph_index: focusedIndex,
@@ -209,6 +219,8 @@ export function loadReaderStateResult(chatId: string): ReaderStateLoadResult {
         question: normalizeText(maybe.question),
         mode: maybe.mode === "slow_reading" ? maybe.mode : "slow_reading",
         collapsed: maybe.collapsed === true,
+        documentKind: normalizeDocumentKind(maybe.documentKind),
+        readerModeOpen: maybe.readerModeOpen === true,
       },
       storageFailed: false,
     };

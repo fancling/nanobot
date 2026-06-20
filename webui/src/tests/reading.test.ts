@@ -41,6 +41,8 @@ describe("reading utilities", () => {
       note: "This feels connected.",
       question: "Why this turn?",
       mode: "slow_reading",
+      documentKind: "markdown",
+      readerModeOpen: false,
     });
 
     expect(snapshot.scene).toBe("reading");
@@ -54,6 +56,25 @@ describe("reading utilities", () => {
     expect(snapshot.focus.current_question).toBe("Why this turn?");
   });
 
+  it("uses the reader document kind in snapshots", () => {
+    const snapshot = buildReadingSnapshot({
+      version: 1,
+      documentId: "doc-epub",
+      title: "Novel",
+      rawText: "Chapter text.",
+      focusedParagraphIndex: 0,
+      selectedText: "",
+      note: "",
+      question: "",
+      mode: "slow_reading",
+      collapsed: false,
+      documentKind: "epub",
+      readerModeOpen: true,
+    });
+
+    expect(snapshot.document.kind).toBe("epub");
+  });
+
   it("uses sane defaults for blank raw text", () => {
     const snapshot = buildReadingSnapshot({
       documentId: "doc-1",
@@ -64,6 +85,8 @@ describe("reading utilities", () => {
       note: "",
       question: "",
       mode: "slow_reading",
+      documentKind: "markdown",
+      readerModeOpen: false,
     });
 
     expect(snapshot.location.paragraph_count).toBe(1);
@@ -81,6 +104,8 @@ describe("reading utilities", () => {
       note: "",
       question: "",
       mode: "slow_reading",
+      documentKind: "markdown",
+      readerModeOpen: false,
     });
 
     expect(snapshot.location.paragraph_index).toBe(0);
@@ -97,6 +122,8 @@ describe("reading utilities", () => {
       note: "",
       question: "",
       mode: "slow_reading",
+      documentKind: "markdown",
+      readerModeOpen: false,
     });
 
     expect(snapshot.location.paragraph_index).toBe(2);
@@ -113,6 +140,8 @@ describe("reading utilities", () => {
       note: "N".repeat(5000),
       question: "Q".repeat(5000),
       mode: "slow_reading",
+      documentKind: "markdown",
+      readerModeOpen: false,
     });
 
     expect(snapshot.document.title.length).toBeLessThanOrEqual(243);
@@ -139,6 +168,8 @@ describe("reading utilities", () => {
       question: "",
       mode: "slow_reading",
       collapsed: false,
+      documentKind: "markdown",
+      readerModeOpen: false,
     });
 
     expect(saved).toBe(true);
@@ -184,5 +215,15 @@ describe("reading utilities", () => {
     expect(state?.focusedParagraphIndex).toBe(0);
     expect(state?.mode).toBe("slow_reading");
     expect(state?.collapsed).toBe(false);
+  });
+
+  it("restores new reader v0.2 fields with backward-compatible defaults", () => {
+    const key = `${READER_STATE_STORAGE_PREFIX}chat-v02`;
+    window.localStorage.setItem(key, JSON.stringify({ version: 1, rawText: "Text" }));
+
+    const state = loadReaderState("chat-v02");
+
+    expect(state?.documentKind).toBe("markdown");
+    expect(state?.readerModeOpen).toBe(false);
   });
 });

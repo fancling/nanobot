@@ -26,6 +26,8 @@ describe("ReaderStrip", () => {
       question: "Saved question",
       mode: "slow_reading",
       collapsed: false,
+      documentKind: "markdown",
+      readerModeOpen: false,
     };
     const storageKey = `${READER_STATE_STORAGE_PREFIX}chat-reader`;
     window.localStorage.setItem(storageKey, JSON.stringify(savedState));
@@ -62,6 +64,8 @@ describe("ReaderStrip", () => {
       question: "",
       mode: "slow_reading",
       collapsed: false,
+      documentKind: "markdown",
+      readerModeOpen: false,
     };
     window.localStorage.setItem(chatBKey, JSON.stringify(chatBState));
     const setItemSpy = vi.spyOn(Storage.prototype, "setItem");
