@@ -486,6 +486,7 @@ describe("App layout", () => {
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    expect(await within(sidebar).findByLabelText(/Reader session: Book/i)).toBeInTheDocument();
     fireEvent.click(within(sidebar).getByRole("button", { name: /^Book$/ }));
 
     expect(await screen.findByRole("main", { name: /reader page/i })).toBeInTheDocument();

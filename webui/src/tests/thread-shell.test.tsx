@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { CLI_APPS_CHANGED_EVENT } from "@/lib/cli-app-events";
-import { READER_STATE_STORAGE_PREFIX, type ReaderState } from "@/lib/reading";
+import { READER_STATE_STORAGE_PREFIX } from "@/lib/reading";
 import { ClientProvider } from "@/providers/ClientProvider";
 import type { CliAppsPayload, SettingsPayload, UIMessage } from "@/lib/types";
 
@@ -1387,78 +1387,7 @@ describe("ThreadShell", () => {
     expect(screen.getByRole("option", { name: /@gimp/i })).toBeInTheDocument();
   });
 
-  it("sends a reading snapshot from the reader strip", async () => {
-    const client = makeClient();
-    window.localStorage.clear();
-    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-      if (url.includes("/api/sessions/")) {
-        return httpJson(transcriptFromSimpleMessages([
-          { role: "assistant", content: "Existing thread" },
-        ]));
-      }
-      if (url.includes("/api/settings")) {
-        return httpJson(modelSettings("gpt-test", "openai_codex"));
-      }
-      if (url.includes("/api/commands")) {
-        return httpJson({ commands: [] });
-      }
-      if (url.includes("/api/cli-apps")) {
-        return httpJson({ apps: [] });
-      }
-      if (url.includes("/api/mcp/presets")) {
-        return httpJson({ presets: [] });
-      }
-      return httpJson({});
-    }));
-
-    render(wrap(client, (
-      <ThreadShell
-        session={session("chat-reading")}
-        title="Reading chat"
-        onToggleSidebar={() => {}}
-      />
-    )));
-
-    await screen.findByText("Existing thread");
-    fireEvent.click(await screen.findByRole("button", { name: /open reader/i }));
-    fireEvent.change(await screen.findByLabelText(/reading title/i), {
-      target: { value: "Essay" },
-    });
-    fireEvent.change(screen.getByLabelText(/reading text/i), {
-      target: { value: "Before.\n\nFocused passage.\n\nAfter." },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /enter reader mode/i }));
-    fireEvent.click(screen.getByRole("button", { name: /Focus paragraph 2/i }));
-    fireEvent.change(screen.getByLabelText(/Question about focused paragraph/i), {
-      target: { value: "" },
-    });
-    fireEvent.change(screen.getByLabelText(/Note for this paragraph/i), {
-      target: { value: "This feels connected." },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /Send note with paragraph/i }));
-
-    await waitFor(() => {
-      expect(client.sendMessage).toHaveBeenCalledWith(
-        "chat-reading",
-        "聊聊这一段",
-        undefined,
-        expect.objectContaining({
-          readingSnapshot: expect.objectContaining({
-            scene: "reading",
-            document: expect.objectContaining({ title: "Essay" }),
-            focus: expect.objectContaining({
-              focused_text: "Focused passage.",
-              before: "Before.",
-              after: "After.",
-              user_note: "This feels connected.",
-            }),
-          }),
-        }),
-      );
-    });
-  });
-
-  it("lifts reader mode out of the composer dock and restores the composer on close", async () => {
+  it("keeps the composer available instead of mounting reader mode inside the chat shell", async () => {
     const client = makeClient();
     window.localStorage.clear();
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
@@ -1491,47 +1420,34 @@ describe("ThreadShell", () => {
     )));
 
     await screen.findByText("Existing thread");
-    fireEvent.click(await screen.findByRole("button", { name: /open reader/i }));
-    fireEvent.change(screen.getByLabelText(/reading text/i), {
-      target: { value: "Before.\n\nFocused passage." },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /enter reader mode/i }));
-
-    const composerDock = screen.getByTestId("thread-composer-dock");
-    const portal = screen.getByTestId("reader-mode-portal");
-    expect(portal).toContainElement(screen.getByRole("main", { name: /reader document/i }));
-    expect(composerDock).not.toContainElement(portal);
-    expect(composerDock).not.toContainElement(screen.getByRole("main", { name: /reader document/i }));
-    expect(screen.queryByRole("textbox", { name: "Message input" })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /close reader/i }));
-
-    await waitFor(() => {
-      expect(screen.queryByTestId("reader-mode-portal")).not.toBeInTheDocument();
-    });
+    expect(screen.getByRole("textbox", { name: "Message input" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /open reader/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /enter reader mode/i })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("reader-mode-portal")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: /reader document/i })).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Message input" })).toBeInTheDocument();
   });
 
   it("does not suppress the composer from persisted reader mode open state", async () => {
     const client = makeClient();
     window.localStorage.clear();
-    const savedState: ReaderState = {
-      version: 1,
-      documentId: "doc-saved",
-      title: "Saved essay",
-      rawText: "Before.\n\nFocused passage.",
-      focusedParagraphIndex: 0,
-      selectedText: "",
-      note: "",
-      question: "",
-      mode: "slow_reading",
-      collapsed: false,
-      documentKind: "markdown",
-      readerModeOpen: true,
-    };
     window.localStorage.setItem(
       `${READER_STATE_STORAGE_PREFIX}chat-reader-stale-open`,
-      JSON.stringify(savedState),
+      JSON.stringify({
+        version: 1,
+        documentId: "doc-saved",
+        title: "Saved essay",
+        rawText: "Before.\n\nFocused passage.",
+        focusedParagraphIndex: 0,
+        selectedText: "",
+        note: "",
+        question: "",
+        mode: "slow_reading",
+        collapsed: false,
+        documentKind: "markdown",
+        readerModeOpen: true,
+        readerSession: true,
+      }),
     );
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
       if (url.includes("/api/sessions/")) {
@@ -1565,11 +1481,25 @@ describe("ThreadShell", () => {
     await screen.findByText("Existing thread");
     expect(screen.queryByTestId("reader-mode-portal")).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Message input" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /open reader/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /enter reader mode/i })).not.toBeInTheDocument();
+  });
 
-    fireEvent.click(screen.getByRole("button", { name: /enter reader mode/i }));
+  it("does not render the reader strip in the chat composer area", async () => {
+    const client = makeClient();
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("chat-reader-removed")}
+        title="Normal chat"
+        onToggleSidebar={() => {}}
+        onNewChat={() => {}}
+      />,
+    ));
 
-    expect(screen.getByTestId("reader-mode-portal")).toBeInTheDocument();
-    expect(screen.queryByRole("textbox", { name: "Message input" })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("Normal chat")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: /Open reader/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Enter reader mode/i })).not.toBeInTheDocument();
   });
 
   it("does not render the reader strip in hero mode for an empty conversation", async () => {

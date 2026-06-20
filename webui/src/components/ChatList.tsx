@@ -7,6 +7,7 @@ import {
 import {
   Archive,
   ArchiveRestore,
+  BookOpen,
   Folder,
   MoreHorizontal,
   Pencil,
@@ -35,6 +36,7 @@ import {
   visibleSessionsForGroup,
   type ChatGroupLabels,
 } from "@/lib/chat-groups";
+import { loadReaderState } from "@/lib/reading";
 import { cn } from "@/lib/utils";
 import type { ChatSummary, SidebarDensity, SidebarSortMode } from "@/lib/types";
 
@@ -248,6 +250,9 @@ export const ChatList = memo(function ChatList({
                       : updated.has(s.chatId) && !active
                         ? "updated"
                         : null;
+                    const readerState = loadReaderState(s.chatId);
+                    const readerLabel = readerState?.title?.trim() || title;
+                    const isReaderSession = readerState?.readerSession === true;
                     return (
                       <li key={s.key} className="min-w-0">
                         <div
@@ -296,6 +301,17 @@ export const ChatList = memo(function ChatList({
                               </span>
                             ) : null}
                           </button>
+                          {isReaderSession ? (
+                            <span
+                              aria-label={`Reader session: ${readerLabel}`}
+                              className={cn(
+                                "inline-flex h-5 shrink-0 items-center justify-center rounded-md border border-sidebar-border/65 px-1.5 text-[11px] font-medium text-muted-foreground/80",
+                                active && "border-sidebar-border/80 text-sidebar-accent-foreground/75",
+                              )}
+                            >
+                              <BookOpen className="h-3 w-3" aria-hidden />
+                            </span>
+                          ) : null}
                           <SessionActivityIndicator state={activityState} />
                           <DropdownMenu modal={false}>
                             <DropdownMenuTrigger

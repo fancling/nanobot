@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
-import { ReaderStrip } from "@/components/thread/ReaderStrip";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
@@ -31,7 +30,6 @@ import {
 import { inferProviderFromModelName, providerDisplayLabel } from "@/lib/provider-brand";
 import type {
   ChatSummary,
-  ReadingSnapshot,
   SettingsPayload,
   SlashCommand,
   UIMessage,
@@ -289,7 +287,6 @@ export function ThreadShell({
   const [filePreviewPath, setFilePreviewPath] = useState<string | null>(null);
   const [filePreviewClosing, setFilePreviewClosing] = useState(false);
   const [filePreviewWidth, setFilePreviewWidth] = useState(FILE_PREVIEW_DEFAULT_WIDTH);
-  const [readerModeOpen, setReaderModeOpen] = useState(false);
   const shellRef = useRef<HTMLElement | null>(null);
   const filePreviewWidthRef = useRef(FILE_PREVIEW_DEFAULT_WIDTH);
   const filePreviewCloseTimerRef = useRef<number | null>(null);
@@ -550,14 +547,6 @@ export function ThreadShell({
     [send, withWorkspaceScope],
   );
 
-  const handleReadingSend = useCallback(
-    (content: string, snapshot: ReadingSnapshot) => {
-      setScrollToBottomSignal((value) => value + 1);
-      send(content, undefined, withWorkspaceScope({ readingSnapshot: snapshot }));
-    },
-    [send, withWorkspaceScope],
-  );
-
   const handleOpenFilePreview = useCallback((path: string) => {
     if (filePreviewCloseTimerRef.current !== null) {
       window.clearTimeout(filePreviewCloseTimerRef.current);
@@ -646,10 +635,6 @@ export function ThreadShell({
     };
   }, [filePreviewPath]);
 
-  useEffect(() => {
-    setReaderModeOpen(false);
-  }, [chatId]);
-
   const handleForkFromMessage = useCallback(
     async (beforeUserIndex: number) => {
       if (!chatId || !onForkChat) return;
@@ -670,47 +655,37 @@ export function ThreadShell({
           onDismiss={dismissStreamError}
         />
       ) : null}
-      {session && !showHeroComposer ? (
-        <ReaderStrip
-          chatId={chatId}
-          disabled={isStreaming || booting}
-          onReaderModeOpenChange={setReaderModeOpen}
-          onSendReading={handleReadingSend}
-        />
-      ) : null}
       {session ? (
-        !readerModeOpen ? (
-          <ThreadComposer
-            onSend={handleThreadSend}
-            disabled={!chatId}
-            isStreaming={isStreaming}
-            placeholder={
-              showHeroComposer
-                ? t("thread.composer.placeholderHero")
-                : t("thread.composer.placeholderThread")
-            }
-            modelLabel={modelBadgeLabel}
-            modelProvider={modelBadge.provider}
-            modelProviderLabel={modelBadge.providerLabel}
-            modelNeedsSetup={modelBadge.needsSetup}
-            onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
-            variant={showHeroComposer ? "hero" : "thread"}
-            slashCommands={slashCommands}
-            cliApps={cliApps}
-            mcpPresets={mcpPresets}
-            onStop={stop}
-            onTranscribeAudio={transcribeAudio}
-            runStartedAt={runStartedAt}
-            goalState={goalState}
-            workspaceScope={workspaceScope}
-            workspaceDefaultScope={workspaceDefaultScope}
-            workspaceControls={workspaceControls}
-            workspaceScopeDisabled={workspaceScopeDisabled}
-            workspaceError={workspaceError}
-            onWorkspaceScopeChange={onWorkspaceScopeChange}
-            pendingQueueKey={chatId}
-          />
-        ) : null
+        <ThreadComposer
+          onSend={handleThreadSend}
+          disabled={!chatId}
+          isStreaming={isStreaming}
+          placeholder={
+            showHeroComposer
+              ? t("thread.composer.placeholderHero")
+              : t("thread.composer.placeholderThread")
+          }
+          modelLabel={modelBadgeLabel}
+          modelProvider={modelBadge.provider}
+          modelProviderLabel={modelBadge.providerLabel}
+          modelNeedsSetup={modelBadge.needsSetup}
+          onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
+          variant={showHeroComposer ? "hero" : "thread"}
+          slashCommands={slashCommands}
+          cliApps={cliApps}
+          mcpPresets={mcpPresets}
+          onStop={stop}
+          onTranscribeAudio={transcribeAudio}
+          runStartedAt={runStartedAt}
+          goalState={goalState}
+          workspaceScope={workspaceScope}
+          workspaceDefaultScope={workspaceDefaultScope}
+          workspaceControls={workspaceControls}
+          workspaceScopeDisabled={workspaceScopeDisabled}
+          workspaceError={workspaceError}
+          onWorkspaceScopeChange={onWorkspaceScopeChange}
+          pendingQueueKey={chatId}
+        />
       ) : (
         <ThreadComposer
           onSend={handleWelcomeSend}
