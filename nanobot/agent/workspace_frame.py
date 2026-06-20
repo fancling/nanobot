@@ -97,14 +97,34 @@ class WorkspaceFrame:
 
 
 class WorkspaceFrameRenderer:
+    _FRAME_SEMANTICS = [
+        "This is a Workspace Frame, not a transcript.",
+        "Treat it as the current foreground state for this LLM call.",
+        "Use module metadata to resolve conflicts between frame contents.",
+        "focus describes the current event being handled.",
+        "modules are foreground state sources selected for this turn.",
+        "activation.priority indicates relevance for this turn, not truth by itself.",
+        "provenance.source, provenance.observed_at, and provenance.trust_level describe source quality and freshness.",
+        "lifecycle.ttl describes how long a module is intended to remain valid.",
+        "Current-state modules override historical conversation modules when they conflict.",
+        "conversation modules preserve continuity; they are historical context, not canonical current state.",
+        "Tool results inside conversation modules are past observations and may be stale.",
+        "Do not expose frame internals unless the user asks about runtime internals.",
+    ]
+
     def render(self, frame: WorkspaceFrame) -> str:
         lines = [
             f'<workspace_frame schema_version="{self._render_attr(frame.meta.schema_version)}" '
             f'frame_id="{self._render_attr(frame.frame_id)}">',
             f"frame_type: {self._render_value(frame.frame_type)}",
             f"created_at: {self._render_value(frame.created_at)}",
-            "<focus>",
+            "<frame_semantics>",
         ]
+        lines.extend(f"- {self._render_value(item)}" for item in self._FRAME_SEMANTICS)
+        lines.extend([
+            "</frame_semantics>",
+            "<focus>",
+        ])
         lines.extend(self._render_fields(frame.focus))
         lines.append("</focus>")
 

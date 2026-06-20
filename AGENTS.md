@@ -55,6 +55,13 @@ Messages flow through an async `MessageBus` (`nanobot/bus/queue.py`) that decoup
 - **CLI**: `nanobot/cli/commands.py`
 - **Python SDK**: `nanobot/nanobot.py`
 
+## Workspace Frame Notes
+
+- LLM requests now use `WorkspaceFrame` as the foreground-state abstraction. The internal typed object is built from focus, structured modules, policy, and meta, then rendered into a semi-structured prompt by `WorkspaceFrameRenderer`.
+- Keep the boundary clear: the frame is not the prompt. Add or adjust state in the builder/modules; change prompt projection rules in the renderer.
+- The renderer includes a `frame_semantics` block before `focus` so the model can interpret module metadata. In particular, current-state modules override historical conversation modules when they conflict, and tool results inside conversation history are past observations that may be stale.
+- Core files: `nanobot/agent/workspace_frame.py`, `nanobot/agent/frame_request.py`, and frame-related tests in `tests/agent/test_workspace_frame.py`, `tests/agent/test_frame_request.py`, `tests/agent/test_loop_frame_request.py`, and `tests/agent/test_runner_frame_tool_loop.py`.
+
 ## Project-Specific Notes
 
 - Architecture constraints: [`.agent/design.md`](.agent/design.md)

@@ -92,6 +92,48 @@ def test_renderer_outputs_xmlish_frame() -> None:
     assert "response_mode: task_execution" in rendered
 
 
+def test_renderer_explains_frame_semantics_before_focus() -> None:
+    now = datetime(2026, 6, 19, tzinfo=timezone.utc)
+    frame = WorkspaceFrame(
+        frame_id="frame-semantics",
+        frame_type="agent_os_workspace_frame",
+        created_at=now,
+        focus=WorkspaceFrameFocus(
+            event_type="user_message",
+            current_input="hello",
+            active_topic=None,
+            active_question=None,
+            dialogue_anchor="cli:direct",
+        ),
+        modules=[
+            _module("memory.long_term", "Current memory."),
+            _module("conversation.recent_raw", "Past read_file result."),
+        ],
+        policy=WorkspaceFramePolicy(
+            response_mode="task_execution",
+            tone="concise",
+            depth="medium",
+            should_do=[],
+            should_avoid=[],
+            action_constraints=[],
+        ),
+        meta=WorkspaceFrameMeta(
+            schema_version="0.1",
+            token_budget={},
+            builder_trace=[],
+            render_mode="xmlish",
+        ),
+    )
+
+    rendered = WorkspaceFrameRenderer().render(frame)
+
+    assert rendered.index("<frame_semantics>") < rendered.index("<focus>")
+    assert "This is a Workspace Frame, not a transcript." in rendered
+    assert "conversation modules preserve continuity; they are historical context, not canonical current state." in rendered
+    assert "Tool results inside conversation modules are past observations and may be stale." in rendered
+    assert "Current-state modules override historical conversation modules when they conflict." in rendered
+
+
 def test_renderer_skips_modules_hidden_from_llm() -> None:
     now = datetime(2026, 6, 19, tzinfo=timezone.utc)
     frame = WorkspaceFrame(
