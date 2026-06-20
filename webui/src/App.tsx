@@ -1330,6 +1330,8 @@ function Shell({
     const intendedChatId = activeReaderChatIdRef.current;
     const startedWithoutReaderTarget = intendedChatId == null;
     const startedRouteHash = readShellRoute();
+    const isExactBlankReaderRoute = (route: ReturnType<typeof readShellRoute>) =>
+      route.view === "reader" && route.activeKey == null;
     try {
       const imported = await importEpubDocument(file);
       let targetChatId = intendedChatId;
@@ -1337,13 +1339,12 @@ function Shell({
         const currentRoute = readShellRoute();
         const stillOnSameBlankReaderRoute =
           startedWithoutReaderTarget
-          && startedRouteHash.view === "reader"
-          && startedRouteHash.activeKey == null
-          && currentRoute.view === "reader"
-          && currentRoute.activeKey == null;
+          && isExactBlankReaderRoute(startedRouteHash)
+          && isExactBlankReaderRoute(currentRoute);
         if (!stillOnSameBlankReaderRoute) return;
         const newChatId = await createChat(activeWorkspaceScope);
         if (!newChatId) return;
+        if (!isExactBlankReaderRoute(readShellRoute())) return;
         targetChatId = newChatId;
         if (activeWorkspaceScope) {
           setWorkspaceOverrides((current) => ({
@@ -1592,6 +1593,7 @@ function Shell({
     ? (hostSidebarOpen ? SIDEBAR_WIDTH : 0)
     : (hostSidebarOpen ? SIDEBAR_WIDTH : SIDEBAR_RAIL_WIDTH);
   const renderHostSidebarFlowContent = !showHostChrome || hostSidebarOpen;
+  const ShellMainTag = view === "reader" ? "div" : "main";
 
   useEffect(() => {
     document.documentElement.classList.toggle("native-host", showHostChrome);
@@ -1722,8 +1724,7 @@ function Shell({
             titleOverrides={sidebarState.title_overrides}
             onSelect={onSelectSearchResult}
           />
-        <main
-          aria-label={view === "reader" ? "Reader page" : undefined}
+        <ShellMainTag
           className={cn(
             "relative flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background",
             showHostChrome && hostSidebarOpen && "border-l border-border/55",
@@ -1804,8 +1805,8 @@ function Shell({
                 />
               </div>
             )}
-          </main>
-        </div>
+        </ShellMainTag>
+      </div>
 
         <DeleteConfirm
           open={!!pendingDelete}

@@ -69,7 +69,8 @@ export function ReaderDocument({
   );
 
   return (
-    <main
+    <section
+      role="region"
       aria-label="Reader document"
       className="min-h-0 flex-1 overflow-y-auto bg-background"
     >
@@ -109,6 +110,6 @@ export function ReaderDocument({
           })}
         </div>
       </article>
-    </main>
+    </section>
   );
 }

@@ -432,6 +432,7 @@ describe("App layout", () => {
         documentKind: "epub",
       }),
     );
+    expect(screen.getAllByRole("main")).toHaveLength(1);
   });
 
   it("routes reader-backed sessions to the Reader page", async () => {
@@ -646,6 +647,82 @@ describe("App layout", () => {
     expect(createChatSpy).not.toHaveBeenCalled();
     expect(window.location.hash).toBe(`#/chat/${encodeURIComponent("websocket:chat-a")}`);
     expect(screen.queryByText("Book")).not.toBeInTheDocument();
+  });
+
+  it("does not bind a created reader chat after leaving the blank Reader route during chat creation", async () => {
+    let resolveImport: ((value: Awaited<ReturnType<typeof importEpubDocument>>) => void) | null = null;
+    let resolveCreateChat: ((value: string) => void) | null = null;
+    importEpubDocumentMock.mockReturnValueOnce(new Promise((resolve) => {
+      resolveImport = resolve;
+    }));
+    createChatSpy.mockReturnValueOnce(new Promise((resolve) => {
+      resolveCreateChat = resolve;
+    }));
+    mockSessions = [
+      {
+        key: "websocket:chat-a",
+        channel: "websocket",
+        chatId: "chat-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        preview: "Normal chat",
+      },
+    ];
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Reader" }));
+
+    const readerMain = await screen.findByRole("main", { name: /reader page/i });
+    const file = new File(["epub"], "book.epub", { type: "application/epub+zip" });
+    fireEvent.change(within(readerMain).getByLabelText("Import EPUB"), { target: { files: [file] } });
+
+    await act(async () => {
+      resolveImport?.({
+        documentId: "book-1",
+        title: "Book",
+        rawText: "Book text.",
+        documentKind: "epub",
+        readerSession: true,
+        sourceFileName: "book.epub",
+        sections: [],
+        activeSectionIndex: 0,
+      });
+    });
+
+    await waitFor(() => expect(createChatSpy).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(within(sidebar).getByRole("button", { name: /^Normal chat$/ }));
+    await waitFor(() =>
+      expect(window.location.hash).toBe(`#/chat/${encodeURIComponent("websocket:chat-a")}`),
+    );
+
+    await act(async () => {
+      resolveCreateChat?.("late-book-chat");
+    });
+
+    expect(window.location.hash).toBe(`#/chat/${encodeURIComponent("websocket:chat-a")}`);
+    expect(window.localStorage.getItem(`${READER_STATE_STORAGE_PREFIX}late-book-chat`)).toBeNull();
+    expect(screen.queryByText("Book")).not.toBeInTheDocument();
+  });
+
+  it("falls back to the blank Reader page for missing reader deep links", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      `/#/reader?chat=${encodeURIComponent("websocket:missing-chat")}`,
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    await waitFor(() => expect(window.location.hash).toBe("#/reader"));
+    expect(await screen.findByRole("main", { name: /reader page/i })).toBeInTheDocument();
+    expect(screen.getAllByRole("main")).toHaveLength(1);
+    expect(screen.getByText("Import a book to start a reader session.")).toBeInTheDocument();
+    expect(screen.queryByText("missing-chat")).not.toBeInTheDocument();
   });
 
   it("keeps explicit reader deep links visible when storage access fails", async () => {

@@ -42,7 +42,7 @@ describe("ReaderMode", () => {
       />,
     );
 
-    expect(screen.getByRole("main", { name: /reader document/i })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: /reader document/i })).toBeInTheDocument();
     const companionRail = screen.getByRole("complementary", { name: /reader companion/i });
     expect(companionRail).toBeInTheDocument();
     expect(companionRail).toHaveClass("max-h-[45vh]", "min-h-0", "lg:max-h-none");
@@ -126,7 +126,7 @@ describe("ReaderMode", () => {
     expect(within(companionRail).getByText("Middle section.")).toBeInTheDocument();
     expect(within(companionRail).queryByText("Full book middle.")).not.toBeInTheDocument();
     expect(
-      within(screen.getByRole("main", { name: /reader document/i })).getByText("Middle section."),
+      within(screen.getByRole("region", { name: /reader document/i })).getByText("Middle section."),
     ).toBeInTheDocument();
   });
 
@@ -183,7 +183,7 @@ describe("ReaderMode", () => {
       />,
     );
 
-    expect(within(screen.getByRole("main", { name: /reader document/i })).getByText("Middle first.")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: /reader document/i })).getByText("Middle first.")).toBeInTheDocument();
     expect(
       within(screen.getByRole("complementary", { name: /reader companion/i })).getByText("Middle first."),
     ).toBeInTheDocument();

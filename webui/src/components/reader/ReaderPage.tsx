@@ -46,7 +46,7 @@ export function ReaderPage({
   );
 
   return state ? (
-    <div className={shellClassName}>
+    <main aria-label="Reader page" className={shellClassName}>
       <header className="flex items-center justify-between gap-3 border-b border-border bg-muted/20 px-4 py-3">
         <div className="flex min-w-0 items-center gap-2">
           <Button
@@ -95,9 +95,9 @@ export function ReaderPage({
         onClose={onBackToChat}
         onSendReading={onSendReading}
       />
-    </div>
+    </main>
   ) : (
-    <div className={shellClassName}>
+    <main aria-label="Reader page" className={shellClassName}>
       <header className="flex items-center justify-between gap-3 border-b border-border bg-muted/20 px-4 py-3">
         <div className="flex min-w-0 items-center gap-2">
           <Button
@@ -163,6 +163,6 @@ export function ReaderPage({
           ) : null}
         </div>
       </section>
-    </div>
+    </main>
   );
 }
