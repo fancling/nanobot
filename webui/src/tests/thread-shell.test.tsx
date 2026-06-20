@@ -1385,4 +1385,67 @@ describe("ThreadShell", () => {
     expect(screen.getByRole("listbox", { name: "Apps" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: /@gimp/i })).toBeInTheDocument();
   });
+
+  it("sends a reading snapshot from the reader strip", async () => {
+    const client = makeClient();
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.includes("/api/sessions/")) {
+        return httpJson(transcriptFromSimpleMessages([]));
+      }
+      if (url.includes("/api/settings")) {
+        return httpJson(modelSettings("gpt-test", "openai_codex"));
+      }
+      if (url.includes("/api/commands")) {
+        return httpJson({ commands: [] });
+      }
+      if (url.includes("/api/cli-apps")) {
+        return httpJson({ apps: [] });
+      }
+      if (url.includes("/api/mcp/presets")) {
+        return httpJson({ presets: [] });
+      }
+      return httpJson({});
+    }));
+
+    render(wrap(client, (
+      <ThreadShell
+        session={session("chat-reading")}
+        title="Reading chat"
+        onToggleSidebar={() => {}}
+      />
+    )));
+
+    fireEvent.click(await screen.findByRole("button", { name: /open reader/i }));
+    fireEvent.change(screen.getByLabelText(/reading title/i), {
+      target: { value: "Essay" },
+    });
+    fireEvent.change(screen.getByLabelText(/reading text/i), {
+      target: { value: "Before.\n\nFocused passage.\n\nAfter." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Focused passage/i }));
+    fireEvent.change(screen.getByLabelText(/reading note/i), {
+      target: { value: "This feels connected." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /chat about this passage/i }));
+
+    await waitFor(() => {
+      expect(client.sendMessage).toHaveBeenCalledWith(
+        "chat-reading",
+        "聊聊这一段",
+        undefined,
+        expect.objectContaining({
+          readingSnapshot: expect.objectContaining({
+            scene: "reading",
+            document: expect.objectContaining({ title: "Essay" }),
+            focus: expect.objectContaining({
+              focused_text: "Focused passage.",
+              before: "Before.",
+              after: "After.",
+              user_note: "This feels connected.",
+            }),
+          }),
+        }),
+      );
+    });
+  });
 });

@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
+import { ReaderStrip } from "@/components/thread/ReaderStrip";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
@@ -30,6 +31,7 @@ import {
 import { inferProviderFromModelName, providerDisplayLabel } from "@/lib/provider-brand";
 import type {
   ChatSummary,
+  ReadingSnapshot,
   SettingsPayload,
   SlashCommand,
   UIMessage,
@@ -547,6 +549,14 @@ export function ThreadShell({
     [send, withWorkspaceScope],
   );
 
+  const handleReadingSend = useCallback(
+    (content: string, snapshot: ReadingSnapshot) => {
+      setScrollToBottomSignal((value) => value + 1);
+      send(content, undefined, withWorkspaceScope({ readingSnapshot: snapshot }));
+    },
+    [send, withWorkspaceScope],
+  );
+
   const handleOpenFilePreview = useCallback((path: string) => {
     if (filePreviewCloseTimerRef.current !== null) {
       window.clearTimeout(filePreviewCloseTimerRef.current);
@@ -653,6 +663,13 @@ export function ThreadShell({
         <StreamErrorNotice
           error={streamError}
           onDismiss={dismissStreamError}
+        />
+      ) : null}
+      {historyKey ? (
+        <ReaderStrip
+          chatId={chatId}
+          disabled={isStreaming || booting}
+          onSendReading={handleReadingSend}
         />
       ) : null}
       {session ? (
