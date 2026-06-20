@@ -313,9 +313,11 @@ describe("ChatList", () => {
     expect(getItemSpy).toHaveBeenCalledWith(`${reading.READER_STATE_STORAGE_PREFIX}book`);
     expect(keySpy).toHaveBeenCalledTimes(window.localStorage.length);
 
+    const nextSessions = [...sessions];
     rerender(
       <ChatList
         {...props}
+        sessions={nextSessions}
         activeKey="websocket:book"
         readerMarkerVersion={1}
       />,
@@ -332,6 +334,64 @@ describe("ChatList", () => {
     );
     expect(getItemSpy).toHaveBeenCalledTimes(2);
     expect(keySpy).toHaveBeenCalledTimes(window.localStorage.length * 2);
+  });
+
+  it("recomputes reader labels for new sessions without rescanning storage", () => {
+    window.localStorage.clear();
+    window.localStorage.setItem(`${reading.READER_STATE_STORAGE_PREFIX}book`, JSON.stringify({
+      version: 1,
+      documentId: "book-1",
+      title: "Book",
+      rawText: "Book text.",
+      focusedParagraphIndex: 0,
+      selectedText: "",
+      note: "",
+      question: "",
+      mode: "slow_reading",
+      collapsed: false,
+      documentKind: "epub",
+      readerSession: true,
+    }));
+
+    const getItemSpy = vi.spyOn(window.localStorage, "getItem");
+    const keySpy = vi.spyOn(window.localStorage, "key");
+    const props = {
+      sessions: [
+        session({
+          chatId: "book",
+          title: "Book",
+        }),
+      ],
+      activeKey: null,
+      readerMarkerVersion: 1,
+      onSelect: vi.fn(),
+      onRequestDelete: vi.fn(),
+      onTogglePin: vi.fn(),
+      onRequestRename: vi.fn(),
+      onToggleArchive: vi.fn(),
+    };
+
+    const { rerender } = render(<ChatList {...props} />);
+
+    expect(screen.getByLabelText("Reader session: Book")).toBeInTheDocument();
+    expect(getItemSpy).toHaveBeenCalledTimes(1);
+    expect(keySpy).toHaveBeenCalledTimes(window.localStorage.length);
+
+    rerender(
+      <ChatList
+        {...props}
+        sessions={[
+          session({
+            chatId: "book",
+            title: "Book renamed",
+          }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByLabelText("Reader session: Book renamed")).toBeInTheDocument();
+    expect(getItemSpy).toHaveBeenCalledTimes(1);
+    expect(keySpy).toHaveBeenCalledTimes(window.localStorage.length);
   });
 
   it("folds long default workspace chats and can show all", () => {

@@ -387,7 +387,7 @@ describe("reading utilities", () => {
     expect(getItemSpy).toHaveBeenCalledWith(`${READER_STATE_STORAGE_PREFIX}chat-plain`);
   });
 
-  it("returns an empty reader session chat id set when a reader entry is malformed", () => {
+  it("skips malformed reader entries and keeps valid reader session markers", () => {
     window.localStorage.setItem(
       `${READER_STATE_STORAGE_PREFIX}chat-book`,
       JSON.stringify({
@@ -406,7 +406,7 @@ describe("reading utilities", () => {
     );
     window.localStorage.setItem(`${READER_STATE_STORAGE_PREFIX}chat-bad`, "{invalid-json");
 
-    expect(loadReaderSessionChatIdSet()).toEqual(new Set());
+    expect(loadReaderSessionChatIdSet()).toEqual(new Set(["chat-book"]));
   });
 
   it("loads reader session metadata and uses the active section for snapshots", () => {

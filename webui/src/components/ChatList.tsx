@@ -159,10 +159,23 @@ export const ChatList = memo(function ChatList({
     [limitedGroups],
   );
   const hiddenSessionCount = Math.max(0, totalSessionCount - visibleSessionCount);
-  const readerSessionChatIds = useMemo(
-    () => loadReaderSessionMarkers(),
-    [readerMarkerVersion, sessions],
-  );
+  const readerSessionChatIds = useMemo(() => loadReaderSessionMarkers(), [readerMarkerVersion]);
+  const readerMarkerLabels = useMemo(() => {
+    const labelsByChatId = new Map<string, string>();
+
+    for (const session of sessions) {
+      if (!readerSessionChatIds.has(session.chatId)) {
+        continue;
+      }
+
+      labelsByChatId.set(
+        session.chatId,
+        displayTitle(session, titleOverrides, t("chat.newChat")),
+      );
+    }
+
+    return labelsByChatId;
+  }, [readerSessionChatIds, sessions, t, titleOverrides]);
 
   useEffect(() => {
     setVisibleLimit(INITIAL_VISIBLE_SESSIONS);
@@ -260,8 +273,8 @@ export const ChatList = memo(function ChatList({
                       : updated.has(s.chatId) && !active
                         ? "updated"
                         : null;
-                    const isReaderSession = readerSessionChatIds.has(s.chatId);
-                    const readerLabel = title;
+                    const readerLabel = readerMarkerLabels.get(s.chatId);
+                    const isReaderSession = Boolean(readerLabel);
                     return (
                       <li key={s.key} className="min-w-0">
                         <div

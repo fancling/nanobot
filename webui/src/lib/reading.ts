@@ -312,18 +312,22 @@ export function loadReaderSessionChatIdSet(): Set<string> {
         continue;
       }
 
-      const raw = storage.getItem(key);
-      if (!raw) {
+      try {
+        const raw = storage.getItem(key);
+        if (!raw) {
+          continue;
+        }
+
+        const state = parseReaderStatePayload(JSON.parse(raw));
+        if (!state) {
+          continue;
+        }
+
+        if (state.readerSession === true) {
+          readerSessionChatIds.add(key.slice(READER_STATE_STORAGE_PREFIX.length));
+        }
+      } catch {
         continue;
-      }
-
-      const state = parseReaderStatePayload(JSON.parse(raw));
-      if (!state) {
-        return new Set();
-      }
-
-      if (state.readerSession === true) {
-        readerSessionChatIds.add(key.slice(READER_STATE_STORAGE_PREFIX.length));
       }
     }
   } catch {
