@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
 import { ReaderAgentPresence } from "@/components/thread/reader/ReaderAgentPresence";
 import { ReaderCompanionRail } from "@/components/thread/reader/ReaderCompanionRail";
@@ -32,14 +32,38 @@ export function ReaderMode({
   );
   const activeSection = sections[activeSectionIndex] ?? null;
   const activeRawText = activeSection?.rawText ?? state.rawText;
+  const activeSectionKey = `${state.documentId}:${activeSection?.id ?? `raw:${activeSectionIndex}`}`;
+  const previousActiveSectionKeyRef = useRef<string | null>(null);
+  const sectionIdentityChanged = previousActiveSectionKeyRef.current !== null
+    && previousActiveSectionKeyRef.current !== activeSectionKey;
   const activeState = activeSection
-    ? { ...state, rawText: activeRawText, activeSectionIndex }
+    ? {
+        ...state,
+        rawText: activeRawText,
+        activeSectionIndex,
+        ...(sectionIdentityChanged
+          ? { selectedText: "", note: "", question: "" }
+          : {}),
+      }
     : state;
   const paragraphCount = useMemo(() => parseReaderParagraphs(activeRawText).length, [activeRawText]);
   const focusedParagraphIndex = paragraphCount > 0
     ? Math.max(0, Math.min(state.focusedParagraphIndex, paragraphCount - 1))
     : 0;
   const canNavigateSections = sections.length > 1;
+
+  useEffect(() => {
+    if (previousActiveSectionKeyRef.current === null) {
+      previousActiveSectionKeyRef.current = activeSectionKey;
+      return;
+    }
+    if (previousActiveSectionKeyRef.current !== activeSectionKey) {
+      previousActiveSectionKeyRef.current = activeSectionKey;
+      if (state.selectedText || state.note || state.question) {
+        onChange({ selectedText: "", note: "", question: "" });
+      }
+    }
+  }, [activeSectionKey, onChange, state.note, state.question, state.selectedText]);
 
   const handleSectionChange = (nextIndex: number) => {
     const nextSection = sections[nextIndex];
@@ -115,7 +139,7 @@ export function ReaderMode({
         onClose={onClose}
         onSendReading={onSendReading}
       />
-      <ReaderAgentPresence active={Boolean(state.selectedText || state.question)} />
+      <ReaderAgentPresence active={Boolean(activeState.selectedText || activeState.question)} />
     </div>
   );
 }

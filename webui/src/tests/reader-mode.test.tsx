@@ -130,8 +130,9 @@ describe("ReaderMode", () => {
     ).toBeInTheDocument();
   });
 
-  it("resets section A paragraph drafts before section B sends a question", () => {
+  it("clears stale section A state when rerendering to section B", () => {
     const onSendReading = vi.fn();
+    const onChange = vi.fn();
     const { rerender } = render(
       <ReaderMode
         state={state({
@@ -148,19 +149,15 @@ describe("ReaderMode", () => {
         })}
         disabled={false}
         persistenceFailed={false}
-        onChange={vi.fn()}
+        onChange={onChange}
         onClose={vi.fn()}
         onSendReading={onSendReading}
       />,
     );
 
-    expect(screen.getByLabelText(/Question about focused paragraph/i)).toHaveValue("");
+    expect(screen.getByText("Selected in section A")).toBeInTheDocument();
     expect(screen.getByLabelText(/Note for this paragraph/i)).toHaveValue("Saved note for section A");
     expect(screen.getByLabelText(/agent presence/i)).toHaveClass("opacity-100");
-
-    fireEvent.change(screen.getByLabelText(/Question about focused paragraph/i), {
-      target: { value: "Draft for section A" },
-    });
 
     rerender(
       <ReaderMode
@@ -168,8 +165,10 @@ describe("ReaderMode", () => {
           documentId: "book-1",
           rawText: "Full book opening.\n\nFull book middle.\n\nFull book ending.",
           activeSectionIndex: 1,
-          selectedText: "",
           focusedParagraphIndex: 0,
+          selectedText: "Selected in section A",
+          note: "Saved note for section A",
+          question: "Saved question for section A",
           sections: [
             { id: "s-1", title: "Opening", rawText: "Opening section.", paragraphCount: 1 },
             { id: "s-2", title: "Middle", rawText: "Middle section.", paragraphCount: 1 },
@@ -177,7 +176,7 @@ describe("ReaderMode", () => {
         })}
         disabled={false}
         persistenceFailed={false}
-        onChange={vi.fn()}
+        onChange={onChange}
         onClose={vi.fn()}
         onSendReading={onSendReading}
       />,
@@ -187,13 +186,19 @@ describe("ReaderMode", () => {
     expect(
       within(screen.getByRole("complementary", { name: /reader companion/i })).getByText("Middle section."),
     ).toBeInTheDocument();
+    expect(screen.queryByText(/Selected text/i)).not.toBeInTheDocument();
     expect(screen.getByLabelText(/Question about focused paragraph/i)).toHaveValue("");
     expect(screen.getByLabelText(/Note for this paragraph/i)).toHaveValue("");
     expect(screen.getByLabelText(/agent presence/i)).toHaveClass("opacity-80");
+    expect(onChange).toHaveBeenCalledWith({
+      selectedText: "",
+      note: "",
+      question: "",
+    });
 
     fireEvent.click(screen.getByRole("button", { name: /Ask about paragraph/i }));
 
-    expect(onSendReading).not.toHaveBeenCalledWith("Draft for section A", expect.anything());
+    expect(onSendReading).not.toHaveBeenCalledWith("Selected in section A", expect.anything());
     expect(onSendReading).not.toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
