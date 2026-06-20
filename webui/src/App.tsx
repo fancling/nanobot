@@ -235,6 +235,17 @@ function blankReaderState(imported?: Awaited<ReturnType<typeof importEpubDocumen
   };
 }
 
+function readerMarkerSignature(state: ReaderState | null): string {
+  if (!state) return "";
+  return JSON.stringify({
+    readerSession: state.readerSession === true,
+    title: state.title.trim(),
+    documentId: state.documentId,
+    documentKind: state.documentKind ?? "",
+    sourceFileName: state.sourceFileName ?? "",
+  });
+}
+
 function AuthForm({
   failed,
   onSecret,
@@ -1326,9 +1337,14 @@ function Shell({
     });
   }, [activeKey, navigate, sessions]);
 
-  const persistReaderState = useCallback((chatId: string, nextState: ReaderState) => {
+  const persistReaderState = useCallback((
+    chatId: string,
+    nextState: ReaderState,
+    previousState?: ReaderState | null,
+  ) => {
     const persisted = saveReaderState(chatId, nextState);
-    if (persisted) {
+    const markerChanged = readerMarkerSignature(previousState ?? null) !== readerMarkerSignature(nextState);
+    if (persisted && markerChanged) {
       setReaderMarkerVersion((version) => version + 1);
     }
     if (chatId === activeReaderChatIdRef.current) {
@@ -1340,7 +1356,7 @@ function Shell({
     if (!activeReaderChatId || !readerState) return;
     const nextState = { ...readerState, ...patch };
     setReaderState(nextState);
-    persistReaderState(activeReaderChatId, nextState);
+    persistReaderState(activeReaderChatId, nextState, readerState);
   }, [activeReaderChatId, persistReaderState, readerState]);
 
   const onReaderImportEpub = useCallback(async (file: File) => {
@@ -1388,7 +1404,7 @@ function Shell({
         question: "",
         collapsed: false,
       } satisfies ReaderState;
-      persistReaderState(targetChatId, nextState);
+      persistReaderState(targetChatId, nextState, readerState ?? blankReaderState());
       const currentRoute = readShellRoute();
       const canRetargetCreatedSession =
         currentRoute.view === "reader"

@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import i18n from "@/i18n";
+import * as reading from "@/lib/reading";
 import { READER_STATE_STORAGE_PREFIX } from "@/lib/reading";
 import { importEpubDocument } from "@/lib/readerEpub";
 import type { ChatSummary, SessionAutomationJob } from "@/lib/types";
@@ -491,6 +492,100 @@ describe("App layout", () => {
 
     expect(await screen.findByRole("main", { name: /reader page/i })).toBeInTheDocument();
     expect(window.location.hash).toBe("#/reader?chat=websocket%3Abook-chat");
+  });
+
+  it("does not refresh sidebar reader markers for focus, note, or question reader edits", async () => {
+    window.localStorage.setItem(
+      `${READER_STATE_STORAGE_PREFIX}book-chat`,
+      JSON.stringify({
+        version: 1,
+        documentId: "book-1",
+        title: "Book",
+        rawText: "First paragraph.\n\nSecond paragraph.",
+        focusedParagraphIndex: 0,
+        selectedText: "",
+        note: "",
+        question: "",
+        mode: "slow_reading",
+        collapsed: false,
+        documentKind: "epub",
+        readerSession: true,
+      }),
+    );
+    mockSessions = [
+      {
+        key: "websocket:book-chat",
+        channel: "websocket",
+        chatId: "book-chat",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        title: "Book",
+        preview: "Book",
+      },
+      {
+        key: "websocket:plain-chat",
+        channel: "websocket",
+        chatId: "plain-chat",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        title: "Plain",
+        preview: "Plain",
+      },
+    ];
+    const loadReaderStateSpy = vi.spyOn(reading, "loadReaderState");
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(await within(sidebar).findByRole("button", { name: /^Book$/ }));
+    const readerMain = await screen.findByRole("main", { name: /reader page/i });
+
+    const readsAfterOpen = loadReaderStateSpy.mock.calls.length;
+
+    fireEvent.click(within(readerMain).getByRole("button", { name: "Focus paragraph 2" }));
+    await waitFor(() => {
+      expect(
+        JSON.parse(window.localStorage.getItem(`${READER_STATE_STORAGE_PREFIX}book-chat`) ?? "null"),
+      ).toMatchObject({
+        focusedParagraphIndex: 1,
+        note: "",
+        question: "",
+      });
+    });
+    expect(loadReaderStateSpy).toHaveBeenCalledTimes(readsAfterOpen);
+
+    fireEvent.change(within(readerMain).getByLabelText("Note for this paragraph"), {
+      target: { value: "Reader note" },
+    });
+    fireEvent.click(within(readerMain).getByRole("button", { name: "Send note with paragraph" }));
+    await waitFor(() => {
+      expect(
+        JSON.parse(window.localStorage.getItem(`${READER_STATE_STORAGE_PREFIX}book-chat`) ?? "null"),
+      ).toMatchObject({
+        focusedParagraphIndex: 1,
+        note: "Reader note",
+        question: "聊聊这一段",
+      });
+    });
+    expect(loadReaderStateSpy).toHaveBeenCalledTimes(readsAfterOpen);
+
+    fireEvent.change(within(readerMain).getByLabelText("Question about focused paragraph"), {
+      target: { value: "Why this paragraph?" },
+    });
+    fireEvent.click(within(readerMain).getByRole("button", { name: "Ask about paragraph" }));
+    await waitFor(() => {
+      expect(
+        JSON.parse(window.localStorage.getItem(`${READER_STATE_STORAGE_PREFIX}book-chat`) ?? "null"),
+      ).toMatchObject({
+        focusedParagraphIndex: 1,
+        note: "Reader note",
+        question: "Why this paragraph?",
+      });
+    });
+    expect(loadReaderStateSpy).toHaveBeenCalledTimes(readsAfterOpen);
+
+    loadReaderStateSpy.mockRestore();
   });
 
   it("keeps the sidebar session list rendering when reader storage reads are blocked", async () => {
