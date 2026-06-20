@@ -40,21 +40,32 @@ export function ReaderDocument({
     [onFocusParagraph],
   );
 
-  const handleClick = useCallback(
-    (paragraph: ReaderParagraph) => {
-      if (selectedText()) return;
+  const handleSelectionAwareFocus = useCallback(
+    (paragraph: ReaderParagraph, captureSelection: boolean) => {
+      const text = selectedText();
+      if (text) {
+        if (captureSelection) onSelectedText(text, paragraph.index);
+        return;
+      }
       handleFocusParagraph(paragraph.index);
     },
-    [handleFocusParagraph],
+    [handleFocusParagraph, onSelectedText],
+  );
+
+  const handleClick = useCallback(
+    (paragraph: ReaderParagraph) => {
+      handleSelectionAwareFocus(paragraph, false);
+    },
+    [handleSelectionAwareFocus],
   );
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLDivElement>, paragraph: ReaderParagraph) => {
       if (event.key !== "Enter" && event.key !== " ") return;
       event.preventDefault();
-      handleFocusParagraph(paragraph.index);
+      handleSelectionAwareFocus(paragraph, true);
     },
-    [handleFocusParagraph],
+    [handleSelectionAwareFocus],
   );
 
   return (

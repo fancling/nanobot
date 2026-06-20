@@ -95,6 +95,34 @@ describe("ReaderMode", () => {
     });
   });
 
+  it("keeps selected text after keyboard paragraph activation", () => {
+    const onChange = vi.fn();
+    getSelectionSpy.mockReturnValue({ toString: () => "Focused passage" } as Selection);
+    render(
+      <ReaderMode
+        state={state()}
+        disabled={false}
+        persistenceFailed={false}
+        onChange={onChange}
+        onClose={vi.fn()}
+        onSendReading={vi.fn()}
+      />,
+    );
+
+    fireEvent.keyDown(screen.getByRole("button", { name: /Focus paragraph 2/i }), {
+      key: "Enter",
+    });
+
+    expect(onChange).toHaveBeenCalledWith({
+      focusedParagraphIndex: 1,
+      selectedText: "Focused passage",
+    });
+    expect(onChange).not.toHaveBeenLastCalledWith({
+      focusedParagraphIndex: 1,
+      selectedText: "",
+    });
+  });
+
   it("sends a paragraph question with a reading snapshot", () => {
     const onSendReading = vi.fn();
     render(
