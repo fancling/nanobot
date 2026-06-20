@@ -55,6 +55,46 @@ describe("ReaderMode", () => {
     expect(screen.getByRole("button", { name: /Focus paragraph 2/i })).toBeInTheDocument();
   });
 
+  it("renders section controls and navigates sections", () => {
+    const onChange = vi.fn();
+    render(
+      <ReaderMode
+        state={state({
+          activeSectionIndex: 1,
+          sections: [
+            { id: "s-1", title: "Opening", rawText: "Opening.", paragraphCount: 1 },
+            { id: "s-2", title: "Middle", rawText: "Middle.", paragraphCount: 1 },
+            { id: "s-3", title: "Ending", rawText: "Ending.", paragraphCount: 1 },
+          ],
+        })}
+        disabled={false}
+        persistenceFailed={false}
+        onChange={onChange}
+        onClose={vi.fn()}
+        onSendReading={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Middle")).toBeInTheDocument();
+    expect(screen.getByText("2 / 3")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Previous section/i }));
+    expect(onChange).toHaveBeenCalledWith({
+      activeSectionIndex: 0,
+      rawText: "Opening.",
+      focusedParagraphIndex: 0,
+      selectedText: "",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Next section/i }));
+    expect(onChange).toHaveBeenCalledWith({
+      activeSectionIndex: 2,
+      rawText: "Ending.",
+      focusedParagraphIndex: 0,
+      selectedText: "",
+    });
+  });
+
   it("clicking a paragraph updates the focused paragraph", () => {
     const onChange = vi.fn();
     render(
