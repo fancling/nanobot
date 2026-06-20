@@ -355,6 +355,64 @@ async def test_webui_message_envelope_marks_inbound_metadata(bus: MagicMock) -> 
 
 
 @pytest.mark.asyncio
+async def test_webui_message_envelope_accepts_reading_snapshot_metadata(bus: MagicMock) -> None:
+    channel = _ch(bus)
+    conn = MagicMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {
+            "type": "message",
+            "chat_id": "reading-chat",
+            "content": "聊聊这一段",
+            "webui": True,
+            "reading_snapshot": {
+                "version": 1,
+                "scene": "reading",
+                "document": {"id": "doc-1", "title": "Essay", "kind": "markdown"},
+                "location": {"paragraph_index": 1, "paragraph_count": 3},
+                "focus": {"focused_text": "Focused passage."},
+            },
+        },
+    )
+
+    inbound = bus.publish_inbound.await_args.args[0]
+    assert inbound.content == "聊聊这一段"
+    assert inbound.metadata["reading_snapshot"]["scene"] == "reading"
+    assert inbound.metadata["reading_snapshot"]["focus"]["focused_text"] == "Focused passage."
+
+
+@pytest.mark.asyncio
+async def test_webui_message_envelope_rejects_malformed_reading_snapshot(
+    bus: MagicMock,
+) -> None:
+    channel = _ch(bus)
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {
+            "type": "message",
+            "chat_id": "reading-chat",
+            "content": "聊聊这一段",
+            "webui": True,
+            "reading_snapshot": {"version": 1, "scene": "chat"},
+        },
+    )
+
+    conn.send.assert_awaited()
+    payload = json.loads(conn.send.await_args.args[0])
+    assert payload["event"] == "error"
+    assert payload["detail"] == "reading_snapshot_rejected"
+    assert payload["reason"]
+    bus.publish_inbound.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_webui_message_envelope_persists_user_transcript_for_refresh(
     bus: MagicMock,
     tmp_path,

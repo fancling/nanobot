@@ -27,6 +27,7 @@ from nanobot.security.workspace_access import (
     WORKSPACE_SCOPE_METADATA_KEY,
     WorkspaceScopeError,
 )
+from nanobot.reading_snapshot import ReadingSnapshotError, normalize_reading_snapshot
 from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.webui_turns import websocket_turn_wall_started_at
 from nanobot.utils.media_decode import (
@@ -777,6 +778,20 @@ class WebSocketChannel(BaseChannel):
                     "enabled": True,
                     "aspect_ratio": aspect_ratio if isinstance(aspect_ratio, str) else None,
                 }
+            raw_reading_snapshot = envelope.get("reading_snapshot")
+            if raw_reading_snapshot is not None:
+                try:
+                    metadata["reading_snapshot"] = normalize_reading_snapshot(
+                        raw_reading_snapshot,
+                    )
+                except ReadingSnapshotError as exc:
+                    await self._send_event(
+                        connection,
+                        "error",
+                        detail="reading_snapshot_rejected",
+                        reason=str(exc),
+                    )
+                    return
             if metadata.get("webui") is True and self.is_allowed(client_id):
                 self._transcripts.append_user_message(
                     cid,
