@@ -2,14 +2,17 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 
 import { ReaderAgentPresence } from "@/components/thread/reader/ReaderAgentPresence";
-import { ReaderCompanionRail } from "@/components/thread/reader/ReaderCompanionRail";
+import { ReaderChatPanel } from "@/components/thread/reader/ReaderChatPanel";
 import { ReaderDocument } from "@/components/thread/reader/ReaderDocument";
 import { Button } from "@/components/ui/button";
 import { parseReaderParagraphs, type ReaderState } from "@/lib/reading";
-import type { ReadingSnapshot } from "@/lib/types";
+import type { ReadingSnapshot, UIMessage } from "@/lib/types";
 
 interface ReaderModeProps {
   state: ReaderState;
+  messages?: UIMessage[];
+  chatLoading?: boolean;
+  isStreaming?: boolean;
   disabled: boolean;
   persistenceFailed: boolean;
   onChange: (patch: Partial<ReaderState>) => void;
@@ -19,6 +22,9 @@ interface ReaderModeProps {
 
 export function ReaderMode({
   state,
+  messages = [],
+  chatLoading = false,
+  isStreaming = false,
   disabled,
   persistenceFailed,
   onChange,
@@ -142,9 +148,12 @@ export function ReaderMode({
           }}
         />
       </div>
-      <ReaderCompanionRail
+      <ReaderChatPanel
         key={`${state.documentId}:${activeSection?.id ?? "raw"}`}
         state={activeState}
+        messages={messages}
+        loading={chatLoading}
+        isStreaming={isStreaming}
         disabled={disabled}
         persistenceFailed={persistenceFailed}
         onChange={onChange}
