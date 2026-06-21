@@ -39,6 +39,35 @@ def test_normalize_reading_snapshot_accepts_valid_payload() -> None:
     assert normalized["focus"]["selected_text"] is None
 
 
+def test_normalize_reading_snapshot_accepts_book_level_payload_without_focus() -> None:
+    payload = {
+        "version": 1,
+        "scene": "reading",
+        "document": {"id": "doc-1", "title": "My Essay", "kind": "markdown"},
+        "location": {"paragraph_index": None, "paragraph_count": 8, "progress_label": None},
+        "focus": {
+            "focused_text": "",
+            "selected_text": None,
+            "before": "",
+            "after": "",
+            "user_note": "",
+            "current_question": "Summarize the chapter so far.",
+        },
+        "reading_state": {"mode": "slow_reading", "engagement": "actively_reflecting"},
+        "prediction": {
+            "likely_need": "respond to the current book-level question",
+            "bad_response_risk": "avoid assuming a paragraph focus",
+        },
+    }
+
+    normalized = normalize_reading_snapshot(payload)
+
+    assert normalized["location"]["paragraph_index"] is None
+    assert normalized["location"]["paragraph_count"] == 8
+    assert normalized["focus"]["focused_text"] == ""
+    assert normalized["focus"]["current_question"] == "Summarize the chapter so far."
+
+
 @pytest.mark.parametrize(
     "payload",
     [

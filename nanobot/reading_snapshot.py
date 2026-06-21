@@ -49,15 +49,16 @@ def normalize_reading_snapshot(value: Any) -> dict[str, Any]:
         else {}
     )
 
-    focused_text = _text(focus, "focused_text", group="focus", required=True)
-    if not focused_text:
-        raise ReadingSnapshotError("reading_snapshot focus.focused_text is required")
-
     paragraph_count = max(1, _int(location.get("paragraph_count"), default=1))
-    paragraph_index = min(
-        paragraph_count - 1,
-        max(0, _int(location.get("paragraph_index"), default=0)),
+    raw_paragraph_index = location.get("paragraph_index")
+    paragraph_index = (
+        None
+        if raw_paragraph_index is None
+        else min(paragraph_count - 1, max(0, _int(raw_paragraph_index, default=0)))
     )
+    focused_text = _text(focus, "focused_text", group="focus", required=True)
+    if paragraph_index is not None and not focused_text:
+        raise ReadingSnapshotError("reading_snapshot focus.focused_text is required")
 
     return {
         "version": 1,

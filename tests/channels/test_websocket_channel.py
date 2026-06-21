@@ -385,6 +385,38 @@ async def test_webui_message_envelope_accepts_reading_snapshot_metadata(bus: Mag
 
 
 @pytest.mark.asyncio
+async def test_webui_message_envelope_accepts_book_level_reading_snapshot(
+    bus: MagicMock,
+) -> None:
+    channel = _ch(bus)
+    conn = MagicMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {
+            "type": "message",
+            "chat_id": "reading-chat",
+            "content": "Summarize the chapter so far.",
+            "webui": True,
+            "reading_snapshot": {
+                "version": 1,
+                "scene": "reading",
+                "document": {"id": "doc-1", "title": "Essay", "kind": "markdown"},
+                "location": {"paragraph_index": None, "paragraph_count": 3},
+                "focus": {"focused_text": "", "current_question": "Summarize the chapter so far."},
+            },
+        },
+    )
+
+    inbound = bus.publish_inbound.await_args.args[0]
+    assert inbound.content == "Summarize the chapter so far."
+    assert inbound.metadata["reading_snapshot"]["location"]["paragraph_index"] is None
+    assert inbound.metadata["reading_snapshot"]["focus"]["focused_text"] == ""
+
+
+@pytest.mark.asyncio
 async def test_webui_message_envelope_rejects_malformed_reading_snapshot(
     bus: MagicMock,
 ) -> None:
