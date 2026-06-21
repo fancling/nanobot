@@ -62,7 +62,12 @@ describe("ReaderMode", () => {
     expect(screen.getByRole("region", { name: /reader document/i })).toBeInTheDocument();
     const chatPanel = screen.getByRole("complementary", { name: /reader chat/i });
     expect(chatPanel).toBeInTheDocument();
-    expect(chatPanel).toHaveClass("max-h-[45vh]", "min-h-0", "lg:max-h-none");
+    expect(chatPanel).toHaveClass(
+      "max-h-[45vh]",
+      "min-h-0",
+      "lg:max-h-none",
+      "lg:w-[clamp(24rem,34%,34rem)]",
+    );
     expect(within(chatPanel).getByText("What does this mean?")).toBeInTheDocument();
     expect(within(chatPanel).getByText("It marks a shift.")).toBeInTheDocument();
     expect(within(chatPanel).queryByLabelText(/Question about focused paragraph/i)).not.toBeInTheDocument();
@@ -93,6 +98,29 @@ describe("ReaderMode", () => {
       within(chatPanel).queryByText("Ask about the focused paragraph to start this book conversation."),
     ).not.toBeInTheDocument();
     expect(within(chatPanel).getByLabelText(/Reader chat message/i)).toBeInTheDocument();
+  });
+
+  it("renders compact reader chat chrome around the message stream", () => {
+    render(
+      <ReaderMode
+        state={state({ focusedParagraphIndex: 1, selectedText: "Focused" })}
+        messages={[message({ id: "a-1", role: "assistant", content: "Reader answer", createdAt: 1 })]}
+        chatLoading={false}
+        isStreaming={false}
+        disabled={false}
+        persistenceFailed={false}
+        onChange={vi.fn()}
+        onClose={vi.fn()}
+        onSendReading={vi.fn()}
+      />,
+    );
+
+    const chatPanel = screen.getByRole("complementary", { name: /reader chat/i });
+    expect(within(chatPanel).queryByText("Current focus")).not.toBeInTheDocument();
+    expect(within(chatPanel).queryByText("Sends with the active reading context.")).not.toBeInTheDocument();
+    expect(within(chatPanel).getByLabelText("Focus: Focused passage.")).toHaveClass("truncate");
+    expect(within(chatPanel).getByLabelText("Selection: Focused")).toHaveClass("truncate");
+    expect(within(chatPanel).getByLabelText(/Reader chat message/i)).toHaveClass("min-h-14");
   });
 
   it("renders section controls and navigates sections", () => {
@@ -599,7 +627,7 @@ describe("ReaderMode", () => {
       />,
     );
 
-    expect(screen.getByText(/Selected text/i)).toBeInTheDocument();
+    expect(screen.getByLabelText("Selection: Focused")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/Reader chat message/i), {
       target: { value: "What does this word imply?" },
     });
