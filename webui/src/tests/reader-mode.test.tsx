@@ -457,6 +457,48 @@ describe("ReaderMode", () => {
     );
   });
 
+  it("sends a reader chat message without an active paragraph focus", () => {
+    const onChange = vi.fn();
+    const onSendReading = vi.fn();
+    render(
+      <ReaderMode
+        state={state({ focusedParagraphIndex: null })}
+        messages={[]}
+        chatLoading={false}
+        isStreaming={false}
+        disabled={false}
+        persistenceFailed={false}
+        onChange={onChange}
+        onClose={vi.fn()}
+        onSendReading={onSendReading}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText(/Reader chat message/i), {
+      target: { value: "Summarize the chapter so far." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(onChange).toHaveBeenCalledWith({
+      focusedParagraphIndex: null,
+      selectedText: "",
+      note: "",
+      question: "Summarize the chapter so far.",
+    });
+    expect(onSendReading).toHaveBeenCalledWith(
+      "Summarize the chapter so far.",
+      expect.objectContaining({
+        location: expect.objectContaining({
+          paragraph_index: null,
+        }),
+        focus: expect.objectContaining({
+          focused_text: "",
+          current_question: "Summarize the chapter so far.",
+        }),
+      }),
+    );
+  });
+
   it("clears the local pending reader prompt after history contains it", () => {
     const { rerender } = render(
       <ReaderMode
@@ -537,6 +579,49 @@ describe("ReaderMode", () => {
 
     expect(screen.queryByText("Waiting for response...")).not.toBeInTheDocument();
     expect(screen.getByText("Fresh answer from the model.")).toBeInTheDocument();
+  });
+
+  it("keeps the local pending reader prompt visible while history refreshes", () => {
+    const { rerender } = render(
+      <ReaderMode
+        state={state({ focusedParagraphIndex: 1 })}
+        messages={[
+          { id: "u-old", role: "user", content: "Previous question", createdAt: 1 },
+          { id: "a-old", role: "assistant", content: "Previous answer", createdAt: 2 },
+        ]}
+        chatLoading={false}
+        isStreaming={false}
+        disabled={false}
+        persistenceFailed={false}
+        onChange={vi.fn()}
+        onClose={vi.fn()}
+        onSendReading={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(screen.getByText("Waiting for response...")).toBeInTheDocument();
+
+    rerender(
+      <ReaderMode
+        state={state({ focusedParagraphIndex: 1 })}
+        messages={[
+          { id: "u-old", role: "user", content: "Previous question", createdAt: 1 },
+          { id: "a-old", role: "assistant", content: "Previous answer", createdAt: 2 },
+        ]}
+        chatLoading
+        isStreaming={false}
+        disabled={false}
+        persistenceFailed={false}
+        onChange={vi.fn()}
+        onClose={vi.fn()}
+        onSendReading={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Waiting for response...")).toBeInTheDocument();
+    expect(screen.getByText("Previous answer")).toBeInTheDocument();
+    expect(screen.queryByText("Loading book conversation...")).not.toBeInTheDocument();
   });
 
   it("renders the reader send action inside the message input", () => {

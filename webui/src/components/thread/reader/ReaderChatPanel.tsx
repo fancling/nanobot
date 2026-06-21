@@ -47,7 +47,7 @@ export function ReaderChatPanel({
       ? Math.max(0, Math.min(state.focusedParagraphIndex, paragraphs.length - 1))
       : 0;
   const focused = activeParagraphIndex === null ? undefined : paragraphs[activeParagraphIndex];
-  const canSend = Boolean(focused) && !disabled;
+  const canSend = paragraphs.length > 0 && !disabled;
   const displayMessages = pendingPrompt ? [...messages, pendingPrompt] : messages;
 
   useEffect(() => {
@@ -63,8 +63,8 @@ export function ReaderChatPanel({
 
   const send = (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
-    if (!focused || disabled) return;
-    const question = draft.trim() || "聊聊这一段";
+    if (paragraphs.length === 0 || disabled) return;
+    const question = draft.trim() || (focused ? "聊聊这一段" : "聊聊这本书");
     const nextState: ReaderState = {
       ...state,
       focusedParagraphIndex: activeParagraphIndex,
@@ -138,7 +138,7 @@ export function ReaderChatPanel({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
-        {loading ? (
+        {loading && displayMessages.length === 0 ? (
           <p className="text-sm text-muted-foreground">Loading book conversation...</p>
         ) : displayMessages.length > 0 ? (
           <>
@@ -171,7 +171,9 @@ export function ReaderChatPanel({
                 ? state.selectedText
                   ? "Ask about the selected text"
                   : "Ask about the focused paragraph"
-                : "Select a paragraph first"
+                : paragraphs.length > 0
+                  ? "Ask about this book"
+                  : "Select a paragraph first"
             }
             disabled={disabled}
           />
