@@ -5,9 +5,14 @@ import { ReaderPage } from "@/components/reader/ReaderPage";
 import type { ReaderState } from "@/lib/reading";
 import type { UIMessage } from "@/lib/types";
 import { useSessionHistory } from "@/hooks/useSessions";
+import { useClient } from "@/providers/ClientProvider";
 
 vi.mock("@/hooks/useSessions", () => ({
   useSessionHistory: vi.fn(),
+}));
+
+vi.mock("@/providers/ClientProvider", () => ({
+  useClient: vi.fn(),
 }));
 
 function state(overrides: Partial<ReaderState> = {}): ReaderState {
@@ -33,12 +38,23 @@ function state(overrides: Partial<ReaderState> = {}): ReaderState {
 
 describe("ReaderPage", () => {
   const useSessionHistoryMock = vi.mocked(useSessionHistory);
+  const useClientMock = vi.mocked(useClient);
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
   beforeEach(() => {
+    useClientMock.mockReturnValue({
+      client: {
+        onSessionUpdate: vi.fn(() => vi.fn()),
+      },
+      token: null,
+      status: "open",
+      modelName: null,
+      modelPreset: null,
+      setRuntimeModel: vi.fn(),
+    });
     useSessionHistoryMock.mockReturnValue({
       messages: [],
       loading: false,
@@ -149,5 +165,60 @@ describe("ReaderPage", () => {
     const chatPanel = screen.getByRole("complementary", { name: /reader chat/i });
     expect(chatPanel).toHaveTextContent("Explain this image");
     expect(chatPanel).toHaveTextContent("The passage is contrasting memory and place.");
+  });
+
+  it("refreshes the active book history after thread updates", () => {
+    const refresh = vi.fn();
+    let sessionUpdateHandler: ((chatId: string, scope?: string) => void) | null = null;
+    const unsubscribe = vi.fn();
+    useClientMock.mockReturnValue({
+      client: {
+        onSessionUpdate: vi.fn((handler: (chatId: string, scope?: string) => void) => {
+          sessionUpdateHandler = handler;
+          return unsubscribe;
+        }),
+      },
+      token: null,
+      status: "open",
+      modelName: null,
+      modelPreset: null,
+      setRuntimeModel: vi.fn(),
+    });
+    useSessionHistoryMock.mockReturnValue({
+      messages: [],
+      loading: false,
+      loadingOlder: false,
+      error: null,
+      refresh,
+      loadOlder: vi.fn(),
+      hasMoreBefore: false,
+      userMessageOffset: 0,
+      version: 0,
+      forkBoundaryMessageCount: null,
+      hasPendingToolCalls: false,
+    });
+
+    const { unmount } = render(
+      <ReaderPage
+        state={state()}
+        sessionKey="websocket:book-1"
+        disabled={false}
+        persistenceFailed={false}
+        onChange={vi.fn()}
+        onImportEpub={vi.fn()}
+        onSendReading={vi.fn()}
+        onBackToChat={vi.fn()}
+      />,
+    );
+
+    sessionUpdateHandler?.("other-book", "thread");
+    sessionUpdateHandler?.("book-1", "metadata");
+    expect(refresh).not.toHaveBeenCalled();
+
+    sessionUpdateHandler?.("book-1", "thread");
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    unmount();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 });

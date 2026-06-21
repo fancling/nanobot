@@ -496,6 +496,49 @@ describe("ReaderMode", () => {
     expect(screen.getByText("This paragraph sets the contrast.")).toBeInTheDocument();
   });
 
+  it("clears the local pending reader prompt after refreshed history adds an assistant reply", () => {
+    const { rerender } = render(
+      <ReaderMode
+        state={state({ focusedParagraphIndex: 1 })}
+        messages={[
+          { id: "u-old", role: "user", content: "Previous question", createdAt: 1 },
+          { id: "a-old", role: "assistant", content: "Previous answer", createdAt: 2 },
+        ]}
+        chatLoading={false}
+        isStreaming={false}
+        disabled={false}
+        persistenceFailed={false}
+        onChange={vi.fn()}
+        onClose={vi.fn()}
+        onSendReading={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(screen.getByText("Waiting for response...")).toBeInTheDocument();
+
+    rerender(
+      <ReaderMode
+        state={state({ focusedParagraphIndex: 1 })}
+        messages={[
+          { id: "u-old", role: "user", content: "Previous question", createdAt: 1 },
+          { id: "a-old", role: "assistant", content: "Previous answer", createdAt: 2 },
+          { id: "a-new", role: "assistant", content: "Fresh answer from the model.", createdAt: 3 },
+        ]}
+        chatLoading={false}
+        isStreaming={false}
+        disabled={false}
+        persistenceFailed={false}
+        onChange={vi.fn()}
+        onClose={vi.fn()}
+        onSendReading={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("Waiting for response...")).not.toBeInTheDocument();
+    expect(screen.getByText("Fresh answer from the model.")).toBeInTheDocument();
+  });
+
   it("renders the reader send action inside the message input", () => {
     render(
       <ReaderMode

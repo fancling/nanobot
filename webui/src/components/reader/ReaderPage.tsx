@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { ArrowLeft, BookOpen, Upload } from "lucide-react";
 
 import { ReaderMode } from "@/components/thread/reader/ReaderMode";
@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { useSessionHistory } from "@/hooks/useSessions";
 import type { ReaderState } from "@/lib/reading";
 import type { ReadingSnapshot } from "@/lib/types";
+import { useClient } from "@/providers/ClientProvider";
 
 interface ReaderPageProps {
   state: ReaderState | null;
@@ -28,13 +29,29 @@ export function ReaderPage({
   onSendReading,
   onBackToChat,
 }: ReaderPageProps) {
+  const { client } = useClient();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const {
     messages,
     loading: chatLoading,
+    refresh: refreshHistory,
     hasPendingToolCalls,
   } = useSessionHistory(sessionKey);
+  const activeChatId = useMemo(() => {
+    if (!sessionKey) return null;
+    const [channel, chatId] = sessionKey.split(":", 2);
+    return channel === "websocket" && chatId ? chatId : null;
+  }, [sessionKey]);
   const shellClassName = "flex min-h-0 flex-1 flex-col bg-background";
+
+  useEffect(() => {
+    if (!activeChatId) return;
+    return client.onSessionUpdate((updatedChatId, scope) => {
+      if (updatedChatId !== activeChatId) return;
+      if (scope === "metadata") return;
+      refreshHistory();
+    });
+  }, [activeChatId, client, refreshHistory]);
 
   const importInput = (
     <input

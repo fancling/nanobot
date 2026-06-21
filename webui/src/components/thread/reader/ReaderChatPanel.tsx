@@ -11,6 +11,10 @@ import {
 } from "@/lib/reading";
 import type { ReadingSnapshot, UIMessage } from "@/lib/types";
 
+type PendingReaderPrompt = UIMessage & {
+  baselineMessageCount: number;
+};
+
 interface ReaderChatPanelProps {
   state: ReaderState;
   messages: UIMessage[];
@@ -35,7 +39,7 @@ export function ReaderChatPanel({
   onSendReading,
 }: ReaderChatPanelProps) {
   const [draft, setDraft] = useState("");
-  const [pendingPrompt, setPendingPrompt] = useState<UIMessage | null>(null);
+  const [pendingPrompt, setPendingPrompt] = useState<PendingReaderPrompt | null>(null);
   const paragraphs = useMemo(() => parseReaderParagraphs(state.rawText), [state.rawText]);
   const activeParagraphIndex = state.focusedParagraphIndex === null
     ? null
@@ -51,7 +55,8 @@ export function ReaderChatPanel({
     const promptInHistory = messages.some(
       (message) => message.role === "user" && message.content === pendingPrompt.content,
     );
-    if (promptInHistory) {
+    const historyAdvanced = messages.length > pendingPrompt.baselineMessageCount;
+    if (promptInHistory || historyAdvanced) {
       setPendingPrompt(null);
     }
   }, [messages, pendingPrompt]);
@@ -76,6 +81,7 @@ export function ReaderChatPanel({
       role: "user",
       content: question,
       createdAt: Date.now(),
+      baselineMessageCount: messages.length,
     });
     onSendReading(question, buildReadingSnapshot(nextState));
     setDraft("");
