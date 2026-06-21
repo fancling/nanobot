@@ -3,11 +3,13 @@ import { ArrowLeft, BookOpen, Upload } from "lucide-react";
 
 import { ReaderMode } from "@/components/thread/reader/ReaderMode";
 import { Button } from "@/components/ui/button";
+import { useSessionHistory } from "@/hooks/useSessions";
 import type { ReaderState } from "@/lib/reading";
 import type { ReadingSnapshot } from "@/lib/types";
 
 interface ReaderPageProps {
   state: ReaderState | null;
+  sessionKey: string | null;
   disabled: boolean;
   persistenceFailed: boolean;
   onChange: (patch: Partial<ReaderState>) => void;
@@ -18,6 +20,7 @@ interface ReaderPageProps {
 
 export function ReaderPage({
   state,
+  sessionKey,
   disabled,
   persistenceFailed,
   onChange,
@@ -26,6 +29,11 @@ export function ReaderPage({
   onBackToChat,
 }: ReaderPageProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const {
+    messages,
+    loading: chatLoading,
+    hasPendingToolCalls,
+  } = useSessionHistory(sessionKey);
   const shellClassName = "flex min-h-0 flex-1 flex-col bg-background";
 
   const importInput = (
@@ -89,6 +97,9 @@ export function ReaderPage({
       ) : null}
       <ReaderMode
         state={state}
+        messages={messages}
+        chatLoading={chatLoading}
+        isStreaming={hasPendingToolCalls || messages.some((message) => message.isStreaming)}
         disabled={disabled}
         persistenceFailed={persistenceFailed}
         onChange={onChange}

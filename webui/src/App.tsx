@@ -1806,6 +1806,7 @@ function Shell({
               <div className="absolute inset-0 flex flex-col">
                 <ReaderPage
                   state={readerState}
+                  sessionKey={activeSession?.key ?? null}
                   disabled={false}
                   persistenceFailed={readerPersistenceFailed}
                   onChange={onReaderChange}

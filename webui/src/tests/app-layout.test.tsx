@@ -494,7 +494,7 @@ describe("App layout", () => {
     expect(window.location.hash).toBe("#/reader?chat=websocket%3Abook-chat");
   });
 
-  it("does not refresh sidebar reader markers for focus, note, or question reader edits", async () => {
+  it("does not refresh sidebar reader markers for focus or reader chat edits", async () => {
     window.localStorage.setItem(
       `${READER_STATE_STORAGE_PREFIX}book-chat`,
       JSON.stringify({
@@ -555,31 +555,17 @@ describe("App layout", () => {
     });
     expect(loadReaderSessionChatIdSetSpy).toHaveBeenCalledTimes(scansAfterOpen);
 
-    fireEvent.change(within(readerMain).getByLabelText("Note for this paragraph"), {
-      target: { value: "Reader note" },
-    });
-    fireEvent.click(within(readerMain).getByRole("button", { name: "Send note with paragraph" }));
-    await waitFor(() => {
-      expect(
-        JSON.parse(window.localStorage.getItem(`${READER_STATE_STORAGE_PREFIX}book-chat`) ?? "null"),
-      ).toMatchObject({
-        focusedParagraphIndex: 1,
-        note: "Reader note",
-        question: "聊聊这一段",
-      });
-    });
-    expect(loadReaderSessionChatIdSetSpy).toHaveBeenCalledTimes(scansAfterOpen);
-
-    fireEvent.change(within(readerMain).getByLabelText("Question about focused paragraph"), {
+    expect(within(readerMain).queryByLabelText("Note for this paragraph")).not.toBeInTheDocument();
+    fireEvent.change(within(readerMain).getByLabelText("Reader chat message"), {
       target: { value: "Why this paragraph?" },
     });
-    fireEvent.click(within(readerMain).getByRole("button", { name: "Ask about paragraph" }));
+    fireEvent.click(within(readerMain).getByRole("button", { name: "Send reader message" }));
     await waitFor(() => {
       expect(
         JSON.parse(window.localStorage.getItem(`${READER_STATE_STORAGE_PREFIX}book-chat`) ?? "null"),
       ).toMatchObject({
         focusedParagraphIndex: 1,
-        note: "Reader note",
+        note: "",
         question: "Why this paragraph?",
       });
     });

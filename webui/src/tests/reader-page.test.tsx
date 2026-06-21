@@ -3,6 +3,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ReaderPage } from "@/components/reader/ReaderPage";
 import type { ReaderState } from "@/lib/reading";
+import type { UIMessage } from "@/lib/types";
+import { useSessionHistory } from "@/hooks/useSessions";
+
+vi.mock("@/hooks/useSessions", () => ({
+  useSessionHistory: vi.fn(),
+}));
 
 function state(overrides: Partial<ReaderState> = {}): ReaderState {
   return {
@@ -26,8 +32,26 @@ function state(overrides: Partial<ReaderState> = {}): ReaderState {
 }
 
 describe("ReaderPage", () => {
+  const useSessionHistoryMock = vi.mocked(useSessionHistory);
+
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  beforeEach(() => {
+    useSessionHistoryMock.mockReturnValue({
+      messages: [],
+      loading: false,
+      loadingOlder: false,
+      error: null,
+      refresh: vi.fn(),
+      loadOlder: vi.fn(),
+      hasMoreBefore: false,
+      userMessageOffset: 0,
+      version: 0,
+      forkBoundaryMessageCount: null,
+      hasPendingToolCalls: false,
+    });
   });
 
   it("renders an empty reader page without an active book", () => {
@@ -36,6 +60,7 @@ describe("ReaderPage", () => {
     render(
       <ReaderPage
         state={null}
+        sessionKey={null}
         disabled={false}
         persistenceFailed={false}
         onChange={vi.fn()}
@@ -65,6 +90,7 @@ describe("ReaderPage", () => {
     render(
       <ReaderPage
         state={state({ focusedParagraphIndex: 1 })}
+        sessionKey="websocket:book-1"
         disabled={false}
         persistenceFailed={false}
         onChange={vi.fn()}
@@ -74,10 +100,10 @@ describe("ReaderPage", () => {
       />,
     );
 
-    fireEvent.change(screen.getByLabelText(/Question about focused paragraph/i), {
+    fireEvent.change(screen.getByLabelText(/Reader chat message/i), {
       target: { value: "Why this paragraph?" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /Ask about paragraph/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Send reader message/i }));
 
     expect(onSendReading).toHaveBeenCalledWith(
       "Why this paragraph?",
@@ -85,5 +111,43 @@ describe("ReaderPage", () => {
         focus: expect.objectContaining({ focused_text: "Second paragraph." }),
       }),
     );
+  });
+
+  it("renders the active book session history in the reader chat", () => {
+    const messages: UIMessage[] = [
+      { id: "u-1", role: "user", content: "Explain this image", createdAt: 1 },
+      { id: "a-1", role: "assistant", content: "The passage is contrasting memory and place.", createdAt: 2 },
+    ];
+    useSessionHistoryMock.mockReturnValue({
+      messages,
+      loading: false,
+      loadingOlder: false,
+      error: null,
+      refresh: vi.fn(),
+      loadOlder: vi.fn(),
+      hasMoreBefore: false,
+      userMessageOffset: 0,
+      version: 1,
+      forkBoundaryMessageCount: null,
+      hasPendingToolCalls: false,
+    });
+
+    render(
+      <ReaderPage
+        state={state()}
+        sessionKey="websocket:book-1"
+        disabled={false}
+        persistenceFailed={false}
+        onChange={vi.fn()}
+        onImportEpub={vi.fn()}
+        onSendReading={vi.fn()}
+        onBackToChat={vi.fn()}
+      />,
+    );
+
+    expect(useSessionHistoryMock).toHaveBeenCalledWith("websocket:book-1");
+    const chatPanel = screen.getByRole("complementary", { name: /reader chat/i });
+    expect(chatPanel).toHaveTextContent("Explain this image");
+    expect(chatPanel).toHaveTextContent("The passage is contrasting memory and place.");
   });
 });
