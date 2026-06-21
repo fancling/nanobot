@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, BookOpen, Upload } from "lucide-react";
 
 import { ReaderMode } from "@/components/thread/reader/ReaderMode";
 import { Button } from "@/components/ui/button";
 import { useSessionHistory } from "@/hooks/useSessions";
+import type { StreamError } from "@/lib/nanobot-client";
 import type { ReaderState } from "@/lib/reading";
 import type { ReadingSnapshot } from "@/lib/types";
 import { useClient } from "@/providers/ClientProvider";
@@ -31,6 +32,7 @@ export function ReaderPage({
 }: ReaderPageProps) {
   const { client } = useClient();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [streamError, setStreamError] = useState<StreamError | null>(null);
   const {
     messages,
     loading: chatLoading,
@@ -52,6 +54,17 @@ export function ReaderPage({
       refreshHistory();
     });
   }, [activeChatId, client, refreshHistory]);
+
+  useEffect(() => {
+    setStreamError(null);
+  }, [activeChatId]);
+
+  useEffect(() => {
+    return client.onError((error) => {
+      if ("chatId" in error && error.chatId && error.chatId !== activeChatId) return;
+      setStreamError(error);
+    });
+  }, [activeChatId, client]);
 
   const importInput = (
     <input
@@ -119,6 +132,8 @@ export function ReaderPage({
         isStreaming={hasPendingToolCalls || messages.some((message) => message.isStreaming)}
         disabled={disabled}
         persistenceFailed={persistenceFailed}
+        streamError={streamError}
+        onDismissStreamError={() => setStreamError(null)}
         onChange={onChange}
         onClose={onBackToChat}
         onSendReading={onSendReading}

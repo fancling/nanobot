@@ -624,6 +624,44 @@ describe("ReaderMode", () => {
     expect(screen.queryByText("Loading book conversation...")).not.toBeInTheDocument();
   });
 
+  it("clears the local pending reader prompt when the request reports an error", () => {
+    const { rerender } = render(
+      <ReaderMode
+        state={state({ focusedParagraphIndex: 1 })}
+        messages={[]}
+        chatLoading={false}
+        isStreaming={false}
+        streamError={null}
+        disabled={false}
+        persistenceFailed={false}
+        onChange={vi.fn()}
+        onClose={vi.fn()}
+        onSendReading={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(screen.getByText("Waiting for response...")).toBeInTheDocument();
+
+    rerender(
+      <ReaderMode
+        state={state({ focusedParagraphIndex: 1 })}
+        messages={[]}
+        chatLoading={false}
+        isStreaming={false}
+        streamError={{ kind: "message_too_big" }}
+        disabled={false}
+        persistenceFailed={false}
+        onDismissStreamError={vi.fn()}
+        onChange={vi.fn()}
+        onClose={vi.fn()}
+        onSendReading={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("Waiting for response...")).not.toBeInTheDocument();
+  });
+
   it("renders the reader send action inside the message input", () => {
     render(
       <ReaderMode

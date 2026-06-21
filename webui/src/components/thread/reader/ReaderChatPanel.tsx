@@ -1,9 +1,11 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { ArrowUp, Bot, X } from "lucide-react";
 
+import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import type { StreamError } from "@/lib/nanobot-client";
 import {
   buildReadingSnapshot,
   parseReaderParagraphs,
@@ -20,8 +22,10 @@ interface ReaderChatPanelProps {
   messages: UIMessage[];
   loading: boolean;
   isStreaming: boolean;
+  streamError: StreamError | null;
   disabled: boolean;
   persistenceFailed: boolean;
+  onDismissStreamError: () => void;
   onChange: (patch: Partial<ReaderState>) => void;
   onClose: () => void;
   onSendReading: (content: string, snapshot: ReadingSnapshot) => void;
@@ -32,8 +36,10 @@ export function ReaderChatPanel({
   messages,
   loading,
   isStreaming,
+  streamError,
   disabled,
   persistenceFailed,
+  onDismissStreamError,
   onChange,
   onClose,
   onSendReading,
@@ -60,6 +66,10 @@ export function ReaderChatPanel({
       setPendingPrompt(null);
     }
   }, [messages, pendingPrompt]);
+
+  useEffect(() => {
+    if (streamError) setPendingPrompt(null);
+  }, [streamError]);
 
   const send = (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
@@ -154,6 +164,15 @@ export function ReaderChatPanel({
         <p className="border-t border-border px-4 py-2 text-xs text-muted-foreground">
           Reader draft persistence is unavailable in this browser context.
         </p>
+      ) : null}
+
+      {streamError ? (
+        <div className="border-t border-border bg-background px-2.5 pt-2">
+          <StreamErrorNotice
+            error={streamError}
+            onDismiss={onDismissStreamError}
+          />
+        </div>
       ) : null}
 
       <form className="border-t border-border bg-background p-2.5" onSubmit={send}>

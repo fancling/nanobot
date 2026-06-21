@@ -5,6 +5,7 @@ import { ReaderAgentPresence } from "@/components/thread/reader/ReaderAgentPrese
 import { ReaderChatPanel } from "@/components/thread/reader/ReaderChatPanel";
 import { ReaderDocument } from "@/components/thread/reader/ReaderDocument";
 import { Button } from "@/components/ui/button";
+import type { StreamError } from "@/lib/nanobot-client";
 import { parseReaderParagraphs, type ReaderState } from "@/lib/reading";
 import type { ReadingSnapshot, UIMessage } from "@/lib/types";
 
@@ -13,8 +14,10 @@ interface ReaderModeProps {
   messages?: UIMessage[];
   chatLoading?: boolean;
   isStreaming?: boolean;
+  streamError?: StreamError | null;
   disabled: boolean;
   persistenceFailed: boolean;
+  onDismissStreamError?: () => void;
   onChange: (patch: Partial<ReaderState>) => void;
   onClose: () => void;
   onSendReading: (content: string, snapshot: ReadingSnapshot) => void;
@@ -25,8 +28,10 @@ export function ReaderMode({
   messages = [],
   chatLoading = false,
   isStreaming = false,
+  streamError = null,
   disabled,
   persistenceFailed,
+  onDismissStreamError,
   onChange,
   onClose,
   onSendReading,
@@ -165,8 +170,10 @@ export function ReaderMode({
         messages={messages}
         loading={chatLoading}
         isStreaming={isStreaming}
+        streamError={streamError}
         disabled={disabled}
         persistenceFailed={persistenceFailed}
+        onDismissStreamError={onDismissStreamError ?? (() => {})}
         onChange={onChange}
         onClose={onClose}
         onSendReading={onSendReading}

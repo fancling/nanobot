@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ReaderPage } from "@/components/reader/ReaderPage";
@@ -47,6 +47,7 @@ describe("ReaderPage", () => {
   beforeEach(() => {
     useClientMock.mockReturnValue({
       client: {
+        onError: vi.fn(() => vi.fn()),
         onSessionUpdate: vi.fn(() => vi.fn()),
       },
       token: null,
@@ -173,6 +174,7 @@ describe("ReaderPage", () => {
     const unsubscribe = vi.fn();
     useClientMock.mockReturnValue({
       client: {
+        onError: vi.fn(() => vi.fn()),
         onSessionUpdate: vi.fn((handler: (chatId: string, scope?: string) => void) => {
           sessionUpdateHandler = handler;
           return unsubscribe;
@@ -217,6 +219,53 @@ describe("ReaderPage", () => {
 
     sessionUpdateHandler?.("book-1", "thread");
     expect(refresh).toHaveBeenCalledTimes(1);
+
+    unmount();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces and dismisses stream errors like the main chat panel", () => {
+    let errorHandler: ((error: { kind: "message_too_big" }) => void) | null = null;
+    const unsubscribe = vi.fn();
+    useClientMock.mockReturnValue({
+      client: {
+        onError: vi.fn((handler: (error: { kind: "message_too_big" }) => void) => {
+          errorHandler = handler;
+          return unsubscribe;
+        }),
+        onSessionUpdate: vi.fn(() => vi.fn()),
+      },
+      token: null,
+      status: "open",
+      modelName: null,
+      modelPreset: null,
+      setRuntimeModel: vi.fn(),
+    });
+
+    const { unmount } = render(
+      <ReaderPage
+        state={state()}
+        sessionKey="websocket:book-1"
+        disabled={false}
+        persistenceFailed={false}
+        onChange={vi.fn()}
+        onImportEpub={vi.fn()}
+        onSendReading={vi.fn()}
+        onBackToChat={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    act(() => {
+      errorHandler?.({ kind: "message_too_big" });
+    });
+
+    const banner = screen.getByRole("alert");
+    expect(banner).toHaveTextContent("Message too large");
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 
     unmount();
     expect(unsubscribe).toHaveBeenCalledTimes(1);
