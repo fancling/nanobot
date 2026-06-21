@@ -405,7 +405,7 @@ describe("ReaderMode", () => {
     fireEvent.change(screen.getByLabelText(/Reader chat message/i), {
       target: { value: "Why this turn?" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /Send reader message/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(onChange).toHaveBeenCalledWith({
       focusedParagraphIndex: 1,
@@ -440,7 +440,8 @@ describe("ReaderMode", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "聊聊这一段" }));
+    expect(screen.queryByRole("button", { name: "聊聊这一段" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     const chatPanel = screen.getByRole("complementary", { name: /reader chat/i });
     expect(within(chatPanel).getByText("Waiting for response...")).toBeInTheDocument();
@@ -471,7 +472,7 @@ describe("ReaderMode", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "聊聊这一段" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     expect(screen.getByText("Waiting for response...")).toBeInTheDocument();
 
     rerender(
@@ -495,7 +496,7 @@ describe("ReaderMode", () => {
     expect(screen.getByText("This paragraph sets the contrast.")).toBeInTheDocument();
   });
 
-  it("uses a standard send label after the reader chat draft has text", () => {
+  it("renders the reader send action inside the message input", () => {
     render(
       <ReaderMode
         state={state({ focusedParagraphIndex: 1 })}
@@ -510,12 +511,15 @@ describe("ReaderMode", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "聊聊这一段" })).toBeEnabled();
+    const sendButton = screen.getByRole("button", { name: "Send message" });
+    expect(sendButton).toBeEnabled();
+    expect(sendButton).toHaveClass("absolute", "bottom-2", "right-2", "rounded-full");
     fireEvent.change(screen.getByLabelText(/Reader chat message/i), {
       target: { value: "Why this turn?" },
     });
 
-    expect(screen.getByRole("button", { name: /Send reader message/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled();
+    expect(screen.queryByText("聊聊这一段")).not.toBeInTheDocument();
   });
 
   it("resets local chat draft when the document changes", () => {
@@ -556,7 +560,7 @@ describe("ReaderMode", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "聊聊这一段" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(onSendReading).not.toHaveBeenCalledWith("Doc A draft question", expect.anything());
     expect(onSendReading).toHaveBeenCalledWith(
@@ -595,7 +599,7 @@ describe("ReaderMode", () => {
     fireEvent.change(screen.getByLabelText(/Reader chat message/i), {
       target: { value: "Why the ending?" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /Send reader message/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(onSendReading).toHaveBeenCalledWith(
       "Why the ending?",
@@ -631,7 +635,7 @@ describe("ReaderMode", () => {
     fireEvent.change(screen.getByLabelText(/Reader chat message/i), {
       target: { value: "What does this word imply?" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /Send reader message/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() => {
       expect(onSendReading).toHaveBeenCalledWith(
@@ -682,7 +686,7 @@ describe("ReaderMode", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "聊聊这一段" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
     expect(screen.getByText(/Add reading text to begin/i)).toBeInTheDocument();
   });
 });

@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
-import { Bot, Send, X } from "lucide-react";
+import { ArrowUp, Bot, X } from "lucide-react";
 
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
 import { Button } from "@/components/ui/button";
@@ -44,7 +44,6 @@ export function ReaderChatPanel({
       : 0;
   const focused = activeParagraphIndex === null ? undefined : paragraphs[activeParagraphIndex];
   const canSend = Boolean(focused) && !disabled;
-  const hasDraft = draft.trim().length > 0;
   const displayMessages = pendingPrompt ? [...messages, pendingPrompt] : messages;
 
   useEffect(() => {
@@ -155,24 +154,29 @@ export function ReaderChatPanel({
         <label className="sr-only" htmlFor="reader-chat-message">
           Reader chat message
         </label>
-        <Textarea
-          id="reader-chat-message"
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          className="min-h-14 resize-none"
-          placeholder={
-            focused
-              ? state.selectedText
-                ? "Ask about the selected text"
-                : "Ask about the focused paragraph"
-              : "Select a paragraph first"
-          }
-          disabled={disabled}
-        />
-        <div className="mt-2 flex items-center justify-end gap-2">
-          <Button type="submit" className="shrink-0 gap-2" disabled={!canSend}>
-            <Send className="h-4 w-4" aria-hidden />
-            <span>{hasDraft ? "Send reader message" : "聊聊这一段"}</span>
+        <div className="relative">
+          <Textarea
+            id="reader-chat-message"
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            className="min-h-14 resize-none pb-10 pr-12"
+            placeholder={
+              focused
+                ? state.selectedText
+                  ? "Ask about the selected text"
+                  : "Ask about the focused paragraph"
+                : "Select a paragraph first"
+            }
+            disabled={disabled}
+          />
+          <Button
+            type="submit"
+            size="icon"
+            aria-label="Send message"
+            className="absolute bottom-2 right-2 h-8 w-8 rounded-full border border-foreground bg-foreground text-background shadow-[0_3px_10px_rgba(15,23,42,0.18)] transition-transform hover:scale-[1.03] hover:bg-foreground/90 active:scale-95 disabled:border-foreground disabled:bg-foreground disabled:text-background"
+            disabled={!canSend}
+          >
+            <ArrowUp className="h-4 w-4" aria-hidden />
           </Button>
         </div>
       </form>

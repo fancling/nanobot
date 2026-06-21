@@ -103,7 +103,7 @@ describe("ReaderPage", () => {
     fireEvent.change(screen.getByLabelText(/Reader chat message/i), {
       target: { value: "Why this paragraph?" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /Send reader message/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(onSendReading).toHaveBeenCalledWith(
       "Why this paragraph?",

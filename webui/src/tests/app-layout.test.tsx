@@ -559,7 +559,7 @@ describe("App layout", () => {
     fireEvent.change(within(readerMain).getByLabelText("Reader chat message"), {
       target: { value: "Why this paragraph?" },
     });
-    fireEvent.click(within(readerMain).getByRole("button", { name: "Send reader message" }));
+    fireEvent.click(within(readerMain).getByRole("button", { name: "Send message" }));
     await waitFor(() => {
       expect(
         JSON.parse(window.localStorage.getItem(`${READER_STATE_STORAGE_PREFIX}book-chat`) ?? "null"),
