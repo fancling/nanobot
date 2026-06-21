@@ -1,4 +1,4 @@
-import { type FormEvent, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { Bot, Send, X } from "lucide-react";
 
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
@@ -35,12 +35,25 @@ export function ReaderChatPanel({
   onSendReading,
 }: ReaderChatPanelProps) {
   const [draft, setDraft] = useState("");
+  const [pendingPrompt, setPendingPrompt] = useState<UIMessage | null>(null);
   const paragraphs = useMemo(() => parseReaderParagraphs(state.rawText), [state.rawText]);
   const activeParagraphIndex = paragraphs.length > 0
     ? Math.max(0, Math.min(state.focusedParagraphIndex, paragraphs.length - 1))
     : 0;
   const focused = paragraphs[activeParagraphIndex];
   const canSend = Boolean(focused) && !disabled;
+  const hasDraft = draft.trim().length > 0;
+  const displayMessages = pendingPrompt ? [...messages, pendingPrompt] : messages;
+
+  useEffect(() => {
+    if (!pendingPrompt) return;
+    const promptInHistory = messages.some(
+      (message) => message.role === "user" && message.content === pendingPrompt.content,
+    );
+    if (promptInHistory) {
+      setPendingPrompt(null);
+    }
+  }, [messages, pendingPrompt]);
 
   const send = (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
@@ -56,6 +69,12 @@ export function ReaderChatPanel({
       selectedText: state.selectedText,
       note: state.note,
       question,
+    });
+    setPendingPrompt({
+      id: `reader-pending-${Date.now()}`,
+      role: "user",
+      content: question,
+      createdAt: Date.now(),
     });
     onSendReading(question, buildReadingSnapshot(nextState));
     setDraft("");
@@ -101,13 +120,14 @@ export function ReaderChatPanel({
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {loading ? (
           <p className="text-sm text-muted-foreground">Loading book conversation...</p>
-        ) : messages.length > 0 ? (
-          <ThreadMessages messages={messages} isStreaming={isStreaming} />
-        ) : (
-          <div className="rounded-md border border-dashed border-border bg-background/70 p-4 text-sm leading-6 text-muted-foreground">
-            Ask about the focused paragraph to start this book conversation.
-          </div>
-        )}
+        ) : displayMessages.length > 0 ? (
+          <>
+            {pendingPrompt ? (
+              <p className="mb-3 text-xs text-muted-foreground">Waiting for response...</p>
+            ) : null}
+            <ThreadMessages messages={displayMessages} isStreaming={isStreaming} />
+          </>
+        ) : null}
       </div>
 
       {persistenceFailed ? (
@@ -134,7 +154,7 @@ export function ReaderChatPanel({
           </p>
           <Button type="submit" className="shrink-0 gap-2" disabled={!canSend}>
             <Send className="h-4 w-4" aria-hidden />
-            <span>Send reader message</span>
+            <span>{hasDraft ? "Send reader message" : "聊聊这一段"}</span>
           </Button>
         </div>
       </form>

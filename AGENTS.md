@@ -17,9 +17,21 @@ cd webui && bun run dev      # or NANOBOT_API_URL=... bun run dev
 cd webui && bun run build
 cd webui && bun run test
 
-# Gateway
-nanobot gateway
+# Gateway from source, not the installed `nanobot` entrypoint
+cd /Users/guquan/code/nanobot
+source .venv/bin/activate
+PYTHONPATH=$PWD python -m nanobot.cli.commands gateway \
+  --config /private/tmp/nanobot-source-config.json \
+  --workspace /private/tmp/nanobot-source-workspace \
+  --port 18791
 ```
+
+When validating WebUI behavior against source changes, make sure the gateway on
+port `18791` is the source process above. Port `8765` may be owned by an
+installed `nanobot gateway`; in that case frontend changes may load while backend
+changes such as WorkspaceFrame/windowframe do not. When using the Vite dev UI,
+also point its API/WebSocket target at the source gateway on `18791`, or open the
+source gateway's served WebUI directly.
 
 ## High-Level Architecture
 

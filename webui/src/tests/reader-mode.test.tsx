@@ -73,6 +73,28 @@ describe("ReaderMode", () => {
     expect(screen.getByRole("button", { name: /Focus paragraph 2/i })).toBeInTheDocument();
   });
 
+  it("keeps the reader chat message area empty before the first book message", () => {
+    render(
+      <ReaderMode
+        state={state()}
+        messages={[]}
+        chatLoading={false}
+        isStreaming={false}
+        disabled={false}
+        persistenceFailed={false}
+        onChange={vi.fn()}
+        onClose={vi.fn()}
+        onSendReading={vi.fn()}
+      />,
+    );
+
+    const chatPanel = screen.getByRole("complementary", { name: /reader chat/i });
+    expect(
+      within(chatPanel).queryByText("Ask about the focused paragraph to start this book conversation."),
+    ).not.toBeInTheDocument();
+    expect(within(chatPanel).getByLabelText(/Reader chat message/i)).toBeInTheDocument();
+  });
+
   it("renders section controls and navigates sections", () => {
     const onChange = vi.fn();
     render(
@@ -348,6 +370,100 @@ describe("ReaderMode", () => {
     );
   });
 
+  it("sends the focused paragraph prompt when the reader chat draft is empty", () => {
+    const onSendReading = vi.fn();
+    render(
+      <ReaderMode
+        state={state({ focusedParagraphIndex: 1 })}
+        messages={[]}
+        chatLoading={false}
+        isStreaming={false}
+        disabled={false}
+        persistenceFailed={false}
+        onChange={vi.fn()}
+        onClose={vi.fn()}
+        onSendReading={onSendReading}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "聊聊这一段" }));
+
+    const chatPanel = screen.getByRole("complementary", { name: /reader chat/i });
+    expect(within(chatPanel).getByText("Waiting for response...")).toBeInTheDocument();
+    expect(within(chatPanel).getAllByText("聊聊这一段").length).toBeGreaterThanOrEqual(1);
+    expect(onSendReading).toHaveBeenCalledWith(
+      "聊聊这一段",
+      expect.objectContaining({
+        focus: expect.objectContaining({
+          focused_text: "Focused passage.",
+          current_question: "聊聊这一段",
+        }),
+      }),
+    );
+  });
+
+  it("clears the local pending reader prompt after history contains it", () => {
+    const { rerender } = render(
+      <ReaderMode
+        state={state({ focusedParagraphIndex: 1 })}
+        messages={[]}
+        chatLoading={false}
+        isStreaming={false}
+        disabled={false}
+        persistenceFailed={false}
+        onChange={vi.fn()}
+        onClose={vi.fn()}
+        onSendReading={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "聊聊这一段" }));
+    expect(screen.getByText("Waiting for response...")).toBeInTheDocument();
+
+    rerender(
+      <ReaderMode
+        state={state({ focusedParagraphIndex: 1 })}
+        messages={[
+          { id: "u-1", role: "user", content: "聊聊这一段", createdAt: 1 },
+          { id: "a-1", role: "assistant", content: "This paragraph sets the contrast.", createdAt: 2 },
+        ]}
+        chatLoading={false}
+        isStreaming={false}
+        disabled={false}
+        persistenceFailed={false}
+        onChange={vi.fn()}
+        onClose={vi.fn()}
+        onSendReading={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("Waiting for response...")).not.toBeInTheDocument();
+    expect(screen.getByText("This paragraph sets the contrast.")).toBeInTheDocument();
+  });
+
+  it("uses a standard send label after the reader chat draft has text", () => {
+    render(
+      <ReaderMode
+        state={state({ focusedParagraphIndex: 1 })}
+        messages={[]}
+        chatLoading={false}
+        isStreaming={false}
+        disabled={false}
+        persistenceFailed={false}
+        onChange={vi.fn()}
+        onClose={vi.fn()}
+        onSendReading={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "聊聊这一段" })).toBeEnabled();
+    fireEvent.change(screen.getByLabelText(/Reader chat message/i), {
+      target: { value: "Why this turn?" },
+    });
+
+    expect(screen.getByRole("button", { name: /Send reader message/i })).toBeEnabled();
+  });
+
   it("resets local chat draft when the document changes", () => {
     const onSendReading = vi.fn();
     const { rerender } = render(
@@ -386,7 +502,7 @@ describe("ReaderMode", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /Send reader message/i }));
+    fireEvent.click(screen.getByRole("button", { name: "聊聊这一段" }));
 
     expect(onSendReading).not.toHaveBeenCalledWith("Doc A draft question", expect.anything());
     expect(onSendReading).toHaveBeenCalledWith(
@@ -512,7 +628,7 @@ describe("ReaderMode", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: /Send reader message/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "聊聊这一段" })).toBeDisabled();
     expect(screen.getByText(/Add reading text to begin/i)).toBeInTheDocument();
   });
 });
