@@ -30,6 +30,7 @@ Main files:
 | Turn orchestration | `nanobot/agent/loop.py` |
 | Provider/tool conversation loop | `nanobot/agent/runner.py` |
 | Context construction | `nanobot/agent/context.py` |
+| Workspace frame request context | `nanobot/agent/workspace_frame.py`, `nanobot/agent/frame_request.py` |
 | Session storage and compaction | `nanobot/session/manager.py` |
 | Long-term memory and Dream | `nanobot/agent/memory.py` |
 
@@ -52,6 +53,48 @@ Main files:
 - stops when a final answer is produced or runtime limits are hit.
 
 Keep this split in mind when debugging. If a problem is about channel routing, session keys, workspace selection, or outbound delivery, start in `agent/loop.py`. If it is about provider calls, tool calls, streaming, or iteration limits, start in `agent/runner.py`.
+
+## Workspace Frame Request Context
+
+New turns use `WorkspaceFrame` as the provider-facing request context. The
+frame is a structured envelope built from current runtime state, selected
+conversation history, memory, tool semantics, workspace policy, and optional
+scene-specific foreground state. The provider still receives ordinary messages:
+a rendered system frame and the current user event.
+
+```mermaid
+flowchart LR
+    Session["Session history"] --> Builder["WorkspaceFrameBuilder"]
+    Memory["Memory and bootstrap files"] --> Builder
+    Runtime["Runtime, channel, workspace scope"] --> Builder
+    Scene["Optional foreground state"] --> Builder
+    Builder --> Frame["WorkspaceFrame"]
+    Frame --> Renderer["WorkspaceFrameRenderer"]
+    Renderer --> ProviderMessages["provider messages:<br/>system frame + user event"]
+```
+
+The frame boundary matters:
+
+- `WorkspaceFrameBuilder` decides which structured modules exist.
+- `WorkspaceFrameRenderer` decides how those modules are projected into the
+  provider-visible prompt.
+- The frame is not the prompt. Add or change state in the builder/modules; only
+  change ordering and projection rules in the renderer.
+- A normal chat request should remain a thin frame. Reader, file, browser, or
+  other future surfaces add foreground modules only when their scene state is
+  explicitly present.
+
+Within a turn, `AgentRunner` still appends assistant tool calls, tool results,
+and follow-up provider messages as required by tool-calling protocols. Raw
+session history remains the canonical audit and continuity store inside
+nanobot; it is selected into frame modules rather than replayed as the primary
+provider-visible structure.
+
+Reading foreground state is the first scene-specific module. The WebUI sends a
+validated `reading_snapshot`; `WorkspaceFrameBuilder` renders it as current
+reading state with higher semantic priority than stale conversation history.
+See [`frame-reader-stable-branch.md`](./frame-reader-stable-branch.md) for the
+stable branch boundary.
 
 ## Providers
 

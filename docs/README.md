@@ -63,6 +63,7 @@ If a local `nanobot agent` session can already answer normally, you can also ask
 | Full configuration schema | [`configuration.md`](./configuration.md) | Exact fields, defaults, provider tables, web tools, MCP, security, and runtime options |
 | CLI commands | [`cli-reference.md`](./cli-reference.md) | Command names, common flags, and entrypoints |
 | Architecture | [`architecture.md`](./architecture.md) | Source-level runtime map for core flow, providers, channels, tools, WebUI, memory, security, and extension points |
+| Frame + Reader stable branch | [`frame-reader-stable-branch.md`](./frame-reader-stable-branch.md) | Stable baseline for Workspace Frame provider requests and the first Reader foreground-state surface |
 | Development | [`development.md`](./development.md) | Contributor notes for adding providers and transcription adapters |
 | Memory | [`memory.md`](./memory.md) | Session history, Dream consolidation, memory files, and versioning |
 | Observability | [`configuration.md#langfuse-observability`](./configuration.md#langfuse-observability) | Langfuse tracing setup and required environment variables |

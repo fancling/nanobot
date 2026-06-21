@@ -40,6 +40,7 @@ WebSocket channel on port `8765` by default. The gateway health endpoint,
 | Area | Use it for |
 |---|---|
 | Chat | Start, switch, search, fork, and delete browser sessions |
+| Reader | Import EPUB books, read in a standalone layout, and chat with book-scoped context |
 | Agent activity | See thinking, tool calls, file activity, command output, and generated artifacts in context |
 | Workspace | Pick the project workspace before asking for file or shell work |
 | Access | Choose the access mode for local capabilities allowed by your gateway configuration |
@@ -58,6 +59,28 @@ without changing the original thread.
 
 The message timeline shows both user-visible replies and agent activity. Long
 tool or reasoning sections can be expanded when you need the details.
+
+## Reader
+
+The Reader is a standalone WebUI page for book-like reading sessions. Use it
+when the primary task is reading text and asking about the current book, section,
+paragraph, or selection.
+
+Open Reader from the sidebar, import an EPUB, and nanobot creates a book-scoped
+reader session. The main area is reserved for the document text. The right panel
+is a Reader chat stream for questions about the book. Clicking a paragraph sets
+the current focus; clicking the focused paragraph again clears focus. Selecting
+text includes that selection in the next Reader message.
+
+Reader chat can send either focused paragraph questions or broader book-level
+questions. If no focused paragraph is active, the request is treated as a
+book-level reader turn rather than being blocked. Request errors in the Reader
+panel use the same dismissible notice style as the main chat composer.
+
+Under the hood, Reader messages attach a validated reading snapshot to the
+WebSocket message. The agent turns that snapshot into current foreground state
+inside the Workspace Frame so the model can distinguish the active paragraph or
+selection from older conversation history.
 
 ## Workspace and Access
 
