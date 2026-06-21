@@ -268,6 +268,32 @@ describe("ReaderMode", () => {
     expect(onChange).toHaveBeenCalledWith({ focusedParagraphIndex: 1, selectedText: "" });
   });
 
+  it("clicking the focused paragraph clears reader focus", () => {
+    const onChange = vi.fn();
+    render(
+      <ReaderMode
+        state={state({ focusedParagraphIndex: 1, selectedText: "Focused" })}
+        messages={[]}
+        chatLoading={false}
+        isStreaming={false}
+        disabled={false}
+        persistenceFailed={false}
+        onChange={onChange}
+        onClose={vi.fn()}
+        onSendReading={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Focus paragraph 2/i }));
+
+    expect(onChange).toHaveBeenCalledWith({
+      focusedParagraphIndex: null,
+      selectedText: "",
+      note: "",
+      question: "",
+    });
+  });
+
   it("keeps selected text after the paragraph mouse and click sequence", () => {
     const onChange = vi.fn();
     getSelectionSpy.mockReturnValue({ toString: () => "Focused passage" } as Selection);

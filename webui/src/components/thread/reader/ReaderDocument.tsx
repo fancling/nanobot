@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 interface ReaderDocumentProps {
   title: string;
   rawText: string;
-  focusedParagraphIndex: number;
+  focusedParagraphIndex: number | null;
   onFocusParagraph: (index: number) => void;
   onSelectedText: (text: string, paragraphIndex: number | null) => void;
 }

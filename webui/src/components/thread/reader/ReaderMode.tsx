@@ -55,9 +55,11 @@ export function ReaderMode({
       }
     : state;
   const paragraphCount = useMemo(() => parseReaderParagraphs(activeRawText).length, [activeRawText]);
-  const focusedParagraphIndex = paragraphCount > 0
-    ? Math.max(0, Math.min(activeFocusedParagraphIndex, paragraphCount - 1))
-    : 0;
+  const focusedParagraphIndex = activeFocusedParagraphIndex === null
+    ? null
+    : paragraphCount > 0
+      ? Math.max(0, Math.min(activeFocusedParagraphIndex, paragraphCount - 1))
+      : 0;
   const canNavigateSections = sections.length > 1;
 
   useEffect(() => {
@@ -137,8 +139,17 @@ export function ReaderMode({
           title={state.title}
           rawText={activeRawText}
           focusedParagraphIndex={focusedParagraphIndex}
-          onFocusParagraph={(focusedParagraphIndex) => {
-            onChange({ focusedParagraphIndex, selectedText: "" });
+          onFocusParagraph={(nextFocusedParagraphIndex) => {
+            if (nextFocusedParagraphIndex === focusedParagraphIndex) {
+              onChange({
+                focusedParagraphIndex: null,
+                selectedText: "",
+                note: "",
+                question: "",
+              });
+              return;
+            }
+            onChange({ focusedParagraphIndex: nextFocusedParagraphIndex, selectedText: "" });
           }}
           onSelectedText={(selectedText, paragraphIndex) => {
             onChange({

@@ -22,7 +22,7 @@ export interface ReaderState {
   documentId: string;
   title: string;
   rawText: string;
-  focusedParagraphIndex: number;
+  focusedParagraphIndex: number | null;
   selectedText: string;
   note: string;
   question: string;
@@ -63,6 +63,11 @@ function normalizeText(value: unknown): string {
 
 function normalizeInt(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isInteger(value) ? value : fallback;
+}
+
+function normalizeNullableInt(value: unknown, fallback: number): number | null {
+  if (value === null) return null;
+  return normalizeInt(value, fallback);
 }
 
 function normalizeDocumentKind(value: unknown): ReaderDocumentKind {
@@ -149,7 +154,7 @@ function parseReaderStatePayload(parsed: unknown): ReaderState | null {
         : "",
     title: normalizeText(maybe.title),
     rawText: maybe.rawText,
-    focusedParagraphIndex: normalizeInt(maybe.focusedParagraphIndex, 0),
+    focusedParagraphIndex: normalizeNullableInt(maybe.focusedParagraphIndex, 0),
     selectedText: normalizeText(maybe.selectedText),
     note: normalizeText(maybe.note),
     question: normalizeText(maybe.question),
@@ -201,17 +206,22 @@ export function buildReadingSnapshot(state: ReaderState): ReadingSnapshot {
 
   const paragraphs = parseReaderParagraphs(normalizedRaw);
   const paragraphCount = Math.max(1, paragraphs.length);
-  const focusedIndex = Math.max(
-    0,
-    Math.min(
-      normalizeInt(state.focusedParagraphIndex, 0),
-      paragraphCount - 1,
-    ),
-  );
+  const hasFocus = state.focusedParagraphIndex !== null;
+  const focusedIndex = hasFocus
+    ? Math.max(
+        0,
+        Math.min(
+          normalizeInt(state.focusedParagraphIndex, 0),
+          paragraphCount - 1,
+        ),
+      )
+    : null;
 
-  const focusedParagraph = paragraphs[focusedIndex]?.text ?? normalizedRaw;
-  const before = paragraphs[focusedIndex - 1]?.text ?? "";
-  const after = paragraphs[focusedIndex + 1]?.text ?? "";
+  const focusedParagraph = focusedIndex === null
+    ? ""
+    : paragraphs[focusedIndex]?.text ?? normalizedRaw;
+  const before = focusedIndex === null ? "" : paragraphs[focusedIndex - 1]?.text ?? "";
+  const after = focusedIndex === null ? "" : paragraphs[focusedIndex + 1]?.text ?? "";
   const trimmedFocusedParagraph = normalizeText(focusedParagraph);
 
   const title = trimWithEllipsis(normalizedTitle, TITLE_MAX_CHARS);
@@ -243,7 +253,7 @@ export function buildReadingSnapshot(state: ReaderState): ReadingSnapshot {
     location: {
       paragraph_index: focusedIndex,
       paragraph_count: paragraphCount,
-      progress_label: progressLabel(focusedIndex, paragraphCount),
+      progress_label: focusedIndex === null ? null : progressLabel(focusedIndex, paragraphCount),
     },
     focus: {
       focused_text: focusedText,

@@ -37,10 +37,12 @@ export function ReaderChatPanel({
   const [draft, setDraft] = useState("");
   const [pendingPrompt, setPendingPrompt] = useState<UIMessage | null>(null);
   const paragraphs = useMemo(() => parseReaderParagraphs(state.rawText), [state.rawText]);
-  const activeParagraphIndex = paragraphs.length > 0
-    ? Math.max(0, Math.min(state.focusedParagraphIndex, paragraphs.length - 1))
-    : 0;
-  const focused = paragraphs[activeParagraphIndex];
+  const activeParagraphIndex = state.focusedParagraphIndex === null
+    ? null
+    : paragraphs.length > 0
+      ? Math.max(0, Math.min(state.focusedParagraphIndex, paragraphs.length - 1))
+      : 0;
+  const focused = activeParagraphIndex === null ? undefined : paragraphs[activeParagraphIndex];
   const canSend = Boolean(focused) && !disabled;
   const hasDraft = draft.trim().length > 0;
   const displayMessages = pendingPrompt ? [...messages, pendingPrompt] : messages;
@@ -104,9 +106,15 @@ export function ReaderChatPanel({
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
           Current focus
         </p>
-        <p className="mt-2 line-clamp-3 rounded-md border border-border bg-background p-3 text-sm leading-6">
-          {focused?.text || "Add reading text to begin."}
-        </p>
+        {focused ? (
+          <p className="mt-2 line-clamp-3 rounded-md border border-border bg-background p-3 text-sm leading-6">
+            {focused.text}
+          </p>
+        ) : (
+          <p className="mt-2 text-sm text-muted-foreground">
+            {paragraphs.length > 0 ? "Select a paragraph to focus." : "Add reading text to begin."}
+          </p>
+        )}
         {state.selectedText ? (
           <div className="mt-3 rounded-md border border-primary/30 bg-primary/10 p-3">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -145,7 +153,13 @@ export function ReaderChatPanel({
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           className="min-h-20 resize-none"
-          placeholder={state.selectedText ? "Ask about the selected text" : "Ask about the focused paragraph"}
+          placeholder={
+            focused
+              ? state.selectedText
+                ? "Ask about the selected text"
+                : "Ask about the focused paragraph"
+              : "Select a paragraph first"
+          }
           disabled={disabled}
         />
         <div className="mt-2 flex items-center justify-between gap-2">

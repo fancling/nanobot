@@ -126,6 +126,27 @@ describe("reading utilities", () => {
     expect(snapshot.focus.current_question).toBe("Why this turn?");
   });
 
+  it("builds a reading snapshot without paragraph focus when focus is cleared", () => {
+    const snapshot = buildReadingSnapshot({
+      documentId: "doc-1",
+      title: "Essay",
+      rawText: "Before.\n\nFocused passage.\n\nAfter.",
+      focusedParagraphIndex: null,
+      selectedText: "",
+      note: "",
+      question: "",
+      mode: "slow_reading",
+      documentKind: "markdown",
+      readerModeOpen: false,
+    });
+
+    expect(snapshot.location.paragraph_index).toBeNull();
+    expect(snapshot.location.paragraph_count).toBe(3);
+    expect(snapshot.focus.focused_text).toBe("");
+    expect(snapshot.focus.before).toBe("");
+    expect(snapshot.focus.after).toBe("");
+  });
+
   it("uses the reader document kind in snapshots", () => {
     const snapshot = buildReadingSnapshot({
       version: 1,

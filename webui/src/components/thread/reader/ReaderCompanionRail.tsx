@@ -30,10 +30,12 @@ export function ReaderCompanionRail({
   const [selectionQuestion, setSelectionQuestion] = useState("");
   const [noteDraft, setNoteDraft] = useState(state.note);
   const paragraphs = useMemo(() => parseReaderParagraphs(state.rawText), [state.rawText]);
-  const activeParagraphIndex = paragraphs.length > 0
-    ? Math.max(0, Math.min(state.focusedParagraphIndex, paragraphs.length - 1))
-    : 0;
-  const focused = paragraphs[activeParagraphIndex];
+  const activeParagraphIndex = state.focusedParagraphIndex === null
+    ? null
+    : paragraphs.length > 0
+      ? Math.max(0, Math.min(state.focusedParagraphIndex, paragraphs.length - 1))
+      : 0;
+  const focused = activeParagraphIndex === null ? undefined : paragraphs[activeParagraphIndex];
 
   useEffect(() => {
     setParagraphQuestion("");

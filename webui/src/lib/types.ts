@@ -939,7 +939,7 @@ export interface ReadingSnapshot {
     kind: "markdown" | "text" | string;
   };
   location: {
-    paragraph_index: number;
+    paragraph_index: number | null;
     paragraph_count: number;
     progress_label?: string | null;
   };
