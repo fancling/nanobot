@@ -104,6 +104,7 @@ class TurnContext:
     state: TurnState
     turn_id: str
     session: Session | None = None
+    runtime: TurnRuntime | None = None
 
     history: list[dict[str, Any]] = field(default_factory=list)
     initial_messages: list[dict[str, Any]] = field(default_factory=list)
@@ -136,6 +137,21 @@ class TurnContext:
     turn_latency_ms: int | None = None
 
     trace: list[StateTraceEntry] = field(default_factory=list)
+
+
+@dataclass
+class TurnRuntime:
+    sessions: SessionManager
+    context: ContextBuilder
+    frame_request_adapter: FrameRequestAdapter
+    consolidator: Consolidator
+    auto_compact: AutoCompact
+    use_workspace_frame: bool = False
+
+
+@dataclass
+class WorkframeRuntime(TurnRuntime):
+    use_workspace_frame: bool = True
 
 
 class AgentLoop:
@@ -331,6 +347,20 @@ class AgentLoop:
             consolidator=self.consolidator,
             session_ttl_minutes=session_ttl_minutes,
         )
+        self._consolidation_ratio = consolidation_ratio
+        self._session_ttl_minutes = session_ttl_minutes
+        self.default_runtime = TurnRuntime(
+            sessions=self.sessions,
+            context=self.context,
+            frame_request_adapter=self.frame_request_adapter,
+            consolidator=self.consolidator,
+            auto_compact=self.auto_compact,
+            use_workspace_frame=False,
+        )
+        self.workframe = self._build_workframe_runtime(
+            timezone=timezone,
+            disabled_skills=disabled_skills,
+        )
         self.model_presets: dict[str, ModelPresetConfig] = model_presets or {}
         self._active_preset: str | None = None
         if model_preset:
@@ -340,6 +370,47 @@ class AgentLoop:
         self._current_iteration: int = 0
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
+
+    def _build_workframe_runtime(
+        self,
+        *,
+        timezone: str | None,
+        disabled_skills: list[str] | None,
+    ) -> WorkframeRuntime:
+        workframe_root = self.workspace / "workframes"
+        context = ContextBuilder(
+            self.workspace,
+            timezone=timezone,
+            disabled_skills=disabled_skills,
+            memory_workspace=workframe_root,
+        )
+        sessions = SessionManager(workframe_root)
+        frame_request_adapter = FrameRequestAdapter(context)
+        consolidator = Consolidator(
+            store=context.memory,
+            provider=self.provider,
+            model=self.model,
+            sessions=sessions,
+            context_window_tokens=self.context_window_tokens,
+            build_messages=context.build_messages,
+            get_tool_definitions=self.tools.get_definitions,
+            max_completion_tokens=self.provider.generation.max_tokens,
+            consolidation_ratio=self._consolidation_ratio,
+            unified_session=False,
+        )
+        auto_compact = AutoCompact(
+            sessions=sessions,
+            consolidator=consolidator,
+            session_ttl_minutes=self._session_ttl_minutes,
+        )
+        return WorkframeRuntime(
+            sessions=sessions,
+            context=context,
+            frame_request_adapter=frame_request_adapter,
+            consolidator=consolidator,
+            auto_compact=auto_compact,
+            use_workspace_frame=True,
+        )
 
     @classmethod
     def from_config(
@@ -636,6 +707,26 @@ class AgentLoop:
             unified_session=self._unified_session,
         )
 
+    @staticmethod
+    def _is_workframe_message(msg: InboundMessage) -> bool:
+        return bool((msg.metadata or {}).get("workframe") is True)
+
+    def _turn_runtime_for_message(self, msg: InboundMessage) -> TurnRuntime:
+        if self._is_workframe_message(msg):
+            return self.workframe
+        runtime = getattr(self, "default_runtime", None)
+        if runtime is None:
+            runtime = TurnRuntime(
+                sessions=self.sessions,
+                context=self.context,
+                frame_request_adapter=self.frame_request_adapter,
+                consolidator=self.consolidator,
+                auto_compact=self.auto_compact,
+                use_workspace_frame=False,
+            )
+            self.default_runtime = runtime
+        return runtime
+
     def _build_frame_initial_messages(
         self,
         *,
@@ -666,6 +757,39 @@ class AgentLoop:
             runtime_channel=runtime_channel,
             include_memory_recent_history=include_memory_recent_history,
             unified_session=self._unified_session,
+            current_text=current_text,
+        )
+
+    def _build_workframe_initial_messages(
+        self,
+        *,
+        msg: InboundMessage,
+        session: Session,
+        history: list[dict[str, Any]],
+        pending_summary: str | None,
+        workspace: Path,
+        runtime_chat_id: str,
+        runtime_channel: str | None = None,
+        skip_runtime_lines: bool = False,
+        current_text: str | None = None,
+        include_memory_recent_history: bool = True,
+    ) -> list[dict[str, Any]]:
+        runtime_lines = [*goal_state_runtime_lines(session.metadata)]
+        if not skip_runtime_lines:
+            runtime_lines.extend(agent_context.runtime_lines(self, msg, workspace))
+        return self.workframe.frame_request_adapter.build_frame_only_messages(
+            session=session,
+            history=history,
+            msg=msg,
+            pending_summary=pending_summary,
+            runtime_lines=runtime_lines,
+            workspace=workspace,
+            tool_names=self.tools.tool_names,
+            token_budget={"conversation.recent_raw": self._replay_token_budget()},
+            runtime_chat_id=runtime_chat_id,
+            runtime_channel=runtime_channel,
+            include_memory_recent_history=include_memory_recent_history,
+            unified_session=False,
             current_text=current_text,
         )
 
