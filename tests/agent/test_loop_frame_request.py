@@ -9,6 +9,7 @@ from nanobot.agent.context import ContextBuilder
 from nanobot.agent.frame_request import FrameRequestAdapter
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
+from nanobot.session.goal_state import GOAL_STATE_KEY
 from nanobot.session.manager import Session
 
 
@@ -91,6 +92,31 @@ def test_build_initial_messages_uses_runtime_context_chat_id(tmp_path: Path) -> 
 
     assert "Chat ID: parent-id" in initial[-1]["content"]
     assert "Chat ID: thread-id" not in initial[-1]["content"]
+
+
+def test_build_initial_messages_includes_active_goal_runtime_once(tmp_path: Path) -> None:
+    session = Session(key="cli:direct")
+    session.metadata[GOAL_STATE_KEY] = {
+        "status": "active",
+        "objective": "Finish ordinary prompt restoration.",
+    }
+    msg = InboundMessage(
+        channel="cli",
+        sender_id="user",
+        chat_id="direct",
+        content="new text",
+    )
+
+    initial = _loop(tmp_path)._build_initial_messages(
+        msg,
+        session,
+        history=[],
+        pending_summary=None,
+    )
+
+    current = initial[-1]["content"]
+    assert current.count("Goal (active):") == 1
+    assert current.count("Finish ordinary prompt restoration.") == 1
 
 
 def test_build_initial_messages_includes_memory_recent_history(tmp_path: Path) -> None:

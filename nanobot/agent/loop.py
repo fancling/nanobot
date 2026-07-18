@@ -616,10 +616,7 @@ class AgentLoop:
     ) -> list[dict[str, Any]]:
         """Build the cache-friendly initial message list for an ordinary LLM turn."""
         scope = self.workspace_scopes.for_message(msg, session.metadata)
-        runtime_lines = [
-            *goal_state_runtime_lines(session.metadata),
-            *agent_context.runtime_lines(self, msg, scope.project_path),
-        ]
+        runtime_lines = agent_context.runtime_lines(self, msg, scope.project_path)
         current_text = image_generation_prompt(msg.content, msg.metadata)
         return self.context.build_messages(
             history=history,
