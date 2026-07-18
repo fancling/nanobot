@@ -56,11 +56,13 @@ Keep this split in mind when debugging. If a problem is about channel routing, s
 
 ## Workspace Frame Request Context
 
-New turns use `WorkspaceFrame` as the provider-facing request context. The
-frame is a structured envelope built from current runtime state, selected
-conversation history, memory, tool semantics, workspace policy, and optional
-scene-specific foreground state. The provider still receives ordinary messages:
-a rendered system frame and the current user event.
+WorkspaceFrame is selected by explicit workframe entry points such as Reader;
+it is no longer the default request envelope for every chat turn. Ordinary chat
+uses the cache-friendly prompt path, while workframe turns use a structured
+envelope built from current runtime state, selected conversation history,
+memory, tool semantics, workspace policy, and optional scene-specific
+foreground state. The provider still receives ordinary messages: a rendered
+system frame and the current user event.
 
 ```mermaid
 flowchart LR
@@ -80,9 +82,8 @@ The frame boundary matters:
   provider-visible prompt.
 - The frame is not the prompt. Add or change state in the builder/modules; only
   change ordering and projection rules in the renderer.
-- A normal chat request should remain a thin frame. Reader, file, browser, or
-  other future surfaces add foreground modules only when their scene state is
-  explicitly present.
+- Reader, file, browser, or other future surfaces add foreground modules only
+  when their scene state is explicitly present through a workframe entry point.
 
 Within a turn, `AgentRunner` still appends assistant tool calls, tool results,
 and follow-up provider messages as required by tool-calling protocols. Raw
@@ -90,9 +91,13 @@ session history remains the canonical audit and continuity store inside
 nanobot; it is selected into frame modules rather than replayed as the primary
 provider-visible structure.
 
+Workframe sessions and their memory archive live under `workframes/` so
+ordinary chat history and prompt-cache behavior remain separate.
+
 Reading foreground state is the first scene-specific module. The WebUI sends a
-validated `reading_snapshot`; `WorkspaceFrameBuilder` renders it as current
-reading state with higher semantic priority than stale conversation history.
+validated `reading_snapshot` through the workframe WebSocket protocol;
+`WorkspaceFrameBuilder` renders it as current reading state with higher
+semantic priority than stale conversation history.
 See [`frame-reader-stable-branch.md`](./frame-reader-stable-branch.md) for the
 stable branch boundary.
 

@@ -101,8 +101,11 @@ Ordinary chat:
 Workframe:
 
 1. WebSocket receives `workframe_message`.
-2. The channel publishes `InboundMessage` with `channel="workframe"` and
-   metadata such as `{"workframe": true, "surface": "reader"}`.
+2. The WebSocket channel publishes `InboundMessage` with `channel="websocket"`,
+   `chat_id=<workframe_id>`, `session_key_override="workframe:<workframe_id>"`,
+   and metadata such as `{"workframe": true, "surface": "reader"}`. The
+   transport channel remains WebSocket so existing outbound routing can deliver
+   replies.
 3. AgentLoop chooses `self.workframe.sessions`.
 4. AgentLoop gets history from the workframe session only.
 5. Workframe auto-compact and consolidation use the workframe memory root.

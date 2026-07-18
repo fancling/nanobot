@@ -2,10 +2,10 @@
 
 This branch establishes the first stable baseline for two related changes:
 
-- nanobot builds LLM provider requests through a Workspace Frame request
-  context.
-- the WebUI Reader is the first product surface that adds scene-specific
-  foreground state to that frame.
+- nanobot can build LLM provider requests through an explicit Workframe entry
+  backed by a Workspace Frame request context.
+- the WebUI Reader is the first product surface that uses that workframe entry
+  for scene-specific foreground state.
 
 The important boundary is that Workspace Frame is a request context envelope,
 not a synonym for the Reader UI and not a guarantee that every request has a
@@ -15,23 +15,24 @@ workspace foreground.
 
 The stable behavior for this branch is:
 
-- New agent turns are represented to the provider as a rendered Workspace Frame
-  plus the current user event.
+- Workframe turns are represented to the provider as a rendered Workspace Frame
+  plus the current user event. Ordinary chat turns use the cache-friendly
+  prompt path.
 - Raw session history remains canonical storage inside nanobot.
-- Cross-turn history, memory, runtime information, tool semantics, and scene
-  state are selected into frame modules before the provider call.
+- Workframe cross-turn history, memory, runtime information, tool semantics,
+  and scene state are selected into frame modules before the provider call.
 - `AgentRunner` still owns the current-turn provider/tool loop after the
   initial request is built.
 - Provider implementations do not need special frame support; they receive
   ordinary provider messages.
 
-普通 chat 也可以经过 frame builder，但它 should remain a thin frame: identity,
-runtime, selected conversation context, tool contract, and current input. It
-must not implicitly receive Reader foreground state.
+Ordinary chat does not go through the Workspace Frame builder by default. It
+keeps the stable system prompt plus replayed history so provider prompt caching
+continues to work for daily chat.
 
 ## Reader Scope
 
-The Reader surface is a scene-specific WebUI mode built on top of the frame
+The Reader surface is a scene-specific WebUI mode built on top of the workframe
 request model.
 
 Current Reader capabilities:
@@ -49,8 +50,10 @@ Current Reader capabilities:
 - Reader chat request errors use the same error notice pattern as the main chat
   panel.
 
-The Reader sends a normalized `reading_snapshot` with WebUI messages. The
-WebSocket channel validates that snapshot before publishing the inbound message.
+The Reader stores a generated workframe id in its local reader state and sends
+questions through `workframe_message` envelopes. Those envelopes carry a
+normalized `reading_snapshot`; the WebSocket channel validates the snapshot
+before publishing the inbound message with `session_key_override="workframe:<id>"`.
 The Workspace Frame builder turns the snapshot into a current-state reading
 module. That module is current foreground state, so it has higher semantic
 priority than older conversation history when they conflict.
@@ -124,4 +127,3 @@ Expected behavior during dogfood:
 - If the request fails before an LLM response is produced, the right panel shows
   the same style of error notice as the main chat panel and removes the local
   pending waiting state.
-

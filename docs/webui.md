@@ -77,8 +77,10 @@ questions. If no focused paragraph is active, the request is treated as a
 book-level reader turn rather than being blocked. Request errors in the Reader
 panel use the same dismissible notice style as the main chat composer.
 
-Under the hood, Reader messages attach a validated reading snapshot to the
-WebSocket message. The agent turns that snapshot into current foreground state
+Under the hood, Reader chat uses a workframe session that is separate from the
+ordinary chat session list. The Reader page stores the associated workframe id
+locally and sends validated reading snapshots only through the workframe
+WebSocket protocol. The agent turns that snapshot into current foreground state
 inside the Workspace Frame so the model can distinguish the active paragraph or
 selection from older conversation history.
 
