@@ -99,6 +99,15 @@ def _decode_api_key(raw_key: str) -> str | None:
     return key
 
 
+def _workframe_session_key_for_webui_thread(decoded_key: str) -> str | None:
+    if not decoded_key.startswith("websocket:"):
+        return None
+    workframe_id = decoded_key.split(":", 1)[1]
+    if not workframe_id:
+        return None
+    return f"workframe:{workframe_id}"
+
+
 def _default_model_name_from_config() -> str | None:
     try:
         from nanobot.config.loader import load_config
@@ -151,6 +160,8 @@ class GatewayHTTPHandler:
         media: WebUIMediaGateway,
         workspaces: WebUIWorkspaceController,
         skills_workspace_path: Path,
+        workframe_session_manager: SessionManager | None = None,
+        workframe_workspaces: WebUIWorkspaceController | None = None,
         disabled_skills: set[str] | None = None,
         cron_service: CronService | None = None,
         cron_pending_job_ids: Callable[[str], set[str]] | None = None,
@@ -164,6 +175,8 @@ class GatewayHTTPHandler:
         self.tokens = tokens
         self.media = media
         self.workspaces = workspaces
+        self.workframe_session_manager = workframe_session_manager
+        self.workframe_workspaces = workframe_workspaces
         self.skills_workspace_path = skills_workspace_path
         self.disabled_skills = disabled_skills or set()
         self.cron_service = cron_service
@@ -420,13 +433,24 @@ class GatewayHTTPHandler:
             return _http_error(400, "invalid session key")
         if not _is_websocket_channel_session_key(decoded_key):
             return _http_error(404, "session not found")
-        scope = self.workspaces.scope_for_session_key(decoded_key)
         session_messages: list[dict[str, Any]] | None = None
         if self.session_manager is not None:
             session_data = self.session_manager.read_session_file(decoded_key)
             raw_messages = session_data.get("messages") if isinstance(session_data, dict) else None
             if isinstance(raw_messages, list):
                 session_messages = [m for m in raw_messages if isinstance(m, dict)]
+        scope_controller = self.workspaces
+        scope_key = decoded_key
+        if session_messages is None and self.workframe_session_manager is not None:
+            workframe_key = _workframe_session_key_for_webui_thread(decoded_key)
+            if workframe_key is not None:
+                session_data = self.workframe_session_manager.read_session_file(workframe_key)
+                raw_messages = session_data.get("messages") if isinstance(session_data, dict) else None
+                if isinstance(raw_messages, list):
+                    session_messages = [m for m in raw_messages if isinstance(m, dict)]
+                    scope_controller = self.workframe_workspaces or self.workspaces
+                    scope_key = workframe_key
+        scope = scope_controller.scope_for_session_key(scope_key)
         query = _parse_query(request.path)
         raw_limit = _query_first(query, "limit")
         limit: int | None = None

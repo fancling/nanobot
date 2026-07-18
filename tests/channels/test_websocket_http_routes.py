@@ -7,6 +7,7 @@ import random
 import socket
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -42,6 +43,7 @@ def _make_handler(
     bus: Any,
     *,
     session_manager: SessionManager | None = None,
+    workframe_session_manager: SessionManager | None = None,
     static_dist_path: Path | None = None,
     workspace_path: Path | None = None,
     runtime_model_name: Any | None = None,
@@ -54,6 +56,7 @@ def _make_handler(
         config=config,
         bus=bus,
         session_manager=session_manager,
+        workframe_session_manager=workframe_session_manager,
         static_dist_path=static_dist_path,
         workspace_path=workspace,
         default_restrict_to_workspace=False,
@@ -69,6 +72,7 @@ def _ch(
     bus: Any,
     *,
     session_manager: SessionManager | None = None,
+    workframe_session_manager: SessionManager | None = None,
     static_dist_path: Path | None = None,
     workspace_path: Path | None = None,
     port: int = _PORT,
@@ -89,6 +93,7 @@ def _ch(
     gateway = _make_handler(
         cfg, bus,
         session_manager=session_manager,
+        workframe_session_manager=workframe_session_manager,
         static_dist_path=static_dist_path,
         workspace_path=workspace_path,
         runtime_model_name=runtime_model_name,
@@ -739,6 +744,80 @@ async def test_sessions_list_only_returns_websocket_sessions_by_default(
         # Only websocket-channel sessions are part of the webui surface; CLI /
         # Slack / Lark rows would be non-resumable from the browser.
         assert keys == {"websocket:alpha", "websocket:beta"}
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_webui_thread_hydrates_workframe_history_without_listing_workframes(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
+    from nanobot.webui.transcript import append_transcript_object
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    workframe_id = str(uuid.uuid4())
+    ui_key = f"websocket:{workframe_id}"
+    workframe_key = f"workframe:{workframe_id}"
+    assistant_text = "The workframe answer"
+    workframe_project = tmp_path / "workframe-project"
+    workframe_project.mkdir()
+
+    append_transcript_object(
+        ui_key,
+        {"event": "message", "chat_id": workframe_id, "text": assistant_text},
+    )
+    append_transcript_object(ui_key, {"event": "turn_end", "chat_id": workframe_id})
+
+    ordinary_sessions = SessionManager(tmp_path / "ordinary")
+    workframe_sessions = SessionManager(tmp_path / "workframes")
+    workframe_session = Session(key=workframe_key)
+    workframe_session.add_message("user", "Question from workframe reader")
+    workframe_session.add_message("assistant", assistant_text)
+    workframe_session.metadata[WORKSPACE_SCOPE_METADATA_KEY] = {
+        "project_path": str(workframe_project),
+        "access_mode": "full",
+    }
+    workframe_sessions.save(workframe_session)
+
+    channel = _ch(
+        bus,
+        session_manager=ordinary_sessions,
+        workframe_session_manager=workframe_sessions,
+        port=29937,
+    )
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        boot = await _http_get("http://127.0.0.1:29937/webui/bootstrap")
+        token = boot.json()["token"]
+        auth = {"Authorization": f"Bearer {token}"}
+
+        thread = await _http_get(
+            f"http://127.0.0.1:29937/api/sessions/{quote(ui_key, safe='')}/webui-thread",
+            headers=auth,
+        )
+        assert thread.status_code == 200
+        body = thread.json()
+        assert body["sessionKey"] == ui_key
+        assert body["workspace_scope"]["project_path"] == str(workframe_project.resolve())
+        assert [
+            (message["role"], message["content"])
+            for message in body["messages"]
+            if message["role"] in {"user", "assistant"}
+        ] == [
+            ("user", "Question from workframe reader"),
+            ("assistant", assistant_text),
+        ]
+
+        listing = await _http_get("http://127.0.0.1:29937/api/sessions", headers=auth)
+        assert listing.status_code == 200
+        keys = {session["key"] for session in listing.json()["sessions"]}
+        assert workframe_key not in keys
+        assert ui_key not in keys
     finally:
         await channel.stop()
         await server_task

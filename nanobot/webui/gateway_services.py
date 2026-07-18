@@ -76,6 +76,8 @@ def build_gateway_services(
         media=media,
         workspaces=workspaces,
         skills_workspace_path=workspace_path,
+        workframe_session_manager=workframe_session_manager,
+        workframe_workspaces=workframe_workspaces,
         disabled_skills=disabled_skills,
         cron_service=cron_service,
         cron_pending_job_ids=cron_pending_job_ids,
