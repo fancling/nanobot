@@ -279,9 +279,40 @@ class WebUIWorkspaceController:
             raise WorkspaceScopeError("chat_running", status=409)
         return scope
 
+    def scope_for_message_session_key(
+        self,
+        envelope: dict[str, Any],
+        *,
+        session_key: str,
+        chat_running: bool,
+        controls_available: bool,
+    ) -> WorkspaceScope:
+        scope = self.scope_from_envelope(
+            envelope,
+            session_key=session_key,
+            controls_available=controls_available,
+        )
+        if (
+            WORKSPACE_SCOPE_METADATA_KEY in envelope
+            and chat_running
+            and scope.metadata() != self.scope_for_session_key(session_key).metadata()
+        ):
+            raise WorkspaceScopeError("chat_running", status=409)
+        return scope
+
     def persist_scope(self, chat_id: str, scope: WorkspaceScope) -> None:
+        self.persist_scope_for_session_key(f"websocket:{chat_id}", scope)
+
+    def persist_scope_for_session_key(
+        self,
+        session_key: str,
+        scope: WorkspaceScope,
+        *,
+        webui: bool = True,
+    ) -> None:
         if self._sessions is not None:
-            session = self._sessions.get_or_create(f"websocket:{chat_id}")
-            session.metadata["webui"] = True
+            session = self._sessions.get_or_create(session_key)
+            if webui:
+                session.metadata["webui"] = True
             session.metadata[WORKSPACE_SCOPE_METADATA_KEY] = scope.metadata()
             self._sessions.save(session)

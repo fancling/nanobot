@@ -20,6 +20,7 @@ from nanobot.channels.websocket import (
     WebSocketChannel,
     WebSocketConfig,
     _is_valid_chat_id,
+    _is_valid_workframe_id,
     _parse_envelope,
     _parse_inbound_payload,
     publish_runtime_model_update,
@@ -50,6 +51,8 @@ from nanobot.webui.transcript import append_transcript_object, read_transcript_l
 # -- Shared helpers (aligned with test_websocket_integration.py) ---------------
 
 _PORT = 29876
+_WORKFRAME_ID = "11111111-1111-4111-8111-111111111111"
+_READING_WORKFRAME_ID = "22222222-2222-4222-8222-222222222222"
 
 
 def _ch(bus: Any, **kw: Any) -> WebSocketChannel:
@@ -87,6 +90,7 @@ def _basic_handler(bus: Any, **kw: Any) -> GatewayServices:
         config=cfg,
         bus=bus,
         session_manager=kw.get("session_manager"),
+        workframe_session_manager=kw.get("workframe_session_manager"),
         static_dist_path=None,
         workspace_path=kw.get("workspace_path", Path.cwd()),
         default_restrict_to_workspace=kw.get("default_restrict_to_workspace", False),
@@ -367,7 +371,7 @@ async def test_workframe_message_envelope_accepts_reading_snapshot_metadata(
         "webui-client",
         {
             "type": "workframe_message",
-            "workframe_id": "reading-frame",
+            "workframe_id": _READING_WORKFRAME_ID,
             "content": "聊聊这一段",
             "webui": True,
             "surface": "reader",
@@ -382,8 +386,8 @@ async def test_workframe_message_envelope_accepts_reading_snapshot_metadata(
     )
 
     inbound = bus.publish_inbound.await_args.args[0]
-    assert inbound.chat_id == "reading-frame"
-    assert inbound.session_key_override == "workframe:reading-frame"
+    assert inbound.chat_id == _READING_WORKFRAME_ID
+    assert inbound.session_key_override == f"workframe:{_READING_WORKFRAME_ID}"
     assert inbound.content == "聊聊这一段"
     assert inbound.metadata["workframe"] is True
     assert inbound.metadata["surface"] == "reader"
@@ -404,7 +408,7 @@ async def test_workframe_message_envelope_accepts_book_level_reading_snapshot(
         "webui-client",
         {
             "type": "workframe_message",
-            "workframe_id": "reading-frame",
+            "workframe_id": _READING_WORKFRAME_ID,
             "content": "Summarize the chapter so far.",
             "webui": True,
             "reading_snapshot": {
@@ -418,8 +422,8 @@ async def test_workframe_message_envelope_accepts_book_level_reading_snapshot(
     )
 
     inbound = bus.publish_inbound.await_args.args[0]
-    assert inbound.chat_id == "reading-frame"
-    assert inbound.session_key_override == "workframe:reading-frame"
+    assert inbound.chat_id == _READING_WORKFRAME_ID
+    assert inbound.session_key_override == f"workframe:{_READING_WORKFRAME_ID}"
     assert inbound.content == "Summarize the chapter so far."
     assert inbound.metadata["surface"] == "generic"
     assert inbound.metadata["reading_snapshot"]["location"]["paragraph_index"] is None
@@ -440,7 +444,7 @@ async def test_workframe_message_envelope_rejects_malformed_reading_snapshot(
         "webui-client",
         {
             "type": "workframe_message",
-            "workframe_id": "reading-frame",
+            "workframe_id": _READING_WORKFRAME_ID,
             "content": "聊聊这一段",
             "webui": True,
             "reading_snapshot": {"version": 1, "scene": "chat"},
@@ -468,7 +472,7 @@ async def test_workframe_message_envelope_rejects_non_object_reading_snapshot(
         "webui-client",
         {
             "type": "workframe_message",
-            "workframe_id": "reading-frame",
+            "workframe_id": _READING_WORKFRAME_ID,
             "content": "聊聊这一段",
             "webui": True,
             "reading_snapshot": [],
@@ -2679,7 +2683,7 @@ async def test_workframe_message_publishes_isolated_session_key(
         "webui-client",
         {
             "type": "workframe_message",
-            "workframe_id": "frame-a",
+            "workframe_id": _WORKFRAME_ID,
             "surface": "reader",
             "content": "question",
             "webui": True,
@@ -2699,9 +2703,9 @@ async def test_workframe_message_publishes_isolated_session_key(
 
     inbound = bus.publish_inbound.await_args.args[0]
     assert inbound.channel == "websocket"
-    assert inbound.chat_id == "frame-a"
-    assert inbound.session_key_override == "workframe:frame-a"
-    assert inbound.session_key == "workframe:frame-a"
+    assert inbound.chat_id == _WORKFRAME_ID
+    assert inbound.session_key_override == f"workframe:{_WORKFRAME_ID}"
+    assert inbound.session_key == f"workframe:{_WORKFRAME_ID}"
     assert inbound.metadata["workframe"] is True
     assert inbound.metadata["surface"] == "reader"
     assert inbound.metadata["webui"] is True
@@ -2723,7 +2727,7 @@ async def test_workframe_message_defaults_surface_and_rejects_bad_snapshot(
         "webui-client",
         {
             "type": "workframe_message",
-            "workframe_id": "frame-a",
+            "workframe_id": _WORKFRAME_ID,
             "content": "question",
             "webui": True,
             "reading_snapshot": [],
@@ -2742,7 +2746,7 @@ async def test_workframe_message_defaults_surface_and_rejects_bad_snapshot(
         "webui-client",
         {
             "type": "workframe_message",
-            "workframe_id": "frame-a",
+            "workframe_id": _WORKFRAME_ID,
             "content": "plain workframe question",
             "webui": True,
         },
@@ -2751,6 +2755,52 @@ async def test_workframe_message_defaults_surface_and_rejects_bad_snapshot(
     inbound = bus.publish_inbound.await_args.args[0]
     assert inbound.metadata["surface"] == "generic"
     assert "reading_snapshot" not in inbound.metadata
+
+
+@pytest.mark.asyncio
+async def test_workframe_scope_persists_only_to_workframe_session_store(
+    bus: MagicMock,
+    tmp_path: Path,
+) -> None:
+    default_workspace = tmp_path / "default"
+    project = tmp_path / "project"
+    default_workspace.mkdir()
+    project.mkdir()
+    ordinary_sessions = SessionManager(tmp_path / "ordinary")
+    workframe_sessions = SessionManager(tmp_path / "workframes")
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
+        bus,
+        gateway=_basic_handler(
+            bus,
+            session_manager=ordinary_sessions,
+            workframe_session_manager=workframe_sessions,
+            workspace_path=default_workspace,
+        ),
+    )
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {
+            "type": "workframe_message",
+            "workframe_id": _WORKFRAME_ID,
+            "content": "question",
+            "webui": True,
+            "workspace_scope": {
+                "project_path": str(project),
+                "access_mode": "full",
+            },
+        },
+    )
+
+    inbound = bus.publish_inbound.await_args.args[0]
+    assert inbound.session_key == f"workframe:{_WORKFRAME_ID}"
+    assert workframe_sessions.read_session_file(f"workframe:{_WORKFRAME_ID}") is not None
+    assert ordinary_sessions.read_session_file(f"websocket:{_WORKFRAME_ID}") is None
+    assert ordinary_sessions.read_session_file(f"workframe:{_WORKFRAME_ID}") is None
 
 
 @pytest.mark.asyncio
@@ -3075,6 +3125,24 @@ def test_sessions_list_includes_active_run_started_at(monkeypatch) -> None:
 )
 def test_is_valid_chat_id(value: Any, expected: bool) -> None:
     assert _is_valid_chat_id(value) is expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (_WORKFRAME_ID, True),
+        ("33333333-3333-4333-A333-333333333333", True),
+        ("frame-a", False),
+        ("reading-frame", False),
+        ("11111111111141118111111111111111", False),
+        ("11111111-1111-4111-8111-111111111111/evil", False),
+        ("", False),
+        (None, False),
+        (123, False),
+    ],
+)
+def test_is_valid_workframe_id(value: Any, expected: bool) -> None:
+    assert _is_valid_workframe_id(value) is expected
 
 
 def test_handle_webui_thread_get_returns_json(tmp_path, monkeypatch) -> None:

@@ -56,6 +56,7 @@ class ChannelManager:
         bus: MessageBus,
         *,
         session_manager: "SessionManager | None" = None,
+        workframe_session_manager: "SessionManager | None" = None,
         cron_service: Any | None = None,
         webui_runtime_model_name: Callable[[], str | None] | None = None,
         webui_cron_pending_job_ids: Callable[[str], set[str]] | None = None,
@@ -66,6 +67,7 @@ class ChannelManager:
         self.config = config
         self.bus = bus
         self._session_manager = session_manager
+        self._workframe_session_manager = workframe_session_manager
         self._cron_service = cron_service
         self._webui_runtime_model_name = webui_runtime_model_name
         self._webui_cron_pending_job_ids = webui_cron_pending_job_ids
@@ -120,6 +122,7 @@ class ChannelManager:
                         config=parsed,
                         bus=self.bus,
                         session_manager=self._session_manager,
+                        workframe_session_manager=self._workframe_session_manager,
                         static_dist_path=static_path,
                         workspace_path=workspace,
                         default_restrict_to_workspace=self.config.tools.restrict_to_workspace,

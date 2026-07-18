@@ -1811,7 +1811,7 @@ function Shell({
                   persistenceFailed={readerPersistenceFailed}
                   onChange={onReaderChange}
                   onImportEpub={onReaderImportEpub}
-                  onSendReading={(content, snapshot) => {
+                  onSendReading={(content) => {
                     if (!activeReaderChatId) return;
                     client.sendMessage(
                       activeReaderChatId,
@@ -1819,7 +1819,6 @@ function Shell({
                       undefined,
                       {
                         ...(activeWorkspaceScope ? { workspaceScope: activeWorkspaceScope } : {}),
-                        readingSnapshot: snapshot,
                       },
                     );
                   }}

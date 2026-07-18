@@ -24,7 +24,9 @@ class GatewayServices:
     media: WebUIMediaGateway
     transcripts: WebUITranscriptRecorder
     workspaces: WebUIWorkspaceController
+    workframe_workspaces: WebUIWorkspaceController
     session_manager: Any | None
+    workframe_session_manager: Any | None
     cron_service: Any | None
     cron_pending_job_ids: Callable[[str], set[str]] | None
 
@@ -40,6 +42,7 @@ def build_gateway_services(
     runtime_model_name: Any | None,
     runtime_surface: str,
     runtime_capabilities_overrides: dict[str, Any] | None,
+    workframe_session_manager: Any | None = None,
     disabled_skills: set[str] | None = None,
     cron_service: Any | None = None,
     cron_pending_job_ids: Callable[[str], set[str]] | None = None,
@@ -53,6 +56,11 @@ def build_gateway_services(
     transcripts = WebUITranscriptRecorder(log=logger)
     workspaces = WebUIWorkspaceController(
         session_manager=session_manager,
+        default_workspace=workspace_path,
+        default_restrict_to_workspace=default_restrict_to_workspace,
+    )
+    workframe_workspaces = WebUIWorkspaceController(
+        session_manager=workframe_session_manager,
         default_workspace=workspace_path,
         default_restrict_to_workspace=default_restrict_to_workspace,
     )
@@ -79,7 +87,9 @@ def build_gateway_services(
         media=media,
         transcripts=transcripts,
         workspaces=workspaces,
+        workframe_workspaces=workframe_workspaces,
         session_manager=session_manager,
+        workframe_session_manager=workframe_session_manager,
         cron_service=cron_service,
         cron_pending_job_ids=cron_pending_job_ids,
     )

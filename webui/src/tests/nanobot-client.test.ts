@@ -523,6 +523,7 @@ describe("NanobotClient", () => {
   });
 
   it("sends workframe messages with reading snapshots", () => {
+    const workframeId = "11111111-1111-4111-8111-111111111111";
     const client = new NanobotClient({
       url: "ws://test",
       reconnect: false,
@@ -531,7 +532,7 @@ describe("NanobotClient", () => {
     client.connect();
     lastSocket().fakeOpen();
 
-    client.sendWorkframeMessage("frame-a", "question", {
+    client.sendWorkframeMessage(workframeId, "question", {
       surface: "reader",
       turnId: "turn-1",
       readingSnapshot: {
@@ -552,7 +553,7 @@ describe("NanobotClient", () => {
 
     expect(JSON.parse(lastSocket().sent.at(-1) as string)).toEqual({
       type: "workframe_message",
-      workframe_id: "frame-a",
+      workframe_id: workframeId,
       surface: "reader",
       content: "question",
       turn_id: "turn-1",
@@ -565,6 +566,7 @@ describe("NanobotClient", () => {
   });
 
   it("re-attaches workframes with the workframe protocol after reconnect", async () => {
+    const workframeId = "22222222-2222-4222-8222-222222222222";
     const client = new NanobotClient({
       url: "ws://test",
       reconnect: true,
@@ -572,7 +574,7 @@ describe("NanobotClient", () => {
     });
     client.connect();
     lastSocket().fakeOpen();
-    client.attachWorkframe("frame-a");
+    client.attachWorkframe(workframeId);
 
     lastSocket().close();
     await vi.advanceTimersByTimeAsync(500);
@@ -580,7 +582,7 @@ describe("NanobotClient", () => {
     expect(reconnected).not.toBe(FakeSocket.instances[0]);
     reconnected.fakeOpen();
     expect(reconnected.sent).toContain(
-      JSON.stringify({ type: "attach_workframe", workframe_id: "frame-a" }),
+      JSON.stringify({ type: "attach_workframe", workframe_id: workframeId }),
     );
   });
 
@@ -915,7 +917,7 @@ describe("NanobotClient", () => {
     expect(FakeSocket.instances.length).toBeGreaterThan(1);
   });
 
-  it("sends reading_snapshot on message frames", () => {
+  it("does not send reading_snapshot on ordinary message frames", () => {
     const client = new NanobotClient({
       url: "ws://test",
       reconnect: false,
@@ -944,13 +946,12 @@ describe("NanobotClient", () => {
           bad_response_risk: "avoid generic summary",
         },
       },
-    });
+    } as any);
 
     const sent = JSON.parse(lastSocket().sent.at(-1) ?? "{}");
-    expect(sent.reading_snapshot).toMatchObject({
-      scene: "reading",
-      focus: { focused_text: "Focused passage." },
-    });
+    expect(sent.type).toBe("message");
+    expect("reading_snapshot" in sent).toBe(false);
+    expect(sent.reading_snapshot).toBeUndefined();
   });
 
   it("omits reading_snapshot when not provided", () => {

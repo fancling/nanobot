@@ -1000,6 +1000,7 @@ def _run_gateway(
         config,
         bus,
         session_manager=session_manager,
+        workframe_session_manager=agent.workframe.sessions,
         cron_service=cron,
         webui_runtime_model_name=_webui_runtime_model_name,
         webui_cron_pending_job_ids=getattr(agent, "pending_cron_job_ids_for_session", None),

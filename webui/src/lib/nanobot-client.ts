@@ -429,7 +429,6 @@ export class NanobotClient {
       mcpPresets?: OutboundMcpPresetMention[];
       workspaceScope?: WorkspaceScopePayload | null;
       turnId?: string;
-      readingSnapshot?: ReadingSnapshot;
     },
   ): void {
     this.knownChats.add(chatId);
@@ -442,7 +441,6 @@ export class NanobotClient {
       ...(options?.cliApps?.length ? { cli_apps: options.cliApps } : {}),
       ...(options?.mcpPresets?.length ? { mcp_presets: options.mcpPresets } : {}),
       ...(options?.workspaceScope ? { workspace_scope: options.workspaceScope } : {}),
-      ...(options?.readingSnapshot ? { reading_snapshot: options.readingSnapshot } : {}),
       ...(options?.turnId ? { turn_id: options.turnId } : {}),
       webui: true,
     };

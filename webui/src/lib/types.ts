@@ -980,7 +980,6 @@ export type Outbound =
       mcp_presets?: OutboundMcpPresetMention[];
       workspace_scope?: WorkspaceScopePayload;
       turn_id?: string;
-      reading_snapshot?: ReadingSnapshot;
       /** Marks messages sent by the embedded WebUI, without changing the
        * generic websocket protocol for other clients. */
       webui?: true;

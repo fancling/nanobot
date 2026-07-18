@@ -184,7 +184,6 @@ def _parse_inbound_payload(raw: str) -> str | None:
 # Accept UUIDs and short scoped keys like "unified:default". Keeps the capability
 # namespace small enough to rule out path traversal / quote injection tricks.
 _CHAT_ID_RE = re.compile(r"^[A-Za-z0-9_:-]{1,64}$")
-_WORKFRAME_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
 
 def _is_valid_chat_id(value: Any) -> bool:
@@ -192,7 +191,13 @@ def _is_valid_chat_id(value: Any) -> bool:
 
 
 def _is_valid_workframe_id(value: Any) -> bool:
-    return isinstance(value, str) and _WORKFRAME_ID_RE.fullmatch(value) is not None
+    if not isinstance(value, str):
+        return False
+    try:
+        parsed = uuid.UUID(value)
+    except (TypeError, ValueError, AttributeError):
+        return False
+    return str(parsed) == value.lower()
 
 
 def _workframe_session_key(workframe_id: str) -> str:
@@ -303,6 +308,7 @@ class WebSocketChannel(BaseChannel):
         self._media = gateway.media
         self._transcripts = gateway.transcripts
         self._workspaces = gateway.workspaces
+        self._workframe_workspaces = gateway.workframe_workspaces
 
         self._stream_text_buffers: dict[tuple[str, str], list[str]] = {}
 
@@ -660,14 +666,17 @@ class WebSocketChannel(BaseChannel):
             workframe_id = str(uuid.uuid4())
             scope = await self._workspace_scope_or_error(
                 connection,
-                lambda: self._workspaces.scope_for_new_chat(
+                lambda: self._workframe_workspaces.scope_for_new_chat(
                     envelope,
                     controls_available=self._workspace_controls_available(connection),
                 ),
             )
             if scope is None:
                 return
-            self._workspaces.persist_scope(workframe_id, scope)
+            self._workframe_workspaces.persist_scope_for_session_key(
+                _workframe_session_key(workframe_id),
+                scope,
+            )
             self._attach(connection, workframe_id)
             surface = envelope.get("surface") if isinstance(envelope.get("surface"), str) else None
             await self._send_event(
@@ -837,9 +846,9 @@ class WebSocketChannel(BaseChannel):
 
             scope = await self._workspace_scope_or_error(
                 connection,
-                lambda: self._workspaces.scope_for_message(
+                lambda: self._workframe_workspaces.scope_for_message_session_key(
                     envelope,
-                    chat_id=workframe_id,
+                    session_key=_workframe_session_key(workframe_id),
                     chat_running=websocket_turn_wall_started_at(workframe_id) is not None,
                     controls_available=self._workspace_controls_available(connection),
                 ),
@@ -851,7 +860,10 @@ class WebSocketChannel(BaseChannel):
             self._attach(connection, workframe_id)
             await self._hydrate_after_subscribe(workframe_id)
             metadata[WORKSPACE_SCOPE_METADATA_KEY] = scope.metadata()
-            self._workspaces.persist_scope(workframe_id, scope)
+            self._workframe_workspaces.persist_scope_for_session_key(
+                _workframe_session_key(workframe_id),
+                scope,
+            )
             if metadata.get("webui") is True and self.is_allowed(client_id):
                 self._transcripts.append_user_message(
                     workframe_id,
