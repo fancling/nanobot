@@ -512,16 +512,193 @@ describe("App layout", () => {
     fireEvent.click(within(readerMain).getByRole("button", { name: "Send message" }));
 
     expect(sendMessageSpy).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(sendWorkframeMessageSpy).toHaveBeenCalledWith(
+        "22222222-2222-4222-8222-222222222222",
+        "Why this paragraph?",
+        expect.objectContaining({
+          surface: "reader",
+          readingSnapshot: expect.objectContaining({
+            document: expect.objectContaining({ id: "book-1", title: "Book" }),
+            focus: expect.objectContaining({ focused_text: "First paragraph." }),
+          }),
+        }),
+      ),
+    );
+  });
+
+  it("reuses an in-flight workframe when an old reader sends twice", async () => {
+    let resolveWorkframe: ((id: string) => void) | null = null;
+    newWorkframeSpy.mockReturnValueOnce(new Promise<string>((resolve) => {
+      resolveWorkframe = resolve;
+    }));
+    window.localStorage.setItem(
+      `${READER_STATE_STORAGE_PREFIX}book-chat`,
+      JSON.stringify({
+        version: 1,
+        documentId: "book-1",
+        title: "Book",
+        rawText: "First paragraph.",
+        focusedParagraphIndex: 0,
+        selectedText: "",
+        note: "",
+        question: "",
+        mode: "slow_reading",
+        collapsed: false,
+        documentKind: "epub",
+        readerSession: true,
+      }),
+    );
+    mockSessions = [
+      {
+        key: "websocket:book-chat",
+        channel: "websocket",
+        chatId: "book-chat",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        title: "Book",
+        preview: "Book",
+      },
+    ];
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(await within(sidebar).findByRole("button", { name: /^Book$/ }));
+    const readerMain = await screen.findByRole("main", { name: /reader page/i });
+    const input = within(readerMain).getByLabelText("Reader chat message");
+    const send = within(readerMain).getByRole("button", { name: "Send message" });
+
+    fireEvent.change(input, { target: { value: "First question" } });
+    fireEvent.click(send);
+    fireEvent.change(input, { target: { value: "Second question" } });
+    fireEvent.click(send);
+    await waitFor(() => expect(newWorkframeSpy).toHaveBeenCalledTimes(1));
+
+    resolveWorkframe?.("33333333-3333-4333-8333-333333333333");
+
+    await waitFor(() => expect(sendWorkframeMessageSpy).toHaveBeenCalledTimes(2));
+    expect(sendWorkframeMessageSpy).toHaveBeenNthCalledWith(
+      1,
+      "33333333-3333-4333-8333-333333333333",
+      "First question",
+      expect.objectContaining({ surface: "reader" }),
+    );
+    expect(sendWorkframeMessageSpy).toHaveBeenNthCalledWith(
+      2,
+      "33333333-3333-4333-8333-333333333333",
+      "Second question",
+      expect.objectContaining({ surface: "reader" }),
+    );
+    expect(reading.loadReaderState("book-chat")?.workframeId).toBe(
+      "33333333-3333-4333-8333-333333333333",
+    );
+  });
+
+  it("serializes workframe creation when switching between reader chats", async () => {
+    let resolveFirstWorkframe: ((id: string) => void) | null = null;
+    newWorkframeSpy
+      .mockReturnValueOnce(new Promise<string>((resolve) => {
+        resolveFirstWorkframe = resolve;
+      }))
+      .mockResolvedValueOnce("44444444-4444-4444-8444-444444444444");
+    window.localStorage.setItem(
+      `${READER_STATE_STORAGE_PREFIX}book-a`,
+      JSON.stringify({
+        version: 1,
+        documentId: "book-a",
+        title: "Book A",
+        rawText: "Alpha paragraph.",
+        focusedParagraphIndex: 0,
+        selectedText: "",
+        note: "",
+        question: "",
+        mode: "slow_reading",
+        collapsed: false,
+        documentKind: "epub",
+        readerSession: true,
+      }),
+    );
+    window.localStorage.setItem(
+      `${READER_STATE_STORAGE_PREFIX}book-b`,
+      JSON.stringify({
+        version: 1,
+        documentId: "book-b",
+        title: "Book B",
+        rawText: "Beta paragraph.",
+        focusedParagraphIndex: 0,
+        selectedText: "",
+        note: "",
+        question: "",
+        mode: "slow_reading",
+        collapsed: false,
+        documentKind: "epub",
+        readerSession: true,
+      }),
+    );
+    mockSessions = [
+      {
+        key: "websocket:book-a",
+        channel: "websocket",
+        chatId: "book-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        title: "Book A",
+        preview: "Book A",
+      },
+      {
+        key: "websocket:book-b",
+        channel: "websocket",
+        chatId: "book-b",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        title: "Book B",
+        preview: "Book B",
+      },
+    ];
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(await within(sidebar).findByRole("button", { name: /^Book A$/ }));
+    let readerMain = await screen.findByRole("main", { name: /reader page/i });
+    fireEvent.change(within(readerMain).getByLabelText("Reader chat message"), {
+      target: { value: "Question A" },
+    });
+    fireEvent.click(within(readerMain).getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(newWorkframeSpy).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(await within(sidebar).findByRole("button", { name: /^Book B$/ }));
+    await waitFor(() =>
+      expect(window.location.hash).toBe("#/reader?chat=websocket%3Abook-b"),
+    );
+    readerMain = await screen.findByRole("main", { name: /reader page/i });
+    fireEvent.change(within(readerMain).getByLabelText("Reader chat message"), {
+      target: { value: "Question B" },
+    });
+    fireEvent.click(within(readerMain).getByRole("button", { name: "Send message" }));
+    expect(newWorkframeSpy).toHaveBeenCalledTimes(1);
+
+    resolveFirstWorkframe?.("33333333-3333-4333-8333-333333333333");
+
+    await waitFor(() => expect(newWorkframeSpy).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(sendWorkframeMessageSpy).toHaveBeenCalledTimes(1));
     expect(sendWorkframeMessageSpy).toHaveBeenCalledWith(
-      "22222222-2222-4222-8222-222222222222",
-      "Why this paragraph?",
+      "44444444-4444-4444-8444-444444444444",
+      "Question B",
       expect.objectContaining({
         surface: "reader",
         readingSnapshot: expect.objectContaining({
-          document: expect.objectContaining({ id: "book-1", title: "Book" }),
-          focus: expect.objectContaining({ focused_text: "First paragraph." }),
+          document: expect.objectContaining({ id: "book-b", title: "Book B" }),
         }),
       }),
+    );
+    expect(sendWorkframeMessageSpy).not.toHaveBeenCalledWith(
+      "33333333-3333-4333-8333-333333333333",
+      "Question A",
+      expect.anything(),
     );
   });
 
@@ -835,13 +1012,11 @@ describe("App layout", () => {
       });
     });
 
-    await waitFor(() =>
-      expect(JSON.parse(
-        window.localStorage.getItem(`${READER_STATE_STORAGE_PREFIX}book-a`) ?? "null",
-      )).toMatchObject({
-        title: "Imported book",
-      }),
-    );
+    expect(JSON.parse(
+      window.localStorage.getItem(`${READER_STATE_STORAGE_PREFIX}book-a`) ?? "null",
+    )).toMatchObject({
+      title: "Reader A",
+    });
     expect(window.location.hash).toBe("#/reader?chat=websocket%3Abook-b");
     expect(screen.queryByText("Imported book")).not.toBeInTheDocument();
   });

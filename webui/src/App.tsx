@@ -645,6 +645,8 @@ function Shell({
   const runningChatIdsRef = useRef<Set<string>>(new Set());
   const activeChatIdRef = useRef<string | null>(null);
   const activeReaderChatIdRef = useRef<string | null>(null);
+  const readerWorkframePromisesRef = useRef<Map<string, Promise<string>>>(new Map());
+  const readerWorkframeQueueRef = useRef<Promise<void>>(Promise.resolve());
   const readerImportTicketRef = useRef(0);
   const blankReaderImportTokenRef = useRef(0);
   const activeBlankReaderImportTokenRef = useRef<number | null>(null);
@@ -1360,6 +1362,45 @@ function Shell({
     persistReaderState(activeReaderChatId, nextState, readerState);
   }, [activeReaderChatId, persistReaderState, readerState]);
 
+  const ensureReaderWorkframeId = useCallback(async (
+    chatId: string,
+    state: ReaderState | null,
+    previousState?: ReaderState | null,
+  ): Promise<string> => {
+    const existing = state?.workframeId?.trim();
+    if (existing) return existing;
+    let pending = readerWorkframePromisesRef.current.get(chatId);
+    if (!pending) {
+      pending = (async () => {
+        const previous = readerWorkframeQueueRef.current.catch(() => undefined);
+        let releaseQueue: () => void = () => {};
+        const current = new Promise<void>((resolve) => {
+          releaseQueue = resolve;
+        });
+        readerWorkframeQueueRef.current = previous.then(() => current);
+        await previous;
+        try {
+          return await client.newWorkframe(CHAT_CREATE_TIMEOUT_MS, {
+            surface: "reader",
+            workspaceScope: activeWorkspaceScope,
+          });
+        } finally {
+          releaseQueue();
+        }
+      })().finally(() => {
+        readerWorkframePromisesRef.current.delete(chatId);
+      });
+      readerWorkframePromisesRef.current.set(chatId, pending);
+    }
+    const workframeId = await pending;
+    const nextState = { ...(state ?? blankReaderState()), workframeId };
+    persistReaderState(chatId, nextState, previousState ?? state);
+    if (activeReaderChatIdRef.current === chatId) {
+      setReaderState(nextState);
+    }
+    return workframeId;
+  }, [activeWorkspaceScope, client, persistReaderState]);
+
   const onReaderImportEpub = useCallback(async (file: File) => {
     const importTicket = readerImportTicketRef.current + 1;
     readerImportTicketRef.current = importTicket;
@@ -1396,15 +1437,16 @@ function Shell({
           }));
         }
       }
-      const existingWorkframeId = readerState?.workframeId?.trim() || null;
-      const workframeId = existingWorkframeId
-        ?? (await client.newWorkframe(CHAT_CREATE_TIMEOUT_MS, {
-          surface: "reader",
-          workspaceScope: activeWorkspaceScope,
-        }));
+      const baseReaderState = readerState ?? blankReaderState();
+      const workframeId = await ensureReaderWorkframeId(
+        targetChatId,
+        baseReaderState,
+        readerState ?? blankReaderState(),
+      );
+      if (!startedWithoutReaderTarget && activeReaderChatIdRef.current !== targetChatId) return;
       if (startedWithoutReaderTarget && !canContinueBlankReaderImport()) return;
       const nextState = {
-        ...(readerState ?? blankReaderState()),
+        ...baseReaderState,
         ...imported,
         workframeId,
         focusedParagraphIndex: 0,
@@ -1434,7 +1476,14 @@ function Shell({
     } catch (error) {
       console.error("Failed to import EPUB", error);
     }
-  }, [activeWorkspaceScope, client, createChatGuarded, navigate, persistReaderState, readerState]);
+  }, [
+    activeWorkspaceScope,
+    createChatGuarded,
+    ensureReaderWorkframeId,
+    navigate,
+    persistReaderState,
+    readerState,
+  ]);
 
   const onRestart = useCallback(() => {
     const chatId = activeSession?.chatId ?? client.defaultChatId;
@@ -1821,17 +1870,18 @@ function Shell({
                   onImportEpub={onReaderImportEpub}
                   onSendReading={(content, snapshot) => {
                     void (async () => {
-                      if (!activeReaderChatId || !readerState) return;
-                      let workframeId = readerState.workframeId?.trim() || null;
-                      if (!workframeId) {
-                        workframeId = await client.newWorkframe(CHAT_CREATE_TIMEOUT_MS, {
-                          surface: "reader",
-                          workspaceScope: activeWorkspaceScope,
-                        });
-                        const nextState = { ...readerState, workframeId };
-                        setReaderState(nextState);
-                        persistReaderState(activeReaderChatId, nextState, readerState);
+                      const chatId = activeReaderChatId;
+                      const state = readerState;
+                      if (!chatId || !state) return;
+                      let workframeId: string;
+                      try {
+                        workframeId = await ensureReaderWorkframeId(chatId, state);
+                      } catch (error) {
+                        console.error("Failed to create Reader workframe", error);
+                        setReaderPersistenceFailed(true);
+                        return;
                       }
+                      if (activeReaderChatIdRef.current !== chatId) return;
                       client.sendWorkframeMessage(workframeId, content, {
                         surface: "reader",
                         readingSnapshot: snapshot,
