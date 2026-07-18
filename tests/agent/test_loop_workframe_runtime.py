@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -8,6 +9,8 @@ import pytest
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.frame_request import FrameRequestAdapter
 from nanobot.agent.loop import AgentLoop, TurnRuntime
+from nanobot.agent.subagent import SubagentManager
+from nanobot.agent.tools.file_state import FileStateStore
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.factory import ProviderSnapshot
@@ -34,7 +37,47 @@ class _Tools:
 
 
 class _Commands:
+    def is_priority(self, raw: str) -> bool:
+        return raw.strip().lower() in {"/stop", "/restart"}
+
+    def is_dispatchable_command(self, raw: str) -> bool:
+        return raw.strip().lower() in {"/new", "/help"}
+
     async def dispatch(self, _ctx):
+        return None
+
+    async def dispatch_priority(self, _ctx):
+        return None
+
+
+class _CronTurns:
+    def defer_if_active(self, *_args, **_kwargs) -> bool:
+        return False
+
+    def complete(self, *_args, **_kwargs) -> None:
+        return None
+
+    async def publish_next_deferred(self, _session_key: str) -> None:
+        return None
+
+
+class _RuntimeEvents:
+    async def session_turn_started(self, *_args, **_kwargs) -> None:
+        return None
+
+    async def run_status_changed(self, *_args, **_kwargs) -> None:
+        return None
+
+    async def turn_completed(self, *_args, **_kwargs) -> None:
+        return None
+
+    def clear_turn(self, *_args, **_kwargs) -> None:
+        return None
+
+    def record_turn_runtime(self, *_args, **_kwargs) -> None:
+        return None
+
+    def record_turn_latency(self, *_args, **_kwargs) -> None:
         return None
 
 
@@ -43,7 +86,12 @@ def _loop(tmp_path: Path) -> AgentLoop:
     loop.bus = MessageBus()
     loop.workspace = tmp_path
     loop.context_window_tokens = 16000
+    loop.context_block_limit = None
     loop.max_tool_result_chars = 12000
+    loop.max_iterations = 8
+    loop.provider_retry_mode = "standard"
+    loop.tool_hint_max_length = None
+    loop._extra_hooks = []
     loop.provider = _Provider()
     loop.model = "test-model"
     loop.tools = _Tools()
@@ -60,6 +108,7 @@ def _loop(tmp_path: Path) -> AgentLoop:
     loop._session_ttl_minutes = 0
     loop.workspace_scopes = SimpleNamespace(
         for_message=lambda _msg, _metadata: SimpleNamespace(project_path=tmp_path),
+        for_turn=lambda **_kwargs: SimpleNamespace(project_path=tmp_path),
         persist_message_scope=lambda _session, _msg: None,
     )
     loop.consolidator = SimpleNamespace(
@@ -68,6 +117,22 @@ def _loop(tmp_path: Path) -> AgentLoop:
     loop.auto_compact = SimpleNamespace(
         prepare_session=lambda session, _key: (session, None),
     )
+    loop.runner = SimpleNamespace()
+    loop._file_state_store = FileStateStore()
+    loop._last_usage = {}
+    loop._current_iteration = 0
+    loop.subagents = SimpleNamespace(
+        get_running_count_by_session=lambda _session_key: 0,
+        cancel_by_session=lambda _session_key: _noop_async_value(0),
+    )
+    loop._active_tasks = {}
+    loop._pending_queues = {}
+    loop._session_locks = {}
+    loop._concurrency_gate = None
+    loop._cron_turns = _CronTurns()
+    loop._running = False
+    loop._connect_mcp = _noop_async
+    loop._runtime_events = lambda: _RuntimeEvents()
     loop.commands = _Commands()
     loop._schedule_background = lambda coro: coro.close()
     loop.default_runtime = TurnRuntime(
@@ -84,6 +149,10 @@ def _loop(tmp_path: Path) -> AgentLoop:
 
 async def _noop_async() -> None:
     return None
+
+
+async def _noop_async_value(value):
+    return value
 
 
 def test_workframe_runtime_uses_isolated_session_and_memory_roots(tmp_path: Path) -> None:
@@ -245,3 +314,212 @@ async def test_process_message_routes_workframe_turn_through_workframe_runtime(
     assert (tmp_path / "workframes" / "sessions" / "workframe_frame-a.jsonl").exists()
     assert not (tmp_path / "sessions" / "workframe_frame-a.jsonl").exists()
     assert "<workspace_frame" in captured_initial[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_workframe_checkpoint_uses_workframe_session_store(tmp_path: Path) -> None:
+    loop = _loop(tmp_path)
+    session = loop.workframe.sessions.get_or_create("workframe:frame-a")
+
+    async def _run(spec):
+        await spec.checkpoint_callback(
+            {
+                "phase": "awaiting_tools",
+                "assistant_message": {"role": "assistant", "content": "working"},
+            }
+        )
+        return SimpleNamespace(
+            final_content="answer",
+            tools_used=[],
+            messages=[{"role": "assistant", "content": "answer"}],
+            stop_reason="stop",
+            had_injections=False,
+            usage={},
+        )
+
+    loop.runner.run = _run
+
+    await loop._run_agent_loop(
+        [{"role": "user", "content": "question"}],
+        session=session,
+        session_key="workframe:frame-a",
+        session_manager=loop.workframe.sessions,
+        metadata={"workframe": True},
+    )
+
+    assert (tmp_path / "workframes" / "sessions" / "workframe_frame-a.jsonl").exists()
+    assert not (tmp_path / "sessions" / "workframe_frame-a.jsonl").exists()
+    reloaded = loop.workframe.sessions.get_or_create("workframe:frame-a")
+    assert reloaded.metadata["runtime_checkpoint"]["phase"] == "awaiting_tools"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_cancel_restore_uses_workframe_session_store(tmp_path: Path) -> None:
+    loop = _loop(tmp_path)
+    session = loop.workframe.sessions.get_or_create("workframe:frame-a")
+    session.metadata["runtime_checkpoint"] = {
+        "assistant_message": {"role": "assistant", "content": "partial"},
+        "completed_tool_results": [],
+        "pending_tool_calls": [],
+    }
+    loop.workframe.sessions.save(session)
+
+    async def _process_message(*_args, **_kwargs):
+        raise asyncio.CancelledError()
+
+    loop._process_message = _process_message
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="client",
+        chat_id="frame-a",
+        content="stop me",
+        metadata={"workframe": True},
+        session_key_override="workframe:frame-a",
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await loop._dispatch(msg)
+
+    ordinary = tmp_path / "sessions" / "workframe_frame-a.jsonl"
+    assert not ordinary.exists()
+    reloaded = loop.workframe.sessions.get_or_create("workframe:frame-a")
+    assert reloaded.metadata.get("runtime_checkpoint") is None
+    assert any(message.get("content") == "partial" for message in reloaded.messages)
+
+
+@pytest.mark.asyncio
+async def test_run_does_not_shortcut_priority_workframe_message(tmp_path: Path) -> None:
+    loop = _loop(tmp_path)
+    dispatched = asyncio.Event()
+    inline_calls: list[str] = []
+
+    async def _dispatch(msg):
+        assert msg.metadata["workframe"] is True
+        dispatched.set()
+        loop.stop()
+
+    async def _dispatch_command_inline(_msg, _key, raw, _dispatch_fn):
+        inline_calls.append(raw)
+        loop.stop()
+
+    loop._dispatch = _dispatch
+    loop._dispatch_command_inline = _dispatch_command_inline
+    await loop.bus.publish_inbound(
+        InboundMessage(
+            channel="websocket",
+            sender_id="client",
+            chat_id="frame-a",
+            content="/stop",
+            metadata={"workframe": True},
+            session_key_override="workframe:frame-a",
+        )
+    )
+
+    task = asyncio.create_task(loop.run())
+    await asyncio.wait_for(dispatched.wait(), timeout=1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert inline_calls == []
+
+
+@pytest.mark.asyncio
+async def test_run_queues_dispatchable_workframe_message_instead_of_shortcut(
+    tmp_path: Path,
+) -> None:
+    loop = _loop(tmp_path)
+    queued = asyncio.Queue(maxsize=20)
+    loop._pending_queues["workframe:frame-a"] = queued
+    inline_calls: list[str] = []
+
+    async def _dispatch_command_inline(_msg, _key, raw, _dispatch_fn):
+        inline_calls.append(raw)
+        loop.stop()
+
+    loop._dispatch_command_inline = _dispatch_command_inline
+    await loop.bus.publish_inbound(
+        InboundMessage(
+            channel="websocket",
+            sender_id="client",
+            chat_id="frame-a",
+            content="/new",
+            metadata={"workframe": True},
+            session_key_override="workframe:frame-a",
+        )
+    )
+
+    task = asyncio.create_task(loop.run())
+    queued_msg = await asyncio.wait_for(queued.get(), timeout=1)
+    loop.stop()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert queued_msg.content == "/new"
+    assert queued_msg.metadata["workframe"] is True
+    assert inline_calls == []
+
+
+@pytest.mark.asyncio
+async def test_system_workframe_turn_uses_workframe_session_store(tmp_path: Path) -> None:
+    loop = _loop(tmp_path)
+
+    async def _run_agent_loop(initial_messages, **_kwargs):
+        return (
+            "done",
+            [],
+            [*initial_messages, {"role": "assistant", "content": "done"}],
+            "stop",
+            False,
+        )
+
+    loop._run_agent_loop = _run_agent_loop
+    msg = InboundMessage(
+        channel="system",
+        sender_id="subagent",
+        chat_id="websocket:frame-a",
+        content="subagent result",
+        metadata={"workframe": True, "subagent_task_id": "task-1"},
+        session_key_override="workframe:frame-a",
+    )
+
+    result = await loop._process_system_message(msg)
+
+    assert result is not None
+    assert result.content == "done"
+    assert (tmp_path / "workframes" / "sessions" / "workframe_frame-a.jsonl").exists()
+    assert not (tmp_path / "sessions" / "workframe_frame-a.jsonl").exists()
+
+
+@pytest.mark.asyncio
+async def test_subagent_result_preserves_origin_workframe_metadata(tmp_path: Path) -> None:
+    manager = SubagentManager(
+        provider=_Provider(),
+        workspace=tmp_path,
+        bus=MessageBus(),
+        max_tool_result_chars=12000,
+    )
+    published: list[InboundMessage] = []
+
+    async def _publish(msg: InboundMessage) -> None:
+        published.append(msg)
+
+    manager.bus.publish_inbound = _publish
+
+    await manager._announce_result(
+        "task-1",
+        "label",
+        "task",
+        "result",
+        {
+            "channel": "websocket",
+            "chat_id": "frame-a",
+            "session_key": "workframe:frame-a",
+            "metadata": {"workframe": True, "message_id": "origin"},
+        },
+        "ok",
+    )
+
+    assert published[0].metadata["workframe"] is True
+    assert published[0].metadata["subagent_task_id"] == "task-1"

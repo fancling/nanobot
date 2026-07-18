@@ -42,6 +42,10 @@ class SpawnTool(Tool, ContextAware):
             "spawn_origin_message_id",
             default=None,
         )
+        self._origin_metadata: ContextVar[dict[str, Any] | None] = ContextVar(
+            "spawn_origin_metadata",
+            default=None,
+        )
 
     @classmethod
     def create(cls, ctx: Any) -> Tool:
@@ -53,6 +57,7 @@ class SpawnTool(Tool, ContextAware):
         self._origin_chat_id.set(ctx.chat_id)
         self._session_key.set(ctx.session_key or f"{ctx.channel}:{ctx.chat_id}")
         self._origin_message_id.set(ctx.message_id)
+        self._origin_metadata.set(dict(ctx.metadata or {}))
 
     @property
     def name(self) -> str:
@@ -91,6 +96,7 @@ class SpawnTool(Tool, ContextAware):
             origin_chat_id=self._origin_chat_id.get(),
             session_key=self._session_key.get(),
             origin_message_id=self._origin_message_id.get(),
+            origin_metadata=self._origin_metadata.get() or {},
             temperature=temperature,
             workspace_scope=current_workspace_scope(),
         )

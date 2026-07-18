@@ -179,6 +179,40 @@ async def test_spawn_tool_rejects_when_at_concurrency_limit(tmp_path):
     await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
 
 
+@pytest.mark.asyncio
+async def test_spawn_tool_forwards_origin_metadata_to_subagent_manager():
+    """Workframe metadata on the parent turn should reach subagent announcements."""
+    from nanobot.agent.tools.context import RequestContext
+    from nanobot.agent.tools.spawn import SpawnTool
+
+    captured: dict[str, object] = {}
+
+    class Manager:
+        max_concurrent_subagents = 1
+
+        def get_running_count(self) -> int:
+            return 0
+
+        async def spawn(self, **kwargs):
+            captured.update(kwargs)
+            return "started"
+
+    tool = SpawnTool(Manager())
+    tool.set_context(
+        RequestContext(
+            channel="websocket",
+            chat_id="frame-a",
+            session_key="workframe:frame-a",
+            metadata={"workframe": True},
+        )
+    )
+
+    result = await tool.execute(task="do task")
+
+    assert result == "started"
+    assert captured["origin_metadata"] == {"workframe": True}
+
+
 def test_subagent_default_max_concurrent_matches_agent_defaults(tmp_path):
     """Direct SubagentManager construction should use the agent default concurrency limit."""
     from nanobot.agent.subagent import SubagentManager

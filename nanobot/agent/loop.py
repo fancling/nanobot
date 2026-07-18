@@ -712,8 +712,18 @@ class AgentLoop:
         )
 
     @staticmethod
+    def _looks_like_workframe_session_key(session_key: str | None) -> bool:
+        return bool(session_key and session_key.startswith("workframe:"))
+
+    @staticmethod
     def _is_workframe_message(msg: InboundMessage) -> bool:
-        return bool((msg.metadata or {}).get("workframe") is True)
+        return bool(
+            (msg.metadata or {}).get("workframe") is True
+            or AgentLoop._looks_like_workframe_session_key(msg.session_key_override)
+        )
+
+    def _allow_command_shortcuts(self, msg: InboundMessage) -> bool:
+        return not self._is_workframe_message(msg)
 
     def _turn_runtime_for_message(self, msg: InboundMessage) -> TurnRuntime:
         if self._is_workframe_message(msg):
@@ -854,6 +864,7 @@ class AgentLoop:
         message_id: str | None = None,
         metadata: dict[str, Any] | None = None,
         session_key: str | None = None,
+        session_manager: SessionManager | None = None,
         pending_queue: asyncio.Queue | None = None,
         ephemeral: bool = False,
         tools: ToolRegistry | None = None,
@@ -886,10 +897,12 @@ class AgentLoop:
         if not ephemeral and self._extra_hooks:
             hook = CompositeHook([loop_hook] + self._extra_hooks)
 
+        runtime_sessions = session_manager or self.sessions
+
         async def _checkpoint(payload: dict[str, Any]) -> None:
             if session is None:
                 return
-            self._set_runtime_checkpoint(session, payload)
+            self._set_runtime_checkpoint(session, payload, session_manager=runtime_sessions)
 
         async def _drain_pending(*, limit: int = _MAX_INJECTIONS_PER_TURN) -> list[dict[str, Any]]:
             """Drain follow-up messages from the pending queue.
@@ -994,7 +1007,7 @@ class AgentLoop:
                 # Sustained goals may legitimately exceed NANOBOT_LLM_TIMEOUT_S; idle stall
                 # is still capped by NANOBOT_STREAM_IDLE_TIMEOUT_S in streaming providers.
                 llm_timeout_s=runner_wall_llm_timeout_s(
-                    self.sessions,
+                    runtime_sessions,
                     session.key if session is not None else session_key,
                     metadata=session_metadata,
                     message_metadata=metadata,
@@ -1058,7 +1071,8 @@ class AgentLoop:
             effective_key = self._effective_session_key(msg)
             if await agent_context.handle_runtime_control(self, msg, self.tools):
                 continue
-            if self.commands.is_priority(raw):
+            allow_command_shortcuts = self._allow_command_shortcuts(msg)
+            if allow_command_shortcuts and self.commands.is_priority(raw):
                 await self._dispatch_command_inline(
                     msg, effective_key, raw,
                     self.commands.dispatch_priority,
@@ -1080,7 +1094,7 @@ class AgentLoop:
             if effective_key in self._pending_queues:
                 # Non-priority commands must not be queued for injection;
                 # dispatch them directly (same pattern as priority commands).
-                if self.commands.is_dispatchable_command(raw):
+                if allow_command_shortcuts and self.commands.is_dispatchable_command(raw):
                     await self._dispatch_command_inline(
                         msg, effective_key, raw,
                         self.commands.dispatch,
@@ -1203,10 +1217,11 @@ class AgentLoop:
                     # next conversation turn.
                     try:
                         key = self._effective_session_key(msg)
-                        session = self.sessions.get_or_create(key)
+                        runtime = self._turn_runtime_for_message(msg)
+                        session = runtime.sessions.get_or_create(key)
                         if self._restore_runtime_checkpoint(session):
                             self._clear_pending_user_turn(session)
-                            self.sessions.save(session)
+                            runtime.sessions.save(session)
                             logger.info(
                                 "Restored partial context for cancelled session {}",
                                 key,
@@ -1308,25 +1323,26 @@ class AgentLoop:
             msg.chat_id.split(":", 1) if ":" in msg.chat_id else ("cli", msg.chat_id)
         )
         logger.info("Processing system message from {}", msg.sender_id)
-        key = msg.session_key_override or f"{channel}:{chat_id}"
-        session = self.sessions.get_or_create(key)
+        runtime = self._turn_runtime_for_message(msg)
+        key = session_key or msg.session_key_override or f"{channel}:{chat_id}"
+        session = runtime.sessions.get_or_create(key)
         if self._restore_runtime_checkpoint(session):
-            self.sessions.save(session)
+            runtime.sessions.save(session)
         if self._restore_pending_user_turn(session):
-            self.sessions.save(session)
+            runtime.sessions.save(session)
 
-        session, pending = self.auto_compact.prepare_session(session, key)
+        session, pending = runtime.auto_compact.prepare_session(session, key)
         if pending:
             logger.info("Memory compact triggered for session {}", key)
 
-        await self.consolidator.maybe_consolidate_by_tokens(
+        await runtime.consolidator.maybe_consolidate_by_tokens(
             session,
             replay_max_messages=self._max_messages,
         )
         is_subagent = msg.sender_id == "subagent"
         if is_subagent and self._persist_subagent_followup(session, msg):
             logger.debug("Subagent result persisted for session {}", key)
-            self.sessions.save(session)
+            runtime.sessions.save(session)
         self._set_tool_context(
             channel, chat_id, msg.metadata.get("message_id"),
             msg.metadata, session_key=key,
@@ -1340,24 +1356,39 @@ class AgentLoop:
         history = session.get_history(**_hist_kwargs)
         workspace_scope = self.workspace_scopes.for_message(msg, session.metadata)
 
-        messages = self._build_frame_initial_messages(
-            msg=msg,
-            session=session,
-            history=history,
-            pending_summary=pending,
-            workspace=workspace_scope.project_path,
-            runtime_chat_id=chat_id,
-            runtime_channel=channel,
-            skip_runtime_lines=is_subagent,
-            current_text="" if is_subagent else msg.content,
-            include_memory_recent_history=True,
-        )
+        if runtime.use_workspace_frame:
+            messages = self._build_workframe_initial_messages(
+                msg=msg,
+                session=session,
+                history=history,
+                pending_summary=pending,
+                workspace=workspace_scope.project_path,
+                runtime_chat_id=chat_id,
+                runtime_channel=channel,
+                skip_runtime_lines=is_subagent,
+                current_text="" if is_subagent else msg.content,
+                include_memory_recent_history=True,
+            )
+        else:
+            messages = self._build_frame_initial_messages(
+                msg=msg,
+                session=session,
+                history=history,
+                pending_summary=pending,
+                workspace=workspace_scope.project_path,
+                runtime_chat_id=chat_id,
+                runtime_channel=channel,
+                skip_runtime_lines=is_subagent,
+                current_text="" if is_subagent else msg.content,
+                include_memory_recent_history=True,
+            )
         t_wall = time.time()
         final_content, _, all_msgs, stop_reason, _ = await self._run_agent_loop(
             messages, session=session, channel=channel, chat_id=chat_id,
             message_id=msg.metadata.get("message_id"),
             metadata=msg.metadata,
             session_key=key,
+            session_manager=runtime.sessions,
             pending_queue=pending_queue,
         )
         wall_done = time.time()
@@ -1365,12 +1396,12 @@ class AgentLoop:
         self._save_turn(session, all_msgs, len(messages), turn_latency_ms=latency_ms)
         self._runtime_events().record_turn_latency(key, latency_ms)
         session.enforce_file_cap(
-            on_archive=partial(self.context.memory.raw_archive, session_key=key)
+            on_archive=partial(runtime.context.memory.raw_archive, session_key=key)
         )
         self._clear_runtime_checkpoint(session)
-        self.sessions.save(session)
+        runtime.sessions.save(session)
         self._schedule_background(
-            self.consolidator.maybe_consolidate_by_tokens(
+            runtime.consolidator.maybe_consolidate_by_tokens(
                 session,
                 replay_max_messages=self._max_messages,
             )
@@ -1662,6 +1693,7 @@ class AgentLoop:
         return "ok"
 
     async def _state_run(self, ctx: TurnContext) -> str:
+        runtime = self._runtime_for_context(ctx)
         if ctx.visible_run_started_at is None:
             ctx.visible_run_started_at = time.time()
         await self._runtime_events().run_status_changed(
@@ -1682,6 +1714,7 @@ class AgentLoop:
             message_id=ctx.msg.metadata.get("message_id"),
             metadata=ctx.msg.metadata,
             session_key=ctx.session_key,
+            session_manager=runtime.sessions,
             pending_queue=ctx.pending_queue,
             ephemeral=ctx.ephemeral,
             tools=ctx.tools,
@@ -1890,10 +1923,16 @@ class AgentLoop:
         )
         return True
 
-    def _set_runtime_checkpoint(self, session: Session, payload: dict[str, Any]) -> None:
+    def _set_runtime_checkpoint(
+        self,
+        session: Session,
+        payload: dict[str, Any],
+        *,
+        session_manager: SessionManager | None = None,
+    ) -> None:
         """Persist the latest in-flight turn state into session metadata."""
         session.metadata[self._RUNTIME_CHECKPOINT_KEY] = payload
-        self.sessions.save(session)
+        (session_manager or self.sessions).save(session)
 
     def _mark_pending_user_turn(self, session: Session) -> None:
         session.metadata[self._PENDING_USER_TURN_KEY] = True
