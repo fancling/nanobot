@@ -7,7 +7,7 @@ import pytest
 
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.frame_request import FrameRequestAdapter
-from nanobot.agent.loop import AgentLoop
+from nanobot.agent.loop import AgentLoop, TurnRuntime
 from nanobot.bus.events import InboundMessage
 from nanobot.session.goal_state import GOAL_STATE_KEY
 from nanobot.session.manager import Session
@@ -297,6 +297,14 @@ async def test_process_system_message_saves_response_after_frame_initial_message
         return None
 
     loop.consolidator = SimpleNamespace(maybe_consolidate_by_tokens=_no_consolidate)
+    loop.default_runtime = TurnRuntime(
+        sessions=loop.sessions,
+        context=loop.context,
+        frame_request_adapter=loop.frame_request_adapter,
+        consolidator=loop.consolidator,
+        auto_compact=loop.auto_compact,
+        use_workspace_frame=False,
+    )
     loop._set_tool_context = lambda *_args, **_kwargs: None
     loop._runtime_events = lambda: SimpleNamespace(record_turn_latency=lambda *_args: None)
 
