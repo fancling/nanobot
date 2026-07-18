@@ -3,10 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.frame_request import FrameRequestAdapter
 from nanobot.agent.loop import AgentLoop, TurnRuntime
 from nanobot.bus.events import InboundMessage
+from nanobot.bus.queue import MessageBus
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.session.manager import Session, SessionManager
 
@@ -30,16 +33,26 @@ class _Tools:
         return []
 
 
+class _Commands:
+    async def dispatch(self, _ctx):
+        return None
+
+
 def _loop(tmp_path: Path) -> AgentLoop:
     loop = AgentLoop.__new__(AgentLoop)
+    loop.bus = MessageBus()
     loop.workspace = tmp_path
     loop.context_window_tokens = 16000
+    loop.max_tool_result_chars = 12000
     loop.provider = _Provider()
     loop.model = "test-model"
     loop.tools = _Tools()
     loop._unified_session = False
+    loop._provider_snapshot_loader = None
+    loop._max_messages = 120
     loop._mcp_servers = {}
     loop._mcp_stacks = {}
+    loop.channels_config = None
     loop.context = ContextBuilder(tmp_path, timezone="UTC")
     loop.frame_request_adapter = FrameRequestAdapter(loop.context)
     loop.sessions = SessionManager(tmp_path)
@@ -47,9 +60,16 @@ def _loop(tmp_path: Path) -> AgentLoop:
     loop._session_ttl_minutes = 0
     loop.workspace_scopes = SimpleNamespace(
         for_message=lambda _msg, _metadata: SimpleNamespace(project_path=tmp_path),
+        persist_message_scope=lambda _session, _msg: None,
     )
-    loop.consolidator = SimpleNamespace()
-    loop.auto_compact = SimpleNamespace()
+    loop.consolidator = SimpleNamespace(
+        maybe_consolidate_by_tokens=lambda _session, **_kwargs: _noop_async(),
+    )
+    loop.auto_compact = SimpleNamespace(
+        prepare_session=lambda session, _key: (session, None),
+    )
+    loop.commands = _Commands()
+    loop._schedule_background = lambda coro: coro.close()
     loop.default_runtime = TurnRuntime(
         sessions=loop.sessions,
         context=loop.context,
@@ -60,6 +80,10 @@ def _loop(tmp_path: Path) -> AgentLoop:
     )
     loop.workframe = loop._build_workframe_runtime(timezone="UTC", disabled_skills=[])
     return loop
+
+
+async def _noop_async() -> None:
+    return None
 
 
 def test_workframe_runtime_uses_isolated_session_and_memory_roots(tmp_path: Path) -> None:
@@ -165,3 +189,59 @@ def test_workframe_initial_messages_use_isolated_memory(tmp_path: Path) -> None:
     assert "<workspace_frame" in initial[0]["content"]
     assert "workframe archive" in initial[0]["content"]
     assert "ordinary archive" not in initial[0]["content"]
+
+
+def test_workframe_turn_context_uses_workframe_session_store(tmp_path: Path) -> None:
+    loop = _loop(tmp_path)
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="client",
+        chat_id="frame-a",
+        content="question",
+        metadata={"workframe": True},
+        session_key_override="workframe:frame-a",
+    )
+
+    runtime = loop._turn_runtime_for_message(msg)
+    session = runtime.sessions.get_or_create(msg.session_key)
+    session.add_message("user", "workframe-only history")
+    runtime.sessions.save(session)
+
+    assert (tmp_path / "workframes" / "sessions" / "workframe_frame-a.jsonl").exists()
+    assert not (tmp_path / "sessions" / "workframe_frame-a.jsonl").exists()
+
+
+@pytest.mark.asyncio
+async def test_process_message_routes_workframe_turn_through_workframe_runtime(
+    tmp_path: Path,
+) -> None:
+    loop = _loop(tmp_path)
+    captured_initial: list[dict] = []
+
+    async def _run_agent_loop(initial_messages, **_kwargs):
+        captured_initial.extend(initial_messages)
+        return (
+            "answer",
+            [],
+            [*initial_messages, {"role": "assistant", "content": "answer"}],
+            "stop",
+            False,
+        )
+
+    loop._run_agent_loop = _run_agent_loop
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="client",
+        chat_id="frame-a",
+        content="question",
+        metadata={"workframe": True},
+        session_key_override="workframe:frame-a",
+    )
+
+    result = await loop._process_message(msg)
+
+    assert result is not None
+    assert result.content == "answer"
+    assert (tmp_path / "workframes" / "sessions" / "workframe_frame-a.jsonl").exists()
+    assert not (tmp_path / "sessions" / "workframe_frame-a.jsonl").exists()
+    assert "<workspace_frame" in captured_initial[0]["content"]

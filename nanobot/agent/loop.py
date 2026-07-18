@@ -655,6 +655,8 @@ class AgentLoop:
         self,
         msg: InboundMessage,
         session: Session,
+        *,
+        session_manager: SessionManager | None = None,
         **kwargs: Any,
     ) -> bool:
         """Persist the triggering user message before the turn starts.
@@ -675,7 +677,7 @@ class AgentLoop:
             extra.update(cron_extra)
             session.add_message("user", text, **extra)
             self._mark_pending_user_turn(session)
-            self.sessions.save(session)
+            (session_manager or self.sessions).save(session)
             return True
         return False
 
@@ -717,6 +719,14 @@ class AgentLoop:
         if self._is_workframe_message(msg):
             return self.workframe
         return self.default_runtime
+
+    def _runtime_for_context(self, ctx: TurnContext) -> TurnRuntime:
+        if ctx.runtime is not None:
+            return ctx.runtime
+        if self._is_workframe_message(ctx.msg):
+            raise RuntimeError("Workframe turns require TurnContext.runtime")
+        ctx.runtime = self.default_runtime
+        return ctx.runtime
 
     def _build_frame_initial_messages(
         self,
@@ -1403,10 +1413,12 @@ class AgentLoop:
             )
 
         key = session_key or msg.session_key
+        runtime = self._turn_runtime_for_message(msg)
         t0 = time.time()
         ctx = TurnContext(
             msg=msg,
             session=None,
+            runtime=runtime,
             session_key=key,
             state=TurnState.RESTORE,
             turn_id=f"{key}:{time.time_ns()}",
@@ -1523,15 +1535,16 @@ class AgentLoop:
 
         # Session is already fetched by the caller (_process_message) but
         # ensure it exists in case this handler is invoked independently.
+        runtime = self._runtime_for_context(ctx)
         if ctx.session is None:
-            ctx.session = self.sessions.get_or_create(ctx.session_key)
+            ctx.session = runtime.sessions.get_or_create(ctx.session_key)
         await self._runtime_events().session_turn_started(msg, ctx.session_key)
         self.workspace_scopes.persist_message_scope(ctx.session, msg)
 
         if self._restore_runtime_checkpoint(ctx.session):
-            self.sessions.save(ctx.session)
+            runtime.sessions.save(ctx.session)
         if self._restore_pending_user_turn(ctx.session):
-            self.sessions.save(ctx.session)
+            runtime.sessions.save(ctx.session)
 
         return "ok"
 
@@ -1546,12 +1559,19 @@ class AgentLoop:
         return self.channels_config.extract_document_text
 
     async def _state_compact(self, ctx: TurnContext) -> str:
-        ctx.session, pending = self.auto_compact.prepare_session(ctx.session, ctx.session_key)
+        runtime = self._runtime_for_context(ctx)
+        ctx.session, pending = runtime.auto_compact.prepare_session(
+            ctx.session,
+            ctx.session_key,
+        )
         ctx.pending_summary = pending
         return "ok"
 
     async def _state_command(self, ctx: TurnContext) -> str:
         raw = ctx.msg.content.strip()
+        runtime = self._runtime_for_context(ctx)
+        if runtime.use_workspace_frame:
+            return "dispatch"
         cmd_ctx = CommandContext(
             msg=ctx.msg, session=ctx.session, key=ctx.session_key, raw=raw, loop=self
         )
@@ -1565,19 +1585,23 @@ class AgentLoop:
             # intentionally clears the session.
             if raw.lower() != "/new":
                 ctx.user_persisted_early = self._persist_user_message_early(
-                    ctx.msg, ctx.session, _command=True
+                    ctx.msg,
+                    ctx.session,
+                    session_manager=runtime.sessions,
+                    _command=True,
                 )
                 ctx.session.add_message(
                     "assistant", result.content, _command=True
                 )
-                self.sessions.save(ctx.session)
+                runtime.sessions.save(ctx.session)
                 self._clear_pending_user_turn(ctx.session)
             return "shortcut"
         return "dispatch"
 
     async def _state_build(self, ctx: TurnContext) -> str:
+        runtime = self._runtime_for_context(ctx)
         if not ctx.ephemeral:
-            await self.consolidator.maybe_consolidate_by_tokens(
+            await runtime.consolidator.maybe_consolidate_by_tokens(
                 ctx.session,
                 replay_max_messages=self._max_messages,
             )
@@ -1604,15 +1628,30 @@ class AgentLoop:
             self.llm_runtime(),
         )
 
-        ctx.initial_messages = self._build_initial_messages(
+        if runtime.use_workspace_frame:
+            workspace_scope = self.workspace_scopes.for_message(ctx.msg, ctx.session.metadata)
+            ctx.initial_messages = self._build_workframe_initial_messages(
+                msg=ctx.msg,
+                session=ctx.session,
+                history=ctx.history,
+                pending_summary=ctx.pending_summary,
+                workspace=workspace_scope.project_path,
+                runtime_chat_id=ctx.msg.chat_id,
+                runtime_channel=ctx.msg.channel,
+                include_memory_recent_history=not ctx.ephemeral,
+            )
+        else:
+            ctx.initial_messages = self._build_initial_messages(
+                ctx.msg,
+                ctx.session,
+                ctx.history,
+                ctx.pending_summary,
+                include_memory_recent_history=not ctx.ephemeral,
+            )
+        ctx.user_persisted_early = self._persist_user_message_early(
             ctx.msg,
             ctx.session,
-            ctx.history,
-            ctx.pending_summary,
-            include_memory_recent_history=not ctx.ephemeral,
-        )
-        ctx.user_persisted_early = self._persist_user_message_early(
-            ctx.msg, ctx.session
+            session_manager=runtime.sessions,
         )
 
         if ctx.on_progress is None:
@@ -1657,6 +1696,7 @@ class AgentLoop:
         return "ok"
 
     async def _state_save(self, ctx: TurnContext) -> str:
+        runtime = self._runtime_for_context(ctx)
         turn_continuation.prepare_save_boundary(ctx)
 
         if (
@@ -1682,17 +1722,20 @@ class AgentLoop:
         )
         if not ctx.ephemeral:
             ctx.session.enforce_file_cap(
-                on_archive=partial(self.context.memory.raw_archive, session_key=ctx.session_key)
+                on_archive=partial(
+                    runtime.context.memory.raw_archive,
+                    session_key=ctx.session_key,
+                )
             )
             self._schedule_background(
-                self.consolidator.maybe_consolidate_by_tokens(
+                runtime.consolidator.maybe_consolidate_by_tokens(
                     ctx.session,
                     replay_max_messages=self._max_messages,
                 )
             )
         self._clear_pending_user_turn(ctx.session)
         self._clear_runtime_checkpoint(ctx.session)
-        self.sessions.save(ctx.session)
+        runtime.sessions.save(ctx.session)
         return "ok"
 
     async def _state_respond(self, ctx: TurnContext) -> str:
