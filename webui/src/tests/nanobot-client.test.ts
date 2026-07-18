@@ -378,6 +378,26 @@ describe("NanobotClient", () => {
     await expect(promise).resolves.toBe("fresh-id");
   });
 
+  it("resolves newWorkframe() via the server-assigned workframe_id", async () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+    const promise = client.newWorkframe(1_000, { surface: "reader" });
+    expect(lastSocket().sent).toContain(
+      JSON.stringify({ type: "new_workframe", surface: "reader" }),
+    );
+    lastSocket().fakeMessage({
+      event: "workframe_attached",
+      workframe_id: "frame-fresh",
+      chat_id: "frame-fresh",
+    });
+    await expect(promise).resolves.toBe("frame-fresh");
+  });
+
   it("serializes workspace scope for new chats and messages", async () => {
     const client = new NanobotClient({
       url: "ws://test",
@@ -500,6 +520,68 @@ describe("NanobotClient", () => {
       turn_id: "turn-1",
       webui: true,
     });
+  });
+
+  it("sends workframe messages with reading snapshots", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+
+    client.sendWorkframeMessage("frame-a", "question", {
+      surface: "reader",
+      turnId: "turn-1",
+      readingSnapshot: {
+        version: 1,
+        scene: "reading",
+        document: { id: "doc-1", title: "Book", kind: "markdown" },
+        location: { paragraph_index: null, paragraph_count: 1 },
+        focus: {
+          focused_text: "",
+          selected_text: null,
+          before: "",
+          after: "",
+          user_note: "",
+          current_question: "question",
+        },
+      },
+    });
+
+    expect(JSON.parse(lastSocket().sent.at(-1) as string)).toEqual({
+      type: "workframe_message",
+      workframe_id: "frame-a",
+      surface: "reader",
+      content: "question",
+      turn_id: "turn-1",
+      reading_snapshot: expect.objectContaining({
+        scene: "reading",
+        document: { id: "doc-1", title: "Book", kind: "markdown" },
+      }),
+      webui: true,
+    });
+  });
+
+  it("re-attaches workframes with the workframe protocol after reconnect", async () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: true,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+    client.attachWorkframe("frame-a");
+
+    lastSocket().close();
+    await vi.advanceTimersByTimeAsync(500);
+    const reconnected = lastSocket();
+    expect(reconnected).not.toBe(FakeSocket.instances[0]);
+    reconnected.fakeOpen();
+    expect(reconnected.sent).toContain(
+      JSON.stringify({ type: "attach_workframe", workframe_id: "frame-a" }),
+    );
   });
 
   it("includes image generation options in outbound messages", () => {

@@ -355,7 +355,9 @@ async def test_webui_message_envelope_marks_inbound_metadata(bus: MagicMock) -> 
 
 
 @pytest.mark.asyncio
-async def test_webui_message_envelope_accepts_reading_snapshot_metadata(bus: MagicMock) -> None:
+async def test_workframe_message_envelope_accepts_reading_snapshot_metadata(
+    bus: MagicMock,
+) -> None:
     channel = _ch(bus)
     conn = MagicMock()
     conn.remote_address = ("127.0.0.1", 50123)
@@ -364,10 +366,11 @@ async def test_webui_message_envelope_accepts_reading_snapshot_metadata(bus: Mag
         conn,
         "webui-client",
         {
-            "type": "message",
-            "chat_id": "reading-chat",
+            "type": "workframe_message",
+            "workframe_id": "reading-frame",
             "content": "聊聊这一段",
             "webui": True,
+            "surface": "reader",
             "reading_snapshot": {
                 "version": 1,
                 "scene": "reading",
@@ -379,13 +382,17 @@ async def test_webui_message_envelope_accepts_reading_snapshot_metadata(bus: Mag
     )
 
     inbound = bus.publish_inbound.await_args.args[0]
+    assert inbound.chat_id == "reading-frame"
+    assert inbound.session_key_override == "workframe:reading-frame"
     assert inbound.content == "聊聊这一段"
+    assert inbound.metadata["workframe"] is True
+    assert inbound.metadata["surface"] == "reader"
     assert inbound.metadata["reading_snapshot"]["scene"] == "reading"
     assert inbound.metadata["reading_snapshot"]["focus"]["focused_text"] == "Focused passage."
 
 
 @pytest.mark.asyncio
-async def test_webui_message_envelope_accepts_book_level_reading_snapshot(
+async def test_workframe_message_envelope_accepts_book_level_reading_snapshot(
     bus: MagicMock,
 ) -> None:
     channel = _ch(bus)
@@ -396,8 +403,8 @@ async def test_webui_message_envelope_accepts_book_level_reading_snapshot(
         conn,
         "webui-client",
         {
-            "type": "message",
-            "chat_id": "reading-chat",
+            "type": "workframe_message",
+            "workframe_id": "reading-frame",
             "content": "Summarize the chapter so far.",
             "webui": True,
             "reading_snapshot": {
@@ -411,13 +418,16 @@ async def test_webui_message_envelope_accepts_book_level_reading_snapshot(
     )
 
     inbound = bus.publish_inbound.await_args.args[0]
+    assert inbound.chat_id == "reading-frame"
+    assert inbound.session_key_override == "workframe:reading-frame"
     assert inbound.content == "Summarize the chapter so far."
+    assert inbound.metadata["surface"] == "generic"
     assert inbound.metadata["reading_snapshot"]["location"]["paragraph_index"] is None
     assert inbound.metadata["reading_snapshot"]["focus"]["focused_text"] == ""
 
 
 @pytest.mark.asyncio
-async def test_webui_message_envelope_rejects_malformed_reading_snapshot(
+async def test_workframe_message_envelope_rejects_malformed_reading_snapshot(
     bus: MagicMock,
 ) -> None:
     channel = _ch(bus)
@@ -429,8 +439,8 @@ async def test_webui_message_envelope_rejects_malformed_reading_snapshot(
         conn,
         "webui-client",
         {
-            "type": "message",
-            "chat_id": "reading-chat",
+            "type": "workframe_message",
+            "workframe_id": "reading-frame",
             "content": "聊聊这一段",
             "webui": True,
             "reading_snapshot": {"version": 1, "scene": "chat"},
@@ -443,24 +453,22 @@ async def test_webui_message_envelope_rejects_malformed_reading_snapshot(
     assert payload["detail"] == "reading_snapshot_rejected"
     assert payload["reason"]
     bus.publish_inbound.assert_not_awaited()
-    channel._handle_message.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_webui_message_envelope_rejects_non_object_reading_snapshot(
+async def test_workframe_message_envelope_rejects_non_object_reading_snapshot(
     bus: MagicMock,
 ) -> None:
     channel = _ch(bus)
     conn = AsyncMock()
     conn.remote_address = ("127.0.0.1", 50123)
-    channel._handle_message = AsyncMock()
 
     await channel._dispatch_envelope(
         conn,
         "webui-client",
         {
-            "type": "message",
-            "chat_id": "reading-chat",
+            "type": "workframe_message",
+            "workframe_id": "reading-frame",
             "content": "聊聊这一段",
             "webui": True,
             "reading_snapshot": [],
@@ -473,7 +481,6 @@ async def test_webui_message_envelope_rejects_non_object_reading_snapshot(
     assert payload["detail"] == "reading_snapshot_rejected"
     assert payload["reason"]
     bus.publish_inbound.assert_not_awaited()
-    channel._handle_message.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -519,7 +526,7 @@ async def test_webui_message_rejects_reading_snapshot_before_scope_persistence(
 
     payload = json.loads(conn.send.await_args.args[0])
     assert payload["event"] == "error"
-    assert payload["detail"] == "reading_snapshot_rejected"
+    assert payload["detail"] == "reading_snapshot_requires_workframe"
     assert sessions.read_session_file("websocket:reading-chat") is None
     channel._save_envelope_media.assert_not_called()
     bus.publish_inbound.assert_not_awaited()
@@ -2624,6 +2631,165 @@ async def test_multiplex_new_chat_roundtrip(bus: MagicMock) -> None:
     finally:
         await channel.stop()
         await server_task
+
+
+@pytest.mark.asyncio
+async def test_websocket_rejects_reading_snapshot_on_ordinary_message(
+    bus: MagicMock,
+) -> None:
+    channel = _ch(bus)
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {
+            "type": "message",
+            "chat_id": "reading-chat",
+            "content": "question",
+            "webui": True,
+            "reading_snapshot": {
+                "version": 1,
+                "scene": "reading",
+                "document": {"id": "doc-1", "title": "Book", "kind": "text"},
+                "location": {"paragraph_index": None, "paragraph_count": 1},
+                "focus": {"focused_text": "", "current_question": "question"},
+            },
+        },
+    )
+
+    payload = json.loads(conn.send.await_args.args[0])
+    assert payload["event"] == "error"
+    assert payload["detail"] == "reading_snapshot_requires_workframe"
+    assert payload["chat_id"] == "reading-chat"
+    bus.publish_inbound.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_workframe_message_publishes_isolated_session_key(
+    bus: MagicMock,
+) -> None:
+    channel = _ch(bus)
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {
+            "type": "workframe_message",
+            "workframe_id": "frame-a",
+            "surface": "reader",
+            "content": "question",
+            "webui": True,
+            "turn_id": "turn-1",
+            "reading_snapshot": {
+                "version": 1,
+                "scene": "reading",
+                "document": {"id": "doc-1", "title": "  Book  ", "kind": "text"},
+                "location": {"paragraph_index": None, "paragraph_count": 1},
+                "focus": {
+                    "focused_text": "",
+                    "current_question": "question",
+                },
+            },
+        },
+    )
+
+    inbound = bus.publish_inbound.await_args.args[0]
+    assert inbound.channel == "websocket"
+    assert inbound.chat_id == "frame-a"
+    assert inbound.session_key_override == "workframe:frame-a"
+    assert inbound.session_key == "workframe:frame-a"
+    assert inbound.metadata["workframe"] is True
+    assert inbound.metadata["surface"] == "reader"
+    assert inbound.metadata["webui"] is True
+    assert inbound.metadata["webui_turn_id"] == "turn-1"
+    assert inbound.metadata["reading_snapshot"]["document"]["title"] == "Book"
+    assert inbound.metadata["reading_snapshot"]["location"]["paragraph_index"] is None
+
+
+@pytest.mark.asyncio
+async def test_workframe_message_defaults_surface_and_rejects_bad_snapshot(
+    bus: MagicMock,
+) -> None:
+    channel = _ch(bus)
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {
+            "type": "workframe_message",
+            "workframe_id": "frame-a",
+            "content": "question",
+            "webui": True,
+            "reading_snapshot": [],
+        },
+    )
+
+    payload = json.loads(conn.send.await_args.args[0])
+    assert payload["event"] == "error"
+    assert payload["detail"] == "reading_snapshot_rejected"
+    assert payload["reason"]
+    bus.publish_inbound.assert_not_awaited()
+
+    conn.reset_mock()
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {
+            "type": "workframe_message",
+            "workframe_id": "frame-a",
+            "content": "plain workframe question",
+            "webui": True,
+        },
+    )
+
+    inbound = bus.publish_inbound.await_args.args[0]
+    assert inbound.metadata["surface"] == "generic"
+    assert "reading_snapshot" not in inbound.metadata
+
+
+@pytest.mark.asyncio
+async def test_new_workframe_and_attach_subscribe_outbound_replies(
+    bus: MagicMock,
+) -> None:
+    channel = _ch(bus)
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {"type": "new_workframe", "surface": "reader"},
+    )
+
+    attached = json.loads(conn.send.await_args_list[0].args[0])
+    assert attached["event"] == "workframe_attached"
+    workframe_id = attached["workframe_id"]
+    assert attached["chat_id"] == workframe_id
+    assert attached["surface"] == "reader"
+
+    conn.reset_mock()
+    await channel.send(OutboundMessage(channel="websocket", chat_id=workframe_id, content="reply"))
+    reply = json.loads(conn.send.await_args.args[0])
+    assert reply["event"] == "message"
+    assert reply["chat_id"] == workframe_id
+    assert reply["text"] == "reply"
+
+    conn.reset_mock()
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {"type": "attach_workframe", "workframe_id": workframe_id},
+    )
+    attached_again = json.loads(conn.send.await_args.args[0])
+    assert attached_again["event"] == "workframe_attached"
+    assert attached_again["workframe_id"] == workframe_id
+    assert attached_again["chat_id"] == workframe_id
 
 
 @pytest.mark.asyncio

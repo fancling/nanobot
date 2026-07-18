@@ -776,6 +776,7 @@ export interface InboundTurnMetadata {
 export type InboundEvent =
   | { event: "ready"; chat_id: string; client_id: string }
   | { event: "attached"; chat_id: string }
+  | { event: "workframe_attached"; workframe_id: string; chat_id?: string; surface?: string }
   | ({
       event: "message";
       chat_id: string;
@@ -963,8 +964,10 @@ export interface ReadingSnapshot {
 
 export type Outbound =
   | { type: "new_chat"; workspace_scope?: WorkspaceScopePayload }
+  | { type: "new_workframe"; surface?: string; workspace_scope?: WorkspaceScopePayload }
   | { type: "fork_chat"; source_chat_id: string; before_user_index: number; title?: string }
   | { type: "attach"; chat_id: string }
+  | { type: "attach_workframe"; workframe_id: string }
   | { type: "set_workspace_scope"; chat_id: string; workspace_scope: WorkspaceScopePayload }
   | { type: "transcribe_audio"; request_id: string; data_url: string; duration_ms?: number }
   | {
@@ -980,5 +983,16 @@ export type Outbound =
       reading_snapshot?: ReadingSnapshot;
       /** Marks messages sent by the embedded WebUI, without changing the
        * generic websocket protocol for other clients. */
+      webui?: true;
+    }
+  | {
+      type: "workframe_message";
+      workframe_id: string;
+      surface?: string;
+      content: string;
+      media?: OutboundMedia[];
+      workspace_scope?: WorkspaceScopePayload;
+      turn_id?: string;
+      reading_snapshot?: ReadingSnapshot;
       webui?: true;
     };

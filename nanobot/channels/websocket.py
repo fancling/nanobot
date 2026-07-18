@@ -184,10 +184,19 @@ def _parse_inbound_payload(raw: str) -> str | None:
 # Accept UUIDs and short scoped keys like "unified:default". Keeps the capability
 # namespace small enough to rule out path traversal / quote injection tricks.
 _CHAT_ID_RE = re.compile(r"^[A-Za-z0-9_:-]{1,64}$")
+_WORKFRAME_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
 
 def _is_valid_chat_id(value: Any) -> bool:
     return isinstance(value, str) and _CHAT_ID_RE.match(value) is not None
+
+
+def _is_valid_workframe_id(value: Any) -> bool:
+    return isinstance(value, str) and _WORKFRAME_ID_RE.fullmatch(value) is not None
+
+
+def _workframe_session_key(workframe_id: str) -> str:
+    return f"workframe:{workframe_id}"
 
 
 def _parse_envelope(raw: str) -> dict[str, Any] | None:
@@ -647,6 +656,50 @@ class WebSocketChannel(BaseChannel):
     ) -> None:
         """Route one typed inbound envelope (``new_chat`` / ``attach`` / ``message``)."""
         t = envelope.get("type")
+        if t == "new_workframe":
+            workframe_id = str(uuid.uuid4())
+            scope = await self._workspace_scope_or_error(
+                connection,
+                lambda: self._workspaces.scope_for_new_chat(
+                    envelope,
+                    controls_available=self._workspace_controls_available(connection),
+                ),
+            )
+            if scope is None:
+                return
+            self._workspaces.persist_scope(workframe_id, scope)
+            self._attach(connection, workframe_id)
+            surface = envelope.get("surface") if isinstance(envelope.get("surface"), str) else None
+            await self._send_event(
+                connection,
+                "workframe_attached",
+                workframe_id=workframe_id,
+                chat_id=workframe_id,
+                **({"surface": surface} if surface else {}),
+            )
+            await self._send_event(
+                connection,
+                "session_updated",
+                chat_id=workframe_id,
+                scope="metadata",
+                workspace_scope=scope.payload(),
+            )
+            await self._hydrate_after_subscribe(workframe_id)
+            return
+        if t == "attach_workframe":
+            workframe_id = envelope.get("workframe_id")
+            if not _is_valid_workframe_id(workframe_id):
+                await self._send_event(connection, "error", detail="invalid_workframe_id")
+                return
+            self._attach(connection, workframe_id)
+            await self._send_event(
+                connection,
+                "workframe_attached",
+                workframe_id=workframe_id,
+                chat_id=workframe_id,
+            )
+            await self._hydrate_after_subscribe(workframe_id)
+            return
         if t == "new_chat":
             new_id = str(uuid.uuid4())
             scope = await self._workspace_scope_or_error(
@@ -712,11 +765,125 @@ class WebSocketChannel(BaseChannel):
             event, payload = await webui_transcription_event(envelope)
             await self._send_event(connection, event, **payload)
             return
+        if t == "workframe_message":
+            workframe_id = envelope.get("workframe_id")
+            content = envelope.get("content")
+            if not _is_valid_workframe_id(workframe_id):
+                await self._send_event(connection, "error", detail="invalid_workframe_id")
+                return
+            if not isinstance(content, str):
+                await self._send_event(connection, "error", detail="missing content")
+                return
+
+            raw_media = envelope.get("media")
+            media_paths: list[str] = []
+            if raw_media is not None:
+                if not isinstance(raw_media, list):
+                    await self._send_event(
+                        connection, "error",
+                        detail="image_rejected", reason="malformed",
+                    )
+                    return
+
+            surface = envelope.get("surface") if isinstance(envelope.get("surface"), str) else "generic"
+            metadata: dict[str, Any] = {
+                "remote": getattr(connection, "remote_address", None),
+                "workframe": True,
+                "surface": surface,
+            }
+            if envelope.get("webui") is True:
+                metadata["webui"] = True
+                metadata.update(self._transcripts.client_turn_metadata(envelope.get("turn_id")))
+            cli_apps = normalize_cli_app_mentions(envelope.get("cli_apps"))
+            if cli_apps:
+                metadata["cli_apps"] = cli_apps
+            mcp_presets = normalize_mcp_preset_mentions(envelope.get("mcp_presets"))
+            if mcp_presets:
+                metadata["mcp_presets"] = mcp_presets
+            image_generation = envelope.get("image_generation")
+            if isinstance(image_generation, dict) and image_generation.get("enabled") is True:
+                aspect_ratio = image_generation.get("aspect_ratio")
+                metadata["image_generation"] = {
+                    "enabled": True,
+                    "aspect_ratio": aspect_ratio if isinstance(aspect_ratio, str) else None,
+                }
+            raw_reading_snapshot = envelope.get("reading_snapshot")
+            if raw_reading_snapshot is not None:
+                try:
+                    metadata["reading_snapshot"] = normalize_reading_snapshot(
+                        raw_reading_snapshot,
+                    )
+                except ReadingSnapshotError as exc:
+                    await self._send_event(
+                        connection,
+                        "error",
+                        detail="reading_snapshot_rejected",
+                        reason=str(exc),
+                    )
+                    return
+
+            if raw_media is not None:
+                media_paths, reason = self._save_envelope_media(raw_media)
+                if reason is not None:
+                    await self._send_event(
+                        connection, "error",
+                        detail="image_rejected", reason=reason,
+                    )
+                    return
+
+            if not content.strip() and not media_paths:
+                await self._send_event(connection, "error", detail="missing content")
+                return
+
+            scope = await self._workspace_scope_or_error(
+                connection,
+                lambda: self._workspaces.scope_for_message(
+                    envelope,
+                    chat_id=workframe_id,
+                    chat_running=websocket_turn_wall_started_at(workframe_id) is not None,
+                    controls_available=self._workspace_controls_available(connection),
+                ),
+                chat_id=workframe_id,
+            )
+            if scope is None:
+                return
+
+            self._attach(connection, workframe_id)
+            await self._hydrate_after_subscribe(workframe_id)
+            metadata[WORKSPACE_SCOPE_METADATA_KEY] = scope.metadata()
+            self._workspaces.persist_scope(workframe_id, scope)
+            if metadata.get("webui") is True and self.is_allowed(client_id):
+                self._transcripts.append_user_message(
+                    workframe_id,
+                    content,
+                    metadata=metadata,
+                    media_paths=media_paths or None,
+                    cli_apps=cli_apps or None,
+                    mcp_presets=mcp_presets or None,
+                )
+            await self._handle_message(
+                sender_id=client_id,
+                chat_id=workframe_id,
+                content=content,
+                media=media_paths or None,
+                metadata=metadata,
+                session_key=_workframe_session_key(workframe_id),
+                is_dm=False,
+            )
+            return
         if t == "message":
             cid = envelope.get("chat_id")
             content = envelope.get("content")
             if not _is_valid_chat_id(cid):
                 await self._send_event(connection, "error", detail="invalid chat_id")
+                return
+            if envelope.get("reading_snapshot") is not None:
+                await self._send_event(
+                    connection,
+                    "error",
+                    detail="reading_snapshot_requires_workframe",
+                    chat_id=cid,
+                )
                 return
             if not isinstance(content, str):
                 await self._send_event(connection, "error", detail="missing content")
@@ -749,21 +916,6 @@ class WebSocketChannel(BaseChannel):
                     "enabled": True,
                     "aspect_ratio": aspect_ratio if isinstance(aspect_ratio, str) else None,
                 }
-            raw_reading_snapshot = envelope.get("reading_snapshot")
-            if metadata.get("webui") is True and raw_reading_snapshot is not None:
-                try:
-                    metadata["reading_snapshot"] = normalize_reading_snapshot(
-                        raw_reading_snapshot,
-                    )
-                except ReadingSnapshotError as exc:
-                    await self._send_event(
-                        connection,
-                        "error",
-                        detail="reading_snapshot_rejected",
-                        reason=str(exc),
-                    )
-                    return
-
             if raw_media is not None:
                 media_paths, reason = self._save_envelope_media(raw_media)
                 if reason is not None:

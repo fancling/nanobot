@@ -96,6 +96,12 @@ interface PendingNewChat {
   timer: ReturnType<typeof setTimeout>;
 }
 
+interface PendingNewWorkframe {
+  resolve: (workframeId: string) => void;
+  reject: (err: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
 interface PendingTranscription {
   resolve: (text: string) => void;
   reject: (err: Error) => void;
@@ -134,11 +140,14 @@ export class NanobotClient {
   private static readonly PENDING_INBOUND_MAX = 2000;
   // chat_ids we've attached to since connect; re-attached after reconnects
   private knownChats = new Set<string>();
+  // workframe_ids we've attached to since connect; re-attached after reconnects
+  private knownWorkframes = new Set<string>();
   /** Wall-clock run strip: updated from ``goal_status`` even with no ``onChat`` subscriber. */
   private runStartedAtByChatId = new Map<string, number>();
   /** Latest ``goal_state`` snapshot per ``chat_id`` (multi-session isolation). */
   private goalStateByChatId = new Map<string, GoalStateWsPayload>();
   private pendingNewChat: PendingNewChat | null = null;
+  private pendingNewWorkframe: PendingNewWorkframe | null = null;
   private pendingTranscriptions = new Map<string, PendingTranscription>();
   // Frames queued while the socket is not yet OPEN
   private sendQueue: Outbound[] = [];
@@ -328,6 +337,28 @@ export class NanobotClient {
     });
   }
 
+  /** Ask the server to provision a new workframe id; resolves with the assigned id. */
+  newWorkframe(
+    timeoutMs: number = 5_000,
+    options?: { surface?: string; workspaceScope?: WorkspaceScopePayload | null },
+  ): Promise<string> {
+    if (this.pendingNewWorkframe) {
+      return Promise.reject(new Error("newWorkframe already in flight"));
+    }
+    return new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingNewWorkframe = null;
+        reject(new Error("newWorkframe timed out"));
+      }, timeoutMs);
+      this.pendingNewWorkframe = { resolve, reject, timer };
+      this.queueSend({
+        type: "new_workframe",
+        ...(options?.surface ? { surface: options.surface } : {}),
+        ...(options?.workspaceScope ? { workspace_scope: options.workspaceScope } : {}),
+      });
+    });
+  }
+
   transcribeAudio(
     dataUrl: string,
     options?: { durationMs?: number; timeoutMs?: number },
@@ -381,6 +412,13 @@ export class NanobotClient {
     }
   }
 
+  attachWorkframe(workframeId: string): void {
+    this.knownWorkframes.add(workframeId);
+    if (this.socket?.readyState === WS_OPEN) {
+      this.queueSend({ type: "attach_workframe", workframe_id: workframeId });
+    }
+  }
+
   sendMessage(
     chatId: string,
     content: string,
@@ -411,6 +449,31 @@ export class NanobotClient {
     this.queueSend(frame);
   }
 
+  sendWorkframeMessage(
+    workframeId: string,
+    content: string,
+    options?: {
+      surface?: string;
+      media?: OutboundMedia[];
+      workspaceScope?: WorkspaceScopePayload | null;
+      turnId?: string;
+      readingSnapshot?: ReadingSnapshot;
+    },
+  ): void {
+    this.knownWorkframes.add(workframeId);
+    this.queueSend({
+      type: "workframe_message",
+      workframe_id: workframeId,
+      content,
+      ...(options?.surface ? { surface: options.surface } : {}),
+      ...(options?.media?.length ? { media: options.media } : {}),
+      ...(options?.workspaceScope ? { workspace_scope: options.workspaceScope } : {}),
+      ...(options?.turnId ? { turn_id: options.turnId } : {}),
+      ...(options?.readingSnapshot ? { reading_snapshot: options.readingSnapshot } : {}),
+      webui: true,
+    });
+  }
+
   setWorkspaceScope(chatId: string, workspaceScope: WorkspaceScopePayload): void {
     this.knownChats.add(chatId);
     this.queueSend({
@@ -434,6 +497,9 @@ export class NanobotClient {
     // Re-attach every known chat_id so deliveries continue routing after a drop.
     for (const chatId of this.knownChats) {
       this.rawSend({ type: "attach", chat_id: chatId });
+    }
+    for (const workframeId of this.knownWorkframes) {
+      this.rawSend({ type: "attach_workframe", workframe_id: workframeId });
     }
     // Flush anything queued during reconnect.
     const queued = this.sendQueue.splice(0);
@@ -476,6 +542,17 @@ export class NanobotClient {
       return;
     }
 
+    if (parsed.event === "workframe_attached") {
+      this.knownWorkframes.add(parsed.workframe_id);
+      if (this.pendingNewWorkframe) {
+        clearTimeout(this.pendingNewWorkframe.timer);
+        this.pendingNewWorkframe.resolve(parsed.workframe_id);
+        this.pendingNewWorkframe = null;
+      }
+      this.dispatch(parsed.chat_id ?? parsed.workframe_id, parsed);
+      return;
+    }
+
     if (parsed.event === "runtime_model_updated") {
       this.emitRuntimeModelUpdate(parsed.model_name || null, parsed.model_preset ?? null);
       return;
@@ -507,6 +584,13 @@ export class NanobotClient {
         this.pendingNewChat.reject(new Error(`workspace_scope_rejected:${parsed.reason || ""}`));
         this.pendingNewChat = null;
       }
+      if (this.pendingNewWorkframe) {
+        clearTimeout(this.pendingNewWorkframe.timer);
+        this.pendingNewWorkframe.reject(
+          new Error(`workspace_scope_rejected:${parsed.reason || ""}`),
+        );
+        this.pendingNewWorkframe = null;
+      }
     }
 
     if (parsed.event === "error" && this.pendingNewChat) {
@@ -515,6 +599,14 @@ export class NanobotClient {
       const reason = typeof parsed.reason === "string" && parsed.reason ? `:${parsed.reason}` : "";
       this.pendingNewChat.reject(new Error(`${detail}${reason}`));
       this.pendingNewChat = null;
+    }
+
+    if (parsed.event === "error" && this.pendingNewWorkframe) {
+      clearTimeout(this.pendingNewWorkframe.timer);
+      const detail = typeof parsed.detail === "string" ? parsed.detail : "server error";
+      const reason = typeof parsed.reason === "string" && parsed.reason ? `:${parsed.reason}` : "";
+      this.pendingNewWorkframe.reject(new Error(`${detail}${reason}`));
+      this.pendingNewWorkframe = null;
     }
 
     const chatId = (parsed as { chat_id?: string }).chat_id;
@@ -573,6 +665,11 @@ export class NanobotClient {
       clearTimeout(this.pendingNewChat.timer);
       this.pendingNewChat.reject(new Error("socket closed"));
       this.pendingNewChat = null;
+    }
+    if (this.pendingNewWorkframe) {
+      clearTimeout(this.pendingNewWorkframe.timer);
+      this.pendingNewWorkframe.reject(new Error("socket closed"));
+      this.pendingNewWorkframe = null;
     }
     this.rejectAllTranscriptions("socket closed");
     // Surface structured reasons *before* reconnect logic so the UI can
