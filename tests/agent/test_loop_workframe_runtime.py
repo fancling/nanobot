@@ -5,16 +5,19 @@ from types import SimpleNamespace
 
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.frame_request import FrameRequestAdapter
-from nanobot.agent.loop import AgentLoop
+from nanobot.agent.loop import AgentLoop, TurnRuntime
 from nanobot.bus.events import InboundMessage
+from nanobot.providers.factory import ProviderSnapshot
 from nanobot.session.manager import Session, SessionManager
 
 
 class _Provider:
-    generation = SimpleNamespace(max_tokens=4096)
+    def __init__(self, model: str = "test-model", max_tokens: int = 4096):
+        self._model = model
+        self.generation = SimpleNamespace(max_tokens=max_tokens)
 
     def get_default_model(self) -> str:
-        return "test-model"
+        return self._model
 
 
 class _Tools:
@@ -47,6 +50,14 @@ def _loop(tmp_path: Path) -> AgentLoop:
     )
     loop.consolidator = SimpleNamespace()
     loop.auto_compact = SimpleNamespace()
+    loop.default_runtime = TurnRuntime(
+        sessions=loop.sessions,
+        context=loop.context,
+        frame_request_adapter=loop.frame_request_adapter,
+        consolidator=loop.consolidator,
+        auto_compact=loop.auto_compact,
+        use_workspace_frame=False,
+    )
     loop.workframe = loop._build_workframe_runtime(timezone="UTC", disabled_skills=[])
     return loop
 
@@ -78,6 +89,52 @@ def test_turn_runtime_selects_workframe_from_metadata(tmp_path: Path) -> None:
 
     assert loop._turn_runtime_for_message(ordinary).sessions is loop.sessions
     assert loop._turn_runtime_for_message(workframe).sessions is loop.workframe.sessions
+
+
+def test_turn_runtime_requires_default_runtime_invariant(tmp_path: Path) -> None:
+    loop = _loop(tmp_path)
+    del loop.default_runtime
+    ordinary = InboundMessage(
+        channel="websocket",
+        sender_id="client",
+        chat_id="chat-a",
+        content="hello",
+    )
+
+    try:
+        loop._turn_runtime_for_message(ordinary)
+    except AttributeError:
+        pass
+    else:
+        raise AssertionError("_turn_runtime_for_message should not synthesize default_runtime")
+
+
+def test_provider_snapshot_updates_workframe_consolidator(tmp_path: Path) -> None:
+    loop = _loop(tmp_path)
+    old_provider = loop.provider
+    new_provider = _Provider(model="new-model", max_tokens=2048)
+    calls: list[tuple[object, str, int]] = []
+    loop.runner = SimpleNamespace(provider=old_provider)
+    loop.subagents = SimpleNamespace(set_provider=lambda _provider, _model: None)
+    loop.consolidator = SimpleNamespace(set_provider=lambda _provider, _model, _tokens: None)
+    loop.workframe.consolidator.set_provider = (
+        lambda provider, model, context_window_tokens: calls.append(
+            (provider, model, context_window_tokens)
+        )
+    )
+    loop._runtime_model_publisher = None
+
+    loop._apply_provider_snapshot(
+        ProviderSnapshot(
+            provider=new_provider,
+            model="new-model",
+            context_window_tokens=32000,
+            signature=("new-model",),
+        ),
+        publish_update=False,
+    )
+
+    assert calls == [(new_provider, "new-model", 32000)]
 
 
 def test_workframe_initial_messages_use_isolated_memory(tmp_path: Path) -> None:

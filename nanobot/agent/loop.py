@@ -490,6 +490,8 @@ class AgentLoop:
         self.runner.provider = provider
         self.subagents.set_provider(provider, model)
         self.consolidator.set_provider(provider, model, context_window_tokens)
+        if hasattr(self, "workframe"):
+            self.workframe.consolidator.set_provider(provider, model, context_window_tokens)
         self._provider_signature = snapshot.signature
         if publish_update and self._runtime_model_publisher is not None:
             self._runtime_model_publisher(
@@ -714,18 +716,7 @@ class AgentLoop:
     def _turn_runtime_for_message(self, msg: InboundMessage) -> TurnRuntime:
         if self._is_workframe_message(msg):
             return self.workframe
-        runtime = getattr(self, "default_runtime", None)
-        if runtime is None:
-            runtime = TurnRuntime(
-                sessions=self.sessions,
-                context=self.context,
-                frame_request_adapter=self.frame_request_adapter,
-                consolidator=self.consolidator,
-                auto_compact=self.auto_compact,
-                use_workspace_frame=False,
-            )
-            self.default_runtime = runtime
-        return runtime
+        return self.default_runtime
 
     def _build_frame_initial_messages(
         self,
