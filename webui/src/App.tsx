@@ -81,6 +81,7 @@ const SIDEBAR_RAIL_WIDTH = 56;
 const MOBILE_SIDEBAR_WIDTH = `min(${SIDEBAR_WIDTH}px, calc(100vw - 0.75rem))`;
 const TOKEN_REFRESH_MARGIN_MS = 30_000;
 const TOKEN_REFRESH_MIN_DELAY_MS = 5_000;
+const CHAT_CREATE_TIMEOUT_MS = 60_000;
 type ShellView = "chat" | "settings" | "apps" | "automations" | "skills" | "reader";
 type ShellRoute = {
   view: ShellView;
@@ -1395,9 +1396,17 @@ function Shell({
           }));
         }
       }
+      const existingWorkframeId = readerState?.workframeId?.trim() || null;
+      const workframeId = existingWorkframeId
+        ?? (await client.newWorkframe(CHAT_CREATE_TIMEOUT_MS, {
+          surface: "reader",
+          workspaceScope: activeWorkspaceScope,
+        }));
+      if (startedWithoutReaderTarget && !canContinueBlankReaderImport()) return;
       const nextState = {
         ...(readerState ?? blankReaderState()),
         ...imported,
+        workframeId,
         focusedParagraphIndex: 0,
         selectedText: "",
         note: "",
@@ -1425,7 +1434,7 @@ function Shell({
     } catch (error) {
       console.error("Failed to import EPUB", error);
     }
-  }, [activeWorkspaceScope, createChatGuarded, navigate, persistReaderState, readerState]);
+  }, [activeWorkspaceScope, client, createChatGuarded, navigate, persistReaderState, readerState]);
 
   const onRestart = useCallback(() => {
     const chatId = activeSession?.chatId ?? client.defaultChatId;
@@ -1806,21 +1815,29 @@ function Shell({
               <div className="absolute inset-0 flex flex-col">
                 <ReaderPage
                   state={readerState}
-                  sessionKey={activeSession?.key ?? null}
                   disabled={false}
                   persistenceFailed={readerPersistenceFailed}
                   onChange={onReaderChange}
                   onImportEpub={onReaderImportEpub}
-                  onSendReading={(content) => {
-                    if (!activeReaderChatId) return;
-                    client.sendMessage(
-                      activeReaderChatId,
-                      content,
-                      undefined,
-                      {
+                  onSendReading={(content, snapshot) => {
+                    void (async () => {
+                      if (!activeReaderChatId || !readerState) return;
+                      let workframeId = readerState.workframeId?.trim() || null;
+                      if (!workframeId) {
+                        workframeId = await client.newWorkframe(CHAT_CREATE_TIMEOUT_MS, {
+                          surface: "reader",
+                          workspaceScope: activeWorkspaceScope,
+                        });
+                        const nextState = { ...readerState, workframeId };
+                        setReaderState(nextState);
+                        persistReaderState(activeReaderChatId, nextState, readerState);
+                      }
+                      client.sendWorkframeMessage(workframeId, content, {
+                        surface: "reader",
+                        readingSnapshot: snapshot,
                         ...(activeWorkspaceScope ? { workspaceScope: activeWorkspaceScope } : {}),
-                      },
-                    );
+                      });
+                    })();
                   }}
                   onBackToChat={onBackToChat}
                 />

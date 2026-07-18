@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, BookOpen, Upload } from "lucide-react";
 
 import { ReaderMode } from "@/components/thread/reader/ReaderMode";
@@ -11,7 +11,6 @@ import { useClient } from "@/providers/ClientProvider";
 
 interface ReaderPageProps {
   state: ReaderState | null;
-  sessionKey: string | null;
   disabled: boolean;
   persistenceFailed: boolean;
   onChange: (patch: Partial<ReaderState>) => void;
@@ -22,7 +21,6 @@ interface ReaderPageProps {
 
 export function ReaderPage({
   state,
-  sessionKey,
   disabled,
   persistenceFailed,
   onChange,
@@ -33,38 +31,36 @@ export function ReaderPage({
   const { client } = useClient();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [streamError, setStreamError] = useState<StreamError | null>(null);
+  const workframeId = state?.workframeId?.trim() || null;
+  const historyKey = workframeId ? `websocket:${workframeId}` : null;
   const {
     messages,
     loading: chatLoading,
     refresh: refreshHistory,
     hasPendingToolCalls,
-  } = useSessionHistory(sessionKey);
-  const activeChatId = useMemo(() => {
-    if (!sessionKey) return null;
-    const [channel, chatId] = sessionKey.split(":", 2);
-    return channel === "websocket" && chatId ? chatId : null;
-  }, [sessionKey]);
+  } = useSessionHistory(historyKey);
+  const activeWorkframeId = workframeId;
   const shellClassName = "flex min-h-0 flex-1 flex-col bg-background";
 
   useEffect(() => {
-    if (!activeChatId) return;
+    if (!activeWorkframeId) return;
     return client.onSessionUpdate((updatedChatId, scope) => {
-      if (updatedChatId !== activeChatId) return;
+      if (updatedChatId !== activeWorkframeId) return;
       if (scope === "metadata") return;
       refreshHistory();
     });
-  }, [activeChatId, client, refreshHistory]);
+  }, [activeWorkframeId, client, refreshHistory]);
 
   useEffect(() => {
     setStreamError(null);
-  }, [activeChatId]);
+  }, [activeWorkframeId]);
 
   useEffect(() => {
     return client.onError((error) => {
-      if ("chatId" in error && error.chatId && error.chatId !== activeChatId) return;
+      if ("chatId" in error && error.chatId && error.chatId !== activeWorkframeId) return;
       setStreamError(error);
     });
-  }, [activeChatId, client]);
+  }, [activeWorkframeId, client]);
 
   const importInput = (
     <input

@@ -31,6 +31,7 @@ export interface ReaderState {
   documentKind?: ReaderDocumentKind;
   readerModeOpen?: boolean;
   readerSession?: boolean;
+  workframeId?: string;
   sourceFileName?: string;
   sections?: ReaderSection[];
   activeSectionIndex?: number;
@@ -143,6 +144,7 @@ function parseReaderStatePayload(parsed: unknown): ReaderState | null {
   }
 
   const readerSession = maybe.readerSession === true;
+  const workframeId = normalizeText(maybe.workframeId);
   const sourceFileName = normalizeText(maybe.sourceFileName);
   const sections = normalizeReaderSections(maybe.sections);
 
@@ -163,6 +165,7 @@ function parseReaderStatePayload(parsed: unknown): ReaderState | null {
     documentKind: normalizeDocumentKind(maybe.documentKind),
     readerModeOpen: maybe.readerModeOpen === true,
     readerSession,
+    workframeId: workframeId || undefined,
     sourceFileName: sourceFileName || undefined,
     sections,
     activeSectionIndex: normalizeInt(maybe.activeSectionIndex, 0),

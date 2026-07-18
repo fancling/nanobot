@@ -15,6 +15,9 @@ const getSessionAutomationsSpy = vi.fn<(key: string) => Promise<SessionAutomatio
 const toggleThemeSpy = vi.fn();
 const updateUrlSpy = vi.fn();
 const attachSpy = vi.fn();
+const newWorkframeSpy = vi.fn().mockResolvedValue("11111111-1111-4111-8111-111111111111");
+const sendMessageSpy = vi.fn();
+const sendWorkframeMessageSpy = vi.fn();
 const runStatusHandlers = new Set<(chatId: string, startedAt: number | null) => void>();
 const sessionUpdateHandlers = new Set<(chatId: string, scope?: string) => void>();
 let mockSessions: ChatSummary[] = [];
@@ -244,8 +247,10 @@ vi.mock("@/lib/nanobot-client", () => {
     };
     getRunStartedAt = () => null;
     getGoalState = () => undefined;
-    sendMessage = vi.fn();
+    sendMessage = sendMessageSpy;
+    sendWorkframeMessage = sendWorkframeMessageSpy;
     newChat = vi.fn();
+    newWorkframe = newWorkframeSpy;
     attach = attachSpy;
     close = vi.fn();
     updateUrl = updateUrlSpy;
@@ -263,6 +268,9 @@ describe("App layout", () => {
     mockSessions = [];
     connectSpy.mockClear();
     updateUrlSpy.mockClear();
+    newWorkframeSpy.mockReset().mockResolvedValue("11111111-1111-4111-8111-111111111111");
+    sendMessageSpy.mockReset();
+    sendWorkframeMessageSpy.mockReset();
     refreshSpy.mockReset();
     createChatSpy.mockClear();
     deleteChatSpy.mockReset();
@@ -415,6 +423,7 @@ describe("App layout", () => {
 
   it("creates a reader session when importing from the sidebar Reader page", async () => {
     createChatSpy.mockResolvedValueOnce("book-chat");
+    newWorkframeSpy.mockResolvedValueOnce("22222222-2222-4222-8222-222222222222");
     importEpubDocumentMock.mockResolvedValueOnce({
       documentId: "book-1",
       title: "Book",
@@ -438,6 +447,11 @@ describe("App layout", () => {
     fireEvent.change(importInput, { target: { files: [file] } });
 
     await waitFor(() => expect(createChatSpy).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(newWorkframeSpy).toHaveBeenCalledTimes(1));
+    expect(newWorkframeSpy).toHaveBeenCalledWith(
+      expect.any(Number),
+      expect.objectContaining({ surface: "reader" }),
+    );
     await waitFor(() =>
       expect(window.location.hash).toBe("#/reader?chat=websocket%3Abook-chat"),
     );
@@ -448,9 +462,67 @@ describe("App layout", () => {
         title: "Book",
         readerSession: true,
         documentKind: "epub",
+        workframeId: "22222222-2222-4222-8222-222222222222",
       }),
     );
     expect(screen.getAllByRole("main")).toHaveLength(1);
+  });
+
+  it("sends reader questions to the reader workframe", async () => {
+    window.localStorage.setItem(
+      `${READER_STATE_STORAGE_PREFIX}book-chat`,
+      JSON.stringify({
+        version: 1,
+        documentId: "book-1",
+        title: "Book",
+        rawText: "First paragraph.\n\nSecond paragraph.",
+        focusedParagraphIndex: 0,
+        selectedText: "",
+        note: "",
+        question: "",
+        mode: "slow_reading",
+        collapsed: false,
+        documentKind: "epub",
+        readerSession: true,
+        workframeId: "22222222-2222-4222-8222-222222222222",
+      }),
+    );
+    mockSessions = [
+      {
+        key: "websocket:book-chat",
+        channel: "websocket",
+        chatId: "book-chat",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        title: "Book",
+        preview: "Book",
+      },
+    ];
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(await within(sidebar).findByRole("button", { name: /^Book$/ }));
+    const readerMain = await screen.findByRole("main", { name: /reader page/i });
+
+    fireEvent.change(within(readerMain).getByLabelText("Reader chat message"), {
+      target: { value: "Why this paragraph?" },
+    });
+    fireEvent.click(within(readerMain).getByRole("button", { name: "Send message" }));
+
+    expect(sendMessageSpy).not.toHaveBeenCalled();
+    expect(sendWorkframeMessageSpy).toHaveBeenCalledWith(
+      "22222222-2222-4222-8222-222222222222",
+      "Why this paragraph?",
+      expect.objectContaining({
+        surface: "reader",
+        readingSnapshot: expect.objectContaining({
+          document: expect.objectContaining({ id: "book-1", title: "Book" }),
+          focus: expect.objectContaining({ focused_text: "First paragraph." }),
+        }),
+      }),
+    );
   });
 
   it("routes reader-backed sessions to the Reader page", async () => {

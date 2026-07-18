@@ -30,6 +30,7 @@ function state(overrides: Partial<ReaderState> = {}): ReaderState {
     documentKind: "epub",
     readerModeOpen: false,
     readerSession: true,
+    workframeId: "11111111-1111-4111-8111-111111111111",
     sections: [{ id: "s-1", title: "Chapter 1", rawText: "First paragraph.\n\nSecond paragraph.", paragraphCount: 2 }],
     activeSectionIndex: 0,
     ...overrides,
@@ -77,7 +78,6 @@ describe("ReaderPage", () => {
     render(
       <ReaderPage
         state={null}
-        sessionKey={null}
         disabled={false}
         persistenceFailed={false}
         onChange={vi.fn()}
@@ -107,7 +107,6 @@ describe("ReaderPage", () => {
     render(
       <ReaderPage
         state={state({ focusedParagraphIndex: 1 })}
-        sessionKey="websocket:book-1"
         disabled={false}
         persistenceFailed={false}
         onChange={vi.fn()}
@@ -130,7 +129,7 @@ describe("ReaderPage", () => {
     );
   });
 
-  it("renders the active book session history in the reader chat", () => {
+  it("renders the active workframe history in the reader chat", () => {
     const messages: UIMessage[] = [
       { id: "u-1", role: "user", content: "Explain this image", createdAt: 1 },
       { id: "a-1", role: "assistant", content: "The passage is contrasting memory and place.", createdAt: 2 },
@@ -152,7 +151,6 @@ describe("ReaderPage", () => {
     render(
       <ReaderPage
         state={state()}
-        sessionKey="websocket:book-1"
         disabled={false}
         persistenceFailed={false}
         onChange={vi.fn()}
@@ -162,13 +160,29 @@ describe("ReaderPage", () => {
       />,
     );
 
-    expect(useSessionHistoryMock).toHaveBeenCalledWith("websocket:book-1");
+    expect(useSessionHistoryMock).toHaveBeenCalledWith("websocket:11111111-1111-4111-8111-111111111111");
     const chatPanel = screen.getByRole("complementary", { name: /reader chat/i });
     expect(chatPanel).toHaveTextContent("Explain this image");
     expect(chatPanel).toHaveTextContent("The passage is contrasting memory and place.");
   });
 
-  it("refreshes the active book history after thread updates", () => {
+  it("does not read reader history from the ordinary chat session without a workframe", () => {
+    render(
+      <ReaderPage
+        state={state({ workframeId: undefined })}
+        disabled={false}
+        persistenceFailed={false}
+        onChange={vi.fn()}
+        onImportEpub={vi.fn()}
+        onSendReading={vi.fn()}
+        onBackToChat={vi.fn()}
+      />,
+    );
+
+    expect(useSessionHistoryMock).toHaveBeenCalledWith(null);
+  });
+
+  it("refreshes the active workframe history after thread updates", () => {
     const refresh = vi.fn();
     let sessionUpdateHandler: ((chatId: string, scope?: string) => void) | null = null;
     const unsubscribe = vi.fn();
@@ -203,7 +217,6 @@ describe("ReaderPage", () => {
     const { unmount } = render(
       <ReaderPage
         state={state()}
-        sessionKey="websocket:book-1"
         disabled={false}
         persistenceFailed={false}
         onChange={vi.fn()}
@@ -213,23 +226,23 @@ describe("ReaderPage", () => {
       />,
     );
 
-    sessionUpdateHandler?.("other-book", "thread");
-    sessionUpdateHandler?.("book-1", "metadata");
+    sessionUpdateHandler?.("other-workframe", "thread");
+    sessionUpdateHandler?.("11111111-1111-4111-8111-111111111111", "metadata");
     expect(refresh).not.toHaveBeenCalled();
 
-    sessionUpdateHandler?.("book-1", "thread");
+    sessionUpdateHandler?.("11111111-1111-4111-8111-111111111111", "thread");
     expect(refresh).toHaveBeenCalledTimes(1);
 
     unmount();
     expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 
-  it("surfaces and dismisses stream errors like the main chat panel", () => {
-    let errorHandler: ((error: { kind: "message_too_big" }) => void) | null = null;
+  it("surfaces and dismisses stream errors for the active workframe", () => {
+    let errorHandler: ((error: { kind: "message_too_big" } | { kind: "workspace_scope_rejected"; chatId: string }) => void) | null = null;
     const unsubscribe = vi.fn();
     useClientMock.mockReturnValue({
       client: {
-        onError: vi.fn((handler: (error: { kind: "message_too_big" }) => void) => {
+        onError: vi.fn((handler: (error: { kind: "message_too_big" } | { kind: "workspace_scope_rejected"; chatId: string }) => void) => {
           errorHandler = handler;
           return unsubscribe;
         }),
@@ -245,7 +258,6 @@ describe("ReaderPage", () => {
     const { unmount } = render(
       <ReaderPage
         state={state()}
-        sessionKey="websocket:book-1"
         disabled={false}
         persistenceFailed={false}
         onChange={vi.fn()}
@@ -255,6 +267,22 @@ describe("ReaderPage", () => {
       />,
     );
 
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    act(() => {
+      errorHandler?.({ kind: "workspace_scope_rejected", chatId: "other-workframe" });
+    });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    act(() => {
+      errorHandler?.({
+        kind: "workspace_scope_rejected",
+        chatId: "11111111-1111-4111-8111-111111111111",
+      });
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent("Workspace was not changed");
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 
     act(() => {

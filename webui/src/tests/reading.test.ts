@@ -261,11 +261,13 @@ describe("reading utilities", () => {
       collapsed: false,
       documentKind: "markdown",
       readerModeOpen: false,
+      workframeId: "11111111-1111-4111-8111-111111111111",
     });
 
     expect(saved).toBe(true);
     expect(window.localStorage.getItem(`${READER_STATE_STORAGE_PREFIX}chat-1`)).toContain("Essay");
     expect(loadReaderState("chat-1")?.note).toBe("Note");
+    expect(loadReaderState("chat-1")?.workframeId).toBe("11111111-1111-4111-8111-111111111111");
   });
 
   it("returns null on invalid raw storage payload", () => {
