@@ -62,6 +62,7 @@ from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.document import extract_documents, reference_non_image_attachments
 from nanobot.utils.helpers import image_placeholder_text
 from nanobot.utils.helpers import truncate_text as truncate_text_fn
+from nanobot.utils.image_generation_intent import image_generation_prompt
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.runtime import (
     EMPTY_FINAL_RESPONSE_MESSAGE,
@@ -613,18 +614,29 @@ class AgentLoop:
         pending_summary: str | None,
         include_memory_recent_history: bool = True,
     ) -> list[dict[str, Any]]:
-        """Build the initial message list for the LLM turn."""
+        """Build the cache-friendly initial message list for an ordinary LLM turn."""
         scope = self.workspace_scopes.for_message(msg, session.metadata)
-        return self._build_frame_initial_messages(
-            msg=msg,
-            session=session,
+        runtime_lines = [
+            *goal_state_runtime_lines(session.metadata),
+            *agent_context.runtime_lines(self, msg, scope.project_path),
+        ]
+        current_text = image_generation_prompt(msg.content, msg.metadata)
+        return self.context.build_messages(
             history=history,
-            pending_summary=pending_summary,
+            current_message=current_text,
+            media=msg.media or None,
+            channel=msg.channel,
+            chat_id=self._runtime_chat_id(msg),
+            sender_id=msg.sender_id,
+            session_summary=pending_summary,
+            session_metadata=session.metadata,
+            current_runtime_lines=runtime_lines,
             workspace=scope.project_path,
-            runtime_chat_id=self._runtime_chat_id(msg),
-            runtime_channel=msg.channel,
-            skip_runtime_lines=False,
+            runtime_state=None,
+            inbound_message=None,
             include_memory_recent_history=include_memory_recent_history,
+            session_key=session.key,
+            unified_session=self._unified_session,
         )
 
     def _build_frame_initial_messages(

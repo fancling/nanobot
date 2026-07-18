@@ -44,7 +44,7 @@ def _loop(tmp_path: Path) -> AgentLoop:
     return loop
 
 
-def test_build_initial_messages_uses_frame_only_request(tmp_path: Path) -> None:
+def test_build_initial_messages_uses_cache_friendly_request(tmp_path: Path) -> None:
     session = Session(key="cli:direct")
     session.add_message("user", "old user text")
     session.add_message("assistant", "old assistant text")
@@ -63,13 +63,13 @@ def test_build_initial_messages_uses_frame_only_request(tmp_path: Path) -> None:
         pending_summary="old summary",
     )
 
-    assert [message["role"] for message in initial] == ["system", "user"]
-    assert initial[1]["content"] == "new text"
-    assert "<workspace_frame" in initial[0]["content"]
-    assert "conversation.recent_raw" in initial[0]["content"]
-    assert "old user text" in initial[0]["content"]
+    assert [message["role"] for message in initial] == ["system", "user", "assistant", "user"]
+    assert "<workspace_frame" not in initial[0]["content"]
+    assert "old user text" in initial[1]["content"]
+    assert "old assistant text" in initial[2]["content"]
+    assert "new text" in initial[3]["content"]
+    assert "Current Time:" in initial[3]["content"]
     assert "old summary" in initial[0]["content"]
-    assert not any(message.get("content") == "old user text" for message in initial[1:])
 
 
 def test_build_initial_messages_uses_runtime_context_chat_id(tmp_path: Path) -> None:
@@ -89,8 +89,8 @@ def test_build_initial_messages_uses_runtime_context_chat_id(tmp_path: Path) -> 
         pending_summary=None,
     )
 
-    assert "chat_id: parent-id" in initial[0]["content"]
-    assert "chat_id: thread-id" not in initial[0]["content"]
+    assert "Chat ID: parent-id" in initial[-1]["content"]
+    assert "Chat ID: thread-id" not in initial[-1]["content"]
 
 
 def test_build_initial_messages_includes_memory_recent_history(tmp_path: Path) -> None:
@@ -112,7 +112,6 @@ def test_build_initial_messages_includes_memory_recent_history(tmp_path: Path) -
         include_memory_recent_history=True,
     )
 
-    assert "memory.recent_history" in initial[0]["content"]
     assert "memory archive fact" in initial[0]["content"]
 
 
@@ -140,10 +139,10 @@ def test_build_initial_messages_omits_memory_recent_history_when_disabled(
     )
 
     assert "memory archive fact" not in initial[0]["content"]
-    assert "session replay fact" in initial[0]["content"]
+    assert "session replay fact" in initial[1]["content"]
 
 
-def test_build_initial_messages_scrubs_prior_media_paths_from_frame(
+def test_build_initial_messages_preserves_prior_media_breadcrumbs(
     tmp_path: Path,
 ) -> None:
     session = Session(key="cli:direct")
@@ -165,12 +164,11 @@ def test_build_initial_messages_scrubs_prior_media_paths_from_frame(
         pending_summary=None,
     )
 
-    assert str(png) not in initial[0]["content"]
-    assert "[media]" in initial[0]["content"]
-    assert "prior image text" in initial[0]["content"]
+    assert str(png) in initial[1]["content"]
+    assert "prior image text" in initial[1]["content"]
 
 
-def test_build_initial_messages_scrubs_structured_media_history_from_frame(
+def test_build_initial_messages_preserves_structured_media_history_and_current_image(
     tmp_path: Path,
 ) -> None:
     session = Session(key="cli:direct")
@@ -194,6 +192,7 @@ def test_build_initial_messages_scrubs_structured_media_history_from_frame(
         sender_id="user",
         chat_id="direct",
         content="new text",
+        media=[str(png)],
     )
 
     initial = _loop(tmp_path)._build_initial_messages(
@@ -203,11 +202,13 @@ def test_build_initial_messages_scrubs_structured_media_history_from_frame(
         pending_summary=None,
     )
 
-    assert "data:image" not in initial[0]["content"]
-    assert "_meta" not in initial[0]["content"]
-    assert str(png) not in initial[0]["content"]
-    assert "[media]" in initial[0]["content"]
-    assert "caption text" in initial[0]["content"]
+    assert initial[1]["content"][0]["image_url"]["url"].startswith("data:image/png;base64,")
+    assert initial[1]["content"][0]["_meta"]["path"] == str(png)
+    assert initial[1]["content"][1]["text"] == "caption text"
+    assert initial[1]["content"][2]["image_url"]["url"].startswith("data:image/png;base64,")
+    assert initial[1]["content"][2]["_meta"]["path"] == str(png)
+    assert initial[1]["content"][3]["text"] == "new text"
+    assert "Current Time:" in initial[1]["content"][4]["text"]
 
 
 def test_build_frame_initial_messages_embeds_system_history_in_frame(
