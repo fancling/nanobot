@@ -33,11 +33,12 @@ def test_adapter_builds_frame_only_messages(tmp_path: Path) -> None:
 
     assert [message["role"] for message in messages] == ["system", "user"]
     system_content = messages[0]["content"]
-    assert "<workspace_frame" in system_content
+    assert system_content.startswith("workspace_frame:\n")
     assert "conversation.recent_raw" in system_content
     assert "previous user message" in system_content
     assert "old compact summary" in system_content
-    assert "Runtime flag: active" in system_content
+    assert "Runtime flag: active" not in system_content
+    assert '"text": "current request"' not in system_content
     assert messages[1]["content"] == "current request"
 
 

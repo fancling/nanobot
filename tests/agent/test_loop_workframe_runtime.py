@@ -384,7 +384,7 @@ def test_workframe_initial_messages_use_isolated_memory(tmp_path: Path) -> None:
         include_memory_recent_history=True,
     )
 
-    assert "<workspace_frame" in initial[0]["content"]
+    assert initial[0]["content"].startswith("workspace_frame:\n")
     assert "workframe archive" in initial[0]["content"]
     assert "ordinary archive" not in initial[0]["content"]
 
@@ -442,7 +442,7 @@ async def test_process_message_routes_workframe_turn_through_workframe_runtime(
     assert result.content == "answer"
     assert (tmp_path / "workframes" / "sessions" / "workframe_frame-a.jsonl").exists()
     assert not (tmp_path / "sessions" / "workframe_frame-a.jsonl").exists()
-    assert "<workspace_frame" in captured_initial[0]["content"]
+    assert captured_initial[0]["content"].startswith("workspace_frame:\n")
 
 
 @pytest.mark.asyncio

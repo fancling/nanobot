@@ -236,7 +236,7 @@ describe("webui API helpers", () => {
             {
               id: "scene.reading",
               enabled: true,
-              priority: "critical" as const,
+              priority: "high" as const,
             },
           ],
         },

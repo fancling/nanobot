@@ -71,10 +71,9 @@ class FrameRequestAdapter:
             {"role": "user", "content": user_content},
         ]
 
-    def _sanitized_current_event(self, current_text: str, msg: Any) -> dict[str, Any]:
+    def _sanitized_current_event(self, _current_text: str, msg: Any) -> dict[str, Any]:
         media = getattr(msg, "media", None) or []
         return {
-            "text": current_text,
             "media_count": len(media),
         }
 

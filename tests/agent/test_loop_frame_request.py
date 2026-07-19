@@ -65,7 +65,7 @@ def test_build_initial_messages_uses_cache_friendly_request(tmp_path: Path) -> N
     )
 
     assert [message["role"] for message in initial] == ["system", "user", "assistant", "user"]
-    assert "<workspace_frame" not in initial[0]["content"]
+    assert "workspace_frame:" not in initial[0]["content"]
     assert "old user text" in initial[1]["content"]
     assert "old assistant text" in initial[2]["content"]
     assert "new text" in initial[3]["content"]
@@ -265,7 +265,7 @@ def test_build_frame_initial_messages_embeds_system_history_in_frame(
 
     assert [message["role"] for message in initial] == ["system", "user"]
     assert initial[1]["content"] == "system event"
-    assert "<workspace_frame" in initial[0]["content"]
+    assert initial[0]["content"].startswith("workspace_frame:\n")
     assert "old system-session text" in initial[0]["content"]
     assert not any(
         message.get("content") == "old system-session text" for message in initial[1:]

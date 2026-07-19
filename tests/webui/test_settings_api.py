@@ -416,9 +416,16 @@ def test_settings_payload_includes_workframe_profiles(
     profiles = {profile["name"]: profile for profile in payload["workframe"]["profiles"]}
     assert profiles["generic"]["response_mode"] == "task_execution"
     assert profiles["reader"]["response_mode"] == "task_execution"
+    generic_modules = {module["id"]: module for module in profiles["generic"]["modules"]}
     reader_modules = {module["id"]: module for module in profiles["reader"]["modules"]}
+    assert generic_modules["persona.soul"]["enabled"] is False
+    assert generic_modules["persona.soul"]["default_enabled"] is False
+    assert generic_modules["persona.core"]["enabled"] is True
+    assert generic_modules["persona.core"]["default_enabled"] is True
+    assert reader_modules["persona.soul"]["enabled"] is False
+    assert reader_modules["persona.core"]["enabled"] is True
     assert reader_modules["scene.reading"]["enabled"] is True
-    assert reader_modules["scene.reading"]["priority"] == "critical"
+    assert reader_modules["scene.reading"]["priority"] == "high"
     assert profiles["reader"]["model_parameters"]["model"] is None
     assert profiles["reader"]["model_parameters"]["defaults"]["model"] == "anthropic/claude-opus-4-5"
     assert profiles["reader"]["tool_filters"] == {

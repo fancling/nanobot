@@ -178,31 +178,38 @@ _WORKFRAME_PROFILE_DEFINITIONS: tuple[dict[str, Any], ...] = (
                 "id": "self.identity",
                 "label": "Identity",
                 "description": "Bot identity, runtime platform, workspace path, and platform policy.",
-                "priority": "critical",
+                "priority": "high",
             },
             {
                 "id": "bootstrap.agents",
                 "label": "AGENTS.md",
                 "description": "Workspace-level operating instructions when AGENTS.md exists.",
-                "priority": "critical",
+                "priority": "high",
             },
             {
-                "id": "bootstrap.soul",
+                "id": "persona.soul",
                 "label": "SOUL.md",
-                "description": "Workspace personality or behavior notes when SOUL.md exists.",
-                "priority": "critical",
+                "description": "Full workspace personality notes from SOUL.md.",
+                "enabled": False,
+                "priority": "high",
+            },
+            {
+                "id": "persona.core",
+                "label": "Persona summary",
+                "description": "Short persona summary from PERSONA.md.",
+                "priority": "high",
             },
             {
                 "id": "bootstrap.user",
                 "label": "USER.md",
                 "description": "Workspace user preferences when USER.md exists.",
-                "priority": "critical",
+                "priority": "high",
             },
             {
                 "id": "tool.contract",
                 "label": "Tool contract",
                 "description": "Tool-use rules and expectations.",
-                "priority": "critical",
+                "priority": "high",
             },
             {
                 "id": "memory.long_term",
@@ -273,37 +280,44 @@ _WORKFRAME_PROFILE_DEFINITIONS: tuple[dict[str, Any], ...] = (
                 "id": "scene.reading",
                 "label": "Reading scene",
                 "description": "Current book, focused passage, note, selection, progress, and reader question.",
-                "priority": "critical",
+                "priority": "high",
             },
             {
                 "id": "self.identity",
                 "label": "Identity",
                 "description": "Bot identity, runtime platform, workspace path, and platform policy.",
-                "priority": "critical",
+                "priority": "high",
             },
             {
                 "id": "bootstrap.agents",
                 "label": "AGENTS.md",
                 "description": "Workspace-level operating instructions when AGENTS.md exists.",
-                "priority": "critical",
+                "priority": "high",
             },
             {
-                "id": "bootstrap.soul",
+                "id": "persona.soul",
                 "label": "SOUL.md",
-                "description": "Workspace personality or behavior notes when SOUL.md exists.",
-                "priority": "critical",
+                "description": "Full workspace personality notes from SOUL.md.",
+                "enabled": False,
+                "priority": "high",
+            },
+            {
+                "id": "persona.core",
+                "label": "Persona summary",
+                "description": "Short persona summary from PERSONA.md.",
+                "priority": "high",
             },
             {
                 "id": "bootstrap.user",
                 "label": "USER.md",
                 "description": "Workspace user preferences when USER.md exists.",
-                "priority": "critical",
+                "priority": "high",
             },
             {
                 "id": "tool.contract",
                 "label": "Tool contract",
                 "description": "Tool-use rules and expectations.",
-                "priority": "critical",
+                "priority": "high",
             },
             {
                 "id": "memory.long_term",
@@ -1223,7 +1237,8 @@ def _workframe_module_payload(
     configured_module = None
     if configured_profile is not None:
         configured_module = configured_profile.modules.get(module_definition["id"])
-    enabled = configured_module.enabled if configured_module is not None else True
+    default_enabled = module_definition.get("enabled", True)
+    enabled = configured_module.enabled if configured_module is not None else default_enabled
     priority = (
         configured_module.priority
         if configured_module is not None and configured_module.priority
@@ -1234,7 +1249,7 @@ def _workframe_module_payload(
         "label": module_definition["label"],
         "description": module_definition["description"],
         "enabled": enabled,
-        "default_enabled": True,
+        "default_enabled": default_enabled,
         "priority": priority,
         "default_priority": module_definition["priority"],
     }
@@ -1335,7 +1350,7 @@ def update_workframe_settings(payload: dict[str, Any]) -> dict[str, Any]:
             module_definition = _workframe_module_definition(definition, module_id)
             if module_definition is None:
                 raise WebUISettingsError("unknown workframe module")
-            enabled = raw_module.get("enabled", True)
+            enabled = raw_module.get("enabled", module_definition.get("enabled", True))
             if not isinstance(enabled, bool):
                 raise WebUISettingsError("workframe module enabled must be a boolean")
             priority = raw_module.get("priority", module_definition["priority"])

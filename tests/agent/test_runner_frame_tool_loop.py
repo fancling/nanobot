@@ -42,8 +42,9 @@ async def test_runner_replays_frame_request_with_tool_call_and_result() -> None:
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(return_value="tool result content")
 
+    frame_content = "workspace_frame:\n  frame_id: frame\n"
     initial_messages = [
-        {"role": "system", "content": "<workspace_frame>frame</workspace_frame>"},
+        {"role": "system", "content": frame_content},
         {"role": "user", "content": "current event"},
     ]
 
@@ -61,7 +62,7 @@ async def test_runner_replays_frame_request_with_tool_call_and_result() -> None:
     assert len(provider_requests) == 2
 
     second_request = provider_requests[1]
-    assert {"role": "system", "content": "<workspace_frame>frame</workspace_frame>"} in second_request
+    assert {"role": "system", "content": frame_content} in second_request
     assert {"role": "user", "content": "current event"} in second_request
     assistant_tool_messages = [
         message
