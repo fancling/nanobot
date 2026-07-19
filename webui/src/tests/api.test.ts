@@ -34,6 +34,7 @@ import {
   updateProviderSettings,
   updateSettings,
   updateWebSearchSettings,
+  updateWorkframeSettings,
 } from "@/lib/api";
 
 describe("webui API helpers", () => {
@@ -205,6 +206,52 @@ describe("webui API helpers", () => {
       "/api/settings/update?model_preset=default&model=openrouter%2Ftest&provider=openrouter&context_window_tokens=262144&timezone=Asia%2FShanghai&bot_name=nanobot&bot_icon=nb&tool_hint_max_length=120",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("serializes workframe settings through the JSON header", async () => {
+    const update = {
+      profiles: [
+        {
+          name: "reader",
+          responseMode: "task_execution",
+          depth: "medium",
+          recentRawTokenBudget: 8000,
+          modelParameters: {
+            model: "reader-model",
+            maxTokens: 4096,
+            temperature: 0.2,
+            reasoningEffort: "high",
+            contextWindowTokens: 262144,
+          },
+          toolFilters: {
+            enabled: false,
+            allowlist: ["read_file", "web_fetch"],
+            denylist: ["exec"],
+          },
+          extraShouldDo: ["Use scene.reading."],
+          extraShouldAvoid: [],
+          modules: [
+            {
+              id: "scene.reading",
+              enabled: true,
+              priority: "critical" as const,
+            },
+          ],
+        },
+      ],
+    };
+
+    await updateWorkframeSettings("tok", update);
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/workframe/update",
+      expect.objectContaining({
+        headers: {
+          Authorization: "Bearer tok",
+          "X-Nanobot-Workframe-Values": JSON.stringify(update),
+        },
       }),
     );
   });

@@ -29,7 +29,7 @@ from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
 from nanobot.agent.tools.file_state import FileStateStore, bind_file_states, reset_file_states
 from nanobot.agent.tools.message import MessageTool
-from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.registry import FilteredToolRegistry, ToolRegistry
 from nanobot.agent.tools.self import MyTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.progress import build_bus_progress_callback
@@ -227,6 +227,7 @@ class AgentLoop:
         provider_signature: tuple[object, ...] | None = None,
         model_presets: dict[str, ModelPresetConfig] | None = None,
         model_preset: str | None = None,
+        workframe_config: Any | None = None,
         preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None = None,
         runtime_events: RuntimeEventBus | None = None,
         runtime_model_publisher: Callable[[str, str | None], None] | None = None,
@@ -246,6 +247,7 @@ class AgentLoop:
         self._provider_signature = provider_signature
         self._default_selection_signature = preset_helpers.default_selection_signature(provider_signature)
         self.workspace = workspace
+        self.workframe_config = workframe_config
         self.model = model or provider.get_default_model()
         self.max_iterations = (
             max_iterations if max_iterations is not None else defaults.max_tool_iterations
@@ -285,7 +287,12 @@ class AgentLoop:
         self._last_usage: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
 
-        self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
+        self.context = ContextBuilder(
+            workspace,
+            timezone=timezone,
+            disabled_skills=disabled_skills,
+            workframe_config=workframe_config,
+        )
         self.frame_request_adapter = FrameRequestAdapter(self.context)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
@@ -383,6 +390,7 @@ class AgentLoop:
             timezone=timezone,
             disabled_skills=disabled_skills,
             memory_workspace=workframe_root,
+            workframe_config=getattr(self, "workframe_config", None),
         )
         sessions = SessionManager(workframe_root)
         frame_request_adapter = FrameRequestAdapter(context)
@@ -463,6 +471,7 @@ class AgentLoop:
             tools_config=config.tools,
             model_presets=preset_helpers.configured_model_presets(config),
             model_preset=defaults.model_preset,
+            workframe_config=defaults.workframe,
             provider_snapshot_loader=provider_snapshot_loader,
             preset_snapshot_loader=preset_snapshot_loader,
             **extra,
@@ -838,17 +847,77 @@ class AgentLoop:
             return UNIFIED_SESSION_KEY
         return msg.session_key
 
-    def _replay_token_budget(self) -> int:
+    def _replay_token_budget(
+        self,
+        *,
+        context_window_tokens: int | None = None,
+        max_tokens: int | None = None,
+    ) -> int:
         """Derive a token budget for session history replay from the context window."""
-        if self.context_window_tokens <= 0:
+        context_window = context_window_tokens if context_window_tokens is not None else self.context_window_tokens
+        if context_window <= 0:
             return 0
-        max_output = getattr(getattr(self.provider, "generation", None), "max_tokens", 4096)
+        max_output = (
+            max_tokens
+            if max_tokens is not None
+            else getattr(getattr(self.provider, "generation", None), "max_tokens", 4096)
+        )
         try:
             reserved_output = int(max_output)
         except (TypeError, ValueError):
             reserved_output = 4096
-        budget = self.context_window_tokens - max(1, reserved_output) - 1024
-        return budget if budget > 0 else max(128, self.context_window_tokens // 2)
+        budget = context_window - max(1, reserved_output) - 1024
+        return budget if budget > 0 else max(128, context_window // 2)
+
+    def _workframe_profile_config_for_metadata(self, metadata: dict[str, Any] | None) -> Any | None:
+        workframe_config = getattr(self, "workframe_config", None)
+        profiles = getattr(workframe_config, "profiles", None)
+        if not isinstance(profiles, dict):
+            return None
+        metadata = metadata or {}
+        surface = metadata.get("surface")
+        if isinstance(surface, str) and surface in profiles:
+            return profiles[surface]
+        if isinstance(metadata.get("reading_snapshot"), dict) and "reader" in profiles:
+            return profiles["reader"]
+        return profiles.get("generic")
+
+    def _workframe_run_overrides(self, metadata: dict[str, Any] | None) -> dict[str, Any]:
+        profile_config = self._workframe_profile_config_for_metadata(metadata)
+        if profile_config is None:
+            return {}
+        fields = (
+            "model",
+            "temperature",
+            "max_tokens",
+            "reasoning_effort",
+            "context_window_tokens",
+        )
+        return {
+            field: value
+            for field in fields
+            if (value := getattr(profile_config, field, None)) is not None
+        }
+
+    def _workframe_tools_for_metadata(
+        self,
+        metadata: dict[str, Any] | None,
+        tools: ToolRegistry,
+    ) -> ToolRegistry:
+        profile_config = self._workframe_profile_config_for_metadata(metadata)
+        if profile_config is None:
+            return tools
+        tools_enabled = getattr(profile_config, "tools_enabled", None)
+        allowlist = getattr(profile_config, "tool_allowlist", None) or []
+        denylist = getattr(profile_config, "tool_denylist", None) or []
+        if tools_enabled is not False and not allowlist and not denylist:
+            return tools
+        return FilteredToolRegistry(
+            tools,
+            allowlist=allowlist,
+            denylist=denylist,
+            enabled=tools_enabled is not False,
+        )
 
     async def _run_agent_loop(
         self,
@@ -868,6 +937,7 @@ class AgentLoop:
         pending_queue: asyncio.Queue | None = None,
         ephemeral: bool = False,
         tools: ToolRegistry | None = None,
+        run_overrides: dict[str, Any] | None = None,
     ) -> tuple[str | None, list[str], list[dict], str, bool]:
         """Run the agent iteration loop.
 
@@ -984,19 +1054,29 @@ class AgentLoop:
             )
 
         session_metadata = session.metadata if session is not None else None
+        run_overrides = run_overrides or {}
+        active_tools = tools or self.tools
+        if tools is None:
+            active_tools = self._workframe_tools_for_metadata(metadata, active_tools)
         try:
             result = await self.runner.run(AgentRunSpec(
                 initial_messages=initial_messages,
-                tools=tools or self.tools,
-                model=self.model,
+                tools=active_tools,
+                model=run_overrides.get("model", self.model),
                 max_iterations=self.max_iterations,
                 max_tool_result_chars=self.max_tool_result_chars,
+                temperature=run_overrides.get("temperature"),
+                max_tokens=run_overrides.get("max_tokens"),
+                reasoning_effort=run_overrides.get("reasoning_effort"),
                 hook=hook,
                 error_message="Sorry, I encountered an error calling the AI model.",
                 concurrent_tools=True,
                 workspace=effective_scope.project_path,
                 session_key=session.key if session else None,
-                context_window_tokens=self.context_window_tokens,
+                context_window_tokens=run_overrides.get(
+                    "context_window_tokens",
+                    self.context_window_tokens,
+                ),
                 context_block_limit=self.context_block_limit,
                 provider_retry_mode=self.provider_retry_mode,
                 progress_callback=on_progress,
@@ -1347,9 +1427,13 @@ class AgentLoop:
             channel, chat_id, msg.metadata.get("message_id"),
             msg.metadata, session_key=key,
         )
+        run_overrides = self._workframe_run_overrides(msg.metadata) if runtime.use_workspace_frame else {}
         _hist_kwargs: dict[str, Any] = {
             "max_messages": self._max_messages,
-            "max_tokens": self._replay_token_budget(),
+            "max_tokens": self._replay_token_budget(
+                context_window_tokens=run_overrides.get("context_window_tokens"),
+                max_tokens=run_overrides.get("max_tokens"),
+            ),
             "include_timestamps": True,
             "extend_to_user": is_subagent,
         }
@@ -1390,6 +1474,7 @@ class AgentLoop:
             session_key=key,
             session_manager=runtime.sessions,
             pending_queue=pending_queue,
+            run_overrides=run_overrides,
         )
         wall_done = time.time()
         latency_ms = max(0, int((wall_done - t_wall) * 1000))
@@ -1647,9 +1732,13 @@ class AgentLoop:
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
 
+        run_overrides = self._workframe_run_overrides(ctx.msg.metadata) if runtime.use_workspace_frame else {}
         _hist_kwargs: dict[str, Any] = {
             "max_messages": self._max_messages,
-            "max_tokens": self._replay_token_budget(),
+            "max_tokens": self._replay_token_budget(
+                context_window_tokens=run_overrides.get("context_window_tokens"),
+                max_tokens=run_overrides.get("max_tokens"),
+            ),
             "include_timestamps": True,
             "extend_to_user": False,
         }
@@ -1718,6 +1807,9 @@ class AgentLoop:
             pending_queue=ctx.pending_queue,
             ephemeral=ctx.ephemeral,
             tools=ctx.tools,
+            run_overrides=self._workframe_run_overrides(ctx.msg.metadata)
+            if runtime.use_workspace_frame
+            else None,
         )
         final_content, tools_used, all_msgs, stop_reason, had_injections = result
         ctx.final_content = final_content

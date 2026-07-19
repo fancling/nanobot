@@ -75,10 +75,6 @@ interface ChatListProps {
   emptyLabel?: string;
 }
 
-function loadReaderSessionMarkers(): Set<string> {
-  return loadReaderSessionChatIdSet();
-}
-
 export const ChatList = memo(function ChatList({
   sessions,
   activeKey,
@@ -159,23 +155,29 @@ export const ChatList = memo(function ChatList({
     [limitedGroups],
   );
   const hiddenSessionCount = Math.max(0, totalSessionCount - visibleSessionCount);
-  const readerSessionChatIds = useMemo(() => loadReaderSessionMarkers(), [readerMarkerVersion]);
+  const localReaderSessionChatIds = useMemo(
+    () => loadReaderSessionChatIdSet(),
+    [readerMarkerVersion],
+  );
   const readerMarkerLabels = useMemo(() => {
     const labelsByChatId = new Map<string, string>();
 
     for (const session of sessions) {
-      if (!readerSessionChatIds.has(session.chatId)) {
+      const isReaderSession =
+        session.reader?.reader_session === true || localReaderSessionChatIds.has(session.chatId);
+      if (!isReaderSession) {
         continue;
       }
 
       labelsByChatId.set(
         session.chatId,
-        displayTitle(session, titleOverrides, t("chat.newChat")),
+        session.reader?.title?.trim()
+          || displayTitle(session, titleOverrides, t("chat.newChat")),
       );
     }
 
     return labelsByChatId;
-  }, [readerSessionChatIds, sessions, t, titleOverrides]);
+  }, [localReaderSessionChatIds, sessions, t, titleOverrides]);
 
   useEffect(() => {
     setVisibleLimit(INITIAL_VISIBLE_SESSIONS);

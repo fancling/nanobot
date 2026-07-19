@@ -113,6 +113,84 @@ class ModelPresetConfig(Base):
         )
 
 
+class WorkframeModuleConfig(Base):
+    """Per-module WorkspaceFrame assembly controls."""
+
+    enabled: bool = True
+    priority: Literal["critical", "high", "medium", "low"] | None = None
+
+
+class WorkframeProfileConfig(Base):
+    """Per-surface WorkspaceFrame assembly controls."""
+
+    modules: dict[str, WorkframeModuleConfig] = Field(default_factory=dict)
+    tool_allowlist: list[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("toolAllowlist", "tool_allowlist"),
+        serialization_alias="toolAllowlist",
+    )
+    tool_denylist: list[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("toolDenylist", "tool_denylist"),
+        serialization_alias="toolDenylist",
+    )
+    tools_enabled: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices("toolsEnabled", "tools_enabled"),
+        serialization_alias="toolsEnabled",
+    )
+    model: str | None = None
+    max_tokens: int | None = Field(
+        default=None,
+        ge=1,
+        le=200_000,
+        validation_alias=AliasChoices("maxTokens", "max_tokens"),
+        serialization_alias="maxTokens",
+    )
+    temperature: float | None = Field(default=None, ge=0, le=2)
+    reasoning_effort: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("reasoningEffort", "reasoning_effort"),
+        serialization_alias="reasoningEffort",
+    )
+    context_window_tokens: int | None = Field(
+        default=None,
+        ge=4_096,
+        le=1_000_000,
+        validation_alias=AliasChoices("contextWindowTokens", "context_window_tokens"),
+        serialization_alias="contextWindowTokens",
+    )
+    recent_raw_token_budget: int | None = Field(
+        default=None,
+        ge=0,
+        le=50_000,
+        validation_alias=AliasChoices("recentRawTokenBudget", "recent_raw_token_budget"),
+        serialization_alias="recentRawTokenBudget",
+    )
+    response_mode: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("responseMode", "response_mode"),
+        serialization_alias="responseMode",
+    )
+    depth: str | None = None
+    extra_should_do: list[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("extraShouldDo", "extra_should_do"),
+        serialization_alias="extraShouldDo",
+    )
+    extra_should_avoid: list[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("extraShouldAvoid", "extra_should_avoid"),
+        serialization_alias="extraShouldAvoid",
+    )
+
+
+class WorkframeConfig(Base):
+    """WorkspaceFrame assembly controls."""
+
+    profiles: dict[str, WorkframeProfileConfig] = Field(default_factory=dict)
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -162,6 +240,7 @@ class AgentDefaults(Base):
         serialization_alias="consolidationRatio",
     )  # Consolidation target ratio (0.5 = 50% of budget retained after compression)
     dream: DreamConfig = Field(default_factory=DreamConfig)
+    workframe: WorkframeConfig = Field(default_factory=WorkframeConfig)
 
 
 class AgentsConfig(Base):

@@ -104,6 +104,7 @@ import {
   updateSettings,
   updateTranscriptionSettings,
   updateWebSearchSettings,
+  updateWorkframeSettings,
 } from "@/lib/api";
 import { notifyCliAppsChanged } from "@/lib/cli-app-events";
 import { getHostApi } from "@/lib/runtime";
@@ -133,6 +134,9 @@ import type {
   TranscriptionSettingsUpdate,
   WebSearchSettingsUpdate,
   WebuiDefaultAccessMode,
+  WorkframePriority,
+  WorkframeSettingsPayload,
+  WorkframeSettingsUpdate,
 } from "@/lib/types";
 
 export type SettingsSectionKey =
@@ -142,6 +146,7 @@ export type SettingsSectionKey =
   | "image"
   | "voice"
   | "browser"
+  | "workframe"
   | "apps"
   | "automations"
   | "skills"
@@ -183,7 +188,7 @@ interface ModelConfigurationDraft {
   model: string;
 }
 
-type PendingRestartSection = "runtime" | "browser" | "image";
+type PendingRestartSection = "runtime" | "browser" | "image" | "workframe";
 type PendingRestartSections = Record<PendingRestartSection, boolean>;
 type RestartAwarePayload = {
   requires_restart?: boolean;
@@ -276,6 +281,7 @@ const EMPTY_PENDING_RESTART_SECTIONS: PendingRestartSections = {
   runtime: false,
   browser: false,
   image: false,
+  workframe: false,
 };
 
 const DEFAULT_CUSTOM_MCP_FORM: CustomMcpForm = {
@@ -420,6 +426,42 @@ const DEFAULT_NETWORK_SAFETY_FORM: NetworkSafetySettingsUpdate = {
   webuiDefaultAccessMode: "default",
 };
 
+const DEFAULT_WORKFRAME_SETTINGS: WorkframeSettingsPayload = {
+  profiles: [],
+};
+
+function workframeSettingsUpdateFromPayload(
+  payload: WorkframeSettingsPayload,
+): WorkframeSettingsUpdate {
+  return {
+    profiles: payload.profiles.map((profile) => ({
+      name: profile.name,
+      responseMode: profile.response_mode,
+      depth: profile.depth,
+      recentRawTokenBudget: profile.recent_raw_token_budget,
+      modelParameters: {
+        model: profile.model_parameters.model,
+        maxTokens: profile.model_parameters.max_tokens,
+        temperature: profile.model_parameters.temperature,
+        reasoningEffort: profile.model_parameters.reasoning_effort,
+        contextWindowTokens: profile.model_parameters.context_window_tokens,
+      },
+      toolFilters: {
+        enabled: profile.tool_filters?.enabled ?? true,
+        allowlist: profile.tool_filters?.allowlist ?? [],
+        denylist: profile.tool_filters?.denylist ?? [],
+      },
+      extraShouldDo: profile.extra_should_do,
+      extraShouldAvoid: profile.extra_should_avoid,
+      modules: profile.modules.map((module) => ({
+        id: module.id,
+        enabled: module.enabled,
+        priority: module.priority,
+      })),
+    })),
+  };
+}
+
 function agentDraftFromPayload(payload: SettingsPayload): AgentSettingsDraft {
   const fallbackDefault = defaultPreset(payload);
   const activePresetName = modelPresetValue(payload);
@@ -497,6 +539,7 @@ function pendingRestartSectionsFromPayload(payload: SettingsPayload): PendingRes
     runtime: sections.includes("runtime"),
     browser: sections.includes("browser"),
     image: sections.includes("image"),
+    workframe: sections.includes("workframe"),
   };
 }
 
@@ -543,6 +586,7 @@ export function SettingsView({
   const [imageGenerationSaving, setImageGenerationSaving] = useState(false);
   const [transcriptionSaving, setTranscriptionSaving] = useState(false);
   const [networkSafetySaving, setNetworkSafetySaving] = useState(false);
+  const [workframeSaving, setWorkframeSaving] = useState(false);
   const [hostEngineApplying, setHostEngineApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<SettingsSectionKey>(initialSection);
@@ -589,6 +633,9 @@ export function SettingsView({
   const [networkSafetyForm, setNetworkSafetyForm] = useState<NetworkSafetySettingsUpdate>(() =>
     initialSettings ? networkSafetyFormFromPayload(initialSettings) : DEFAULT_NETWORK_SAFETY_FORM,
   );
+  const [workframeForm, setWorkframeForm] = useState<WorkframeSettingsPayload>(() =>
+    initialSettings?.workframe ?? DEFAULT_WORKFRAME_SETTINGS,
+  );
 
   useEffect(() => {
     setActiveSection(initialSection);
@@ -620,6 +667,7 @@ export function SettingsView({
     setImageGenerationForm(imageGenerationFormFromPayload(payload));
     setTranscriptionForm(transcriptionFormFromPayload(payload));
     setNetworkSafetyForm(networkSafetyFormFromPayload(payload));
+    setWorkframeForm(payload.workframe);
     if (payload.restart_required_sections) {
       setPendingRestartSections(pendingRestartSectionsFromPayload(payload));
     }
@@ -859,6 +907,11 @@ export function SettingsView({
     );
   }, [networkSafetyForm, settings]);
 
+  const workframeDirty = useMemo(() => {
+    if (!settings) return false;
+    return JSON.stringify(workframeForm) !== JSON.stringify(settings.workframe);
+  }, [settings, workframeForm]);
+
   const configuredModelProviderOptions = useMemo(
     () =>
       settings?.providers
@@ -1083,6 +1136,27 @@ export function SettingsView({
       setError((err as Error).message);
     } finally {
       setNetworkSafetySaving(false);
+    }
+  };
+
+  const saveWorkframeSettings = async () => {
+    if (!settings || !workframeDirty || workframeSaving) return;
+    setWorkframeSaving(true);
+    try {
+      const payload = await updateWorkframeSettings(
+        token,
+        workframeSettingsUpdateFromPayload(workframeForm),
+      );
+      applyPayload(payload);
+      if (payload.requires_restart) {
+        setPendingRestartSections((prev) => ({ ...prev, workframe: true }));
+      }
+      await maybeRestartHostEngine(payload);
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setWorkframeSaving(false);
     }
   };
 
@@ -1568,6 +1642,19 @@ export function SettingsView({
             requiresRestartPending={pendingRestartSections.browser}
           />
         );
+      case "workframe":
+        return (
+          <WorkframeSettings
+            form={workframeForm}
+            dirty={workframeDirty}
+            saving={workframeSaving}
+            requiresRestartPending={pendingRestartSections.workframe}
+            onChange={setWorkframeForm}
+            onSave={saveWorkframeSettings}
+            onRestart={restartViaSettingsSurface}
+            isRestarting={isRestarting || hostEngineApplying}
+          />
+        );
       case "apps":
         return (
           <AppsCatalogSettings
@@ -1781,6 +1868,7 @@ const SETTINGS_NAV_ITEMS: Array<{ key: SettingsSectionKey; icon: LucideIcon; fal
   { key: "image", icon: ImageIcon, fallback: "Image" },
   { key: "voice", icon: Mic, fallback: "Voice" },
   { key: "browser", icon: Globe2, fallback: "Web" },
+  { key: "workframe", icon: Layers, fallback: "Workframe" },
   { key: "runtime", icon: Server, fallback: "System" },
   { key: "advanced", icon: ShieldCheck, fallback: "Security" },
 ];
@@ -6107,6 +6195,410 @@ function RuntimeSettings({
   );
 }
 
+function WorkframeSettings({
+  form,
+  dirty,
+  saving,
+  requiresRestartPending,
+  onChange,
+  onSave,
+  onRestart,
+  isRestarting,
+}: {
+  form: WorkframeSettingsPayload;
+  dirty: boolean;
+  saving: boolean;
+  requiresRestartPending: boolean;
+  onChange: Dispatch<SetStateAction<WorkframeSettingsPayload>>;
+  onSave: () => void;
+  onRestart?: () => void;
+  isRestarting?: boolean;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const [activeProfileName, setActiveProfileName] = useState<string>(() => form.profiles[0]?.name ?? "generic");
+  const activeProfile = form.profiles.find((profile) => profile.name === activeProfileName) ?? form.profiles[0] ?? null;
+
+  useEffect(() => {
+    if (form.profiles.some((profile) => profile.name === activeProfileName)) return;
+    setActiveProfileName(form.profiles[0]?.name ?? "generic");
+  }, [activeProfileName, form.profiles]);
+
+  const updateProfile = (
+    profileName: string,
+    updater: (profile: WorkframeSettingsPayload["profiles"][number]) => WorkframeSettingsPayload["profiles"][number],
+  ) => {
+    onChange((prev) => ({
+      ...prev,
+      profiles: prev.profiles.map((profile) =>
+        profile.name === profileName ? updater(profile) : profile,
+      ),
+    }));
+  };
+
+  const updateModule = (
+    profileName: string,
+    moduleId: string,
+    updater: (module: WorkframeSettingsPayload["profiles"][number]["modules"][number]) => WorkframeSettingsPayload["profiles"][number]["modules"][number],
+  ) => {
+    updateProfile(profileName, (profile) => ({
+      ...profile,
+      modules: profile.modules.map((module) => (module.id === moduleId ? updater(module) : module)),
+    }));
+  };
+
+  if (!activeProfile) {
+    return (
+      <div className="space-y-7">
+        <section>
+          <SettingsSectionTitle>{tx("settings.sections.workframe", "Workframe")}</SettingsSectionTitle>
+          <SettingsGroup>
+            <SettingsRow
+              title={tx("settings.rows.workframeUnavailable", "No profiles")}
+              description={tx("settings.help.workframeUnavailable", "The gateway did not return workframe profile metadata.")}
+            />
+          </SettingsGroup>
+        </section>
+      </div>
+    );
+  }
+
+  const extraShouldDo = activeProfile.extra_should_do.join("\n");
+  const extraShouldAvoid = activeProfile.extra_should_avoid.join("\n");
+  const toolAllowlist = (activeProfile.tool_filters?.allowlist ?? []).join("\n");
+  const toolDenylist = (activeProfile.tool_filters?.denylist ?? []).join("\n");
+
+  return (
+    <div className="space-y-7">
+      <section>
+        <SettingsSectionTitle>{tx("settings.sections.workframeProfiles", "Profiles")}</SettingsSectionTitle>
+        <SettingsGroup>
+          <SettingsRow
+            title={tx("settings.rows.workframeProfile", "Profile")}
+            description={tx("settings.help.workframeProfile", "Choose the surface-specific assembly strategy to edit.")}
+          >
+            <SegmentedControl
+              value={activeProfile.name}
+              options={form.profiles.map((profile) => ({
+                value: profile.name,
+                label: profile.label,
+              }))}
+              onChange={setActiveProfileName}
+            />
+          </SettingsRow>
+          <SettingsRow
+            title={tx("settings.rows.responseMode", "Response mode")}
+            description={tx("settings.help.responseMode", "Stored in the workframe policy block.")}
+          >
+            <Input
+              value={activeProfile.response_mode}
+              onChange={(event) =>
+                updateProfile(activeProfile.name, (profile) => ({
+                  ...profile,
+                  response_mode: event.target.value,
+                }))
+              }
+              className="h-8 w-[220px] rounded-full text-[13px]"
+            />
+          </SettingsRow>
+          <SettingsRow
+            title={tx("settings.rows.workframeDepth", "Depth")}
+            description={tx("settings.help.workframeDepth", "Stored in the workframe policy block.")}
+          >
+            <Input
+              value={activeProfile.depth}
+              onChange={(event) =>
+                updateProfile(activeProfile.name, (profile) => ({
+                  ...profile,
+                  depth: event.target.value,
+                }))
+              }
+              className="h-8 w-[160px] rounded-full text-[13px]"
+            />
+          </SettingsRow>
+          <SettingsRow
+            title={tx("settings.rows.recentRawBudget", "Recent raw budget")}
+            description={tx("settings.help.recentRawBudget", "Token cap for conversation.recent_raw.")}
+          >
+            <NumberInput
+              value={activeProfile.recent_raw_token_budget}
+              min={0}
+              max={50000}
+              suffix="tokens"
+              onChange={(recentRawTokenBudget) =>
+                updateProfile(activeProfile.name, (profile) => ({
+                  ...profile,
+                  recent_raw_token_budget: recentRawTokenBudget,
+                }))
+              }
+            />
+          </SettingsRow>
+          <RestartSettingsFooter
+            dirty={dirty}
+            saving={saving}
+            pendingRestart={requiresRestartPending}
+            onSave={onSave}
+            onRestart={onRestart}
+            isRestarting={isRestarting}
+          />
+        </SettingsGroup>
+      </section>
+
+      <section>
+        <SettingsSectionTitle>{tx("settings.sections.workframeModel", "Model parameters")}</SettingsSectionTitle>
+        <SettingsGroup>
+          <SettingsRow
+            title={tx("settings.rows.workframeModel", "Model")}
+            description={tx("settings.help.workframeModel", "Leave empty to inherit the active global model.")}
+          >
+            <Input
+              value={activeProfile.model_parameters.model ?? ""}
+              placeholder={activeProfile.model_parameters.defaults.model}
+              onChange={(event) =>
+                updateProfile(activeProfile.name, (profile) => ({
+                  ...profile,
+                  model_parameters: {
+                    ...profile.model_parameters,
+                    model: event.target.value.trim() || null,
+                  },
+                }))
+              }
+              className="h-8 w-[260px] rounded-full text-[13px]"
+            />
+          </SettingsRow>
+          <SettingsRow
+            title={tx("settings.rows.workframeMaxTokens", "Max tokens")}
+            description={tx("settings.help.workframeMaxTokens", "Completion token limit for this workframe profile.")}
+          >
+            <NullableNumberInput
+              value={activeProfile.model_parameters.max_tokens}
+              placeholder={String(activeProfile.model_parameters.defaults.max_tokens)}
+              min={1}
+              max={200000}
+              onChange={(maxTokens) =>
+                updateProfile(activeProfile.name, (profile) => ({
+                  ...profile,
+                  model_parameters: {
+                    ...profile.model_parameters,
+                    max_tokens: maxTokens,
+                  },
+                }))
+              }
+            />
+          </SettingsRow>
+          <SettingsRow
+            title={tx("settings.rows.workframeTemperature", "Temperature")}
+            description={tx("settings.help.workframeTemperature", "Sampling temperature for this workframe profile.")}
+          >
+            <NullableNumberInput
+              value={activeProfile.model_parameters.temperature}
+              placeholder={String(activeProfile.model_parameters.defaults.temperature)}
+              min={0}
+              max={2}
+              step={0.1}
+              onChange={(temperature) =>
+                updateProfile(activeProfile.name, (profile) => ({
+                  ...profile,
+                  model_parameters: {
+                    ...profile.model_parameters,
+                    temperature,
+                  },
+                }))
+              }
+            />
+          </SettingsRow>
+          <SettingsRow
+            title={tx("settings.rows.workframeReasoning", "Reasoning effort")}
+            description={tx("settings.help.workframeReasoning", "Provider-specific reasoning effort; empty inherits the active model setting.")}
+          >
+            <Input
+              value={activeProfile.model_parameters.reasoning_effort ?? ""}
+              placeholder={activeProfile.model_parameters.defaults.reasoning_effort ?? "none"}
+              onChange={(event) =>
+                updateProfile(activeProfile.name, (profile) => ({
+                  ...profile,
+                  model_parameters: {
+                    ...profile.model_parameters,
+                    reasoning_effort: event.target.value.trim() || null,
+                  },
+                }))
+              }
+              className="h-8 w-[180px] rounded-full text-[13px]"
+            />
+          </SettingsRow>
+          <SettingsRow
+            title={tx("settings.rows.workframeContextWindow", "Context window")}
+            description={tx("settings.help.workframeContextWindow", "Used for prompt trimming and runner context metadata.")}
+          >
+            <NullableNumberInput
+              value={activeProfile.model_parameters.context_window_tokens}
+              placeholder={String(activeProfile.model_parameters.defaults.context_window_tokens)}
+              min={4096}
+              max={1000000}
+              onChange={(contextWindowTokens) =>
+                updateProfile(activeProfile.name, (profile) => ({
+                  ...profile,
+                  model_parameters: {
+                    ...profile.model_parameters,
+                    context_window_tokens: contextWindowTokens,
+                  },
+                }))
+              }
+            />
+          </SettingsRow>
+        </SettingsGroup>
+      </section>
+
+      <section>
+        <SettingsSectionTitle>{tx("settings.sections.workframeTools", "Tool access")}</SettingsSectionTitle>
+        <SettingsGroup>
+          <SettingsRow
+            title={tx("settings.rows.toolsEnabled", "Tools")}
+            description={tx("settings.help.toolsEnabled", "Disable to send no tool schemas for this workframe profile.")}
+          >
+            <ToggleButton
+              checked={activeProfile.tool_filters?.enabled ?? true}
+              onChange={(enabled) =>
+                updateProfile(activeProfile.name, (profile) => ({
+                  ...profile,
+                  tool_filters: {
+                    ...(profile.tool_filters ?? { enabled: true, allowlist: [], denylist: [] }),
+                    enabled,
+                  },
+                }))
+              }
+              ariaLabel={tx("settings.rows.toolsEnabled", "Tools")}
+              label={(activeProfile.tool_filters?.enabled ?? true) ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
+            />
+          </SettingsRow>
+          <SettingsRow
+            title={tx("settings.rows.toolAllowlist", "Allowed tools")}
+            description={tx("settings.help.toolAllowlist", "One exact tool name per row. Empty means every registered tool is eligible.")}
+          >
+            <Textarea
+              value={toolAllowlist}
+              onChange={(event) =>
+                updateProfile(activeProfile.name, (profile) => ({
+                  ...profile,
+                  tool_filters: {
+                    ...(profile.tool_filters ?? { enabled: true, allowlist: [], denylist: [] }),
+                    allowlist: event.target.value
+                      .split("\n")
+                      .map((line) => line.trim())
+                      .filter(Boolean),
+                  },
+                }))
+              }
+              className="min-h-[96px] w-[min(420px,70vw)] rounded-[14px] text-[13px]"
+              placeholder={"read_file\nweb_fetch"}
+            />
+          </SettingsRow>
+          <SettingsRow
+            title={tx("settings.rows.toolDenylist", "Denied tools")}
+            description={tx("settings.help.toolDenylist", "One exact tool name per row. These tools stay hidden even when the allowlist is empty.")}
+          >
+            <Textarea
+              value={toolDenylist}
+              onChange={(event) =>
+                updateProfile(activeProfile.name, (profile) => ({
+                  ...profile,
+                  tool_filters: {
+                    ...(profile.tool_filters ?? { enabled: true, allowlist: [], denylist: [] }),
+                    denylist: event.target.value
+                      .split("\n")
+                      .map((line) => line.trim())
+                      .filter(Boolean),
+                  },
+                }))
+              }
+              className="min-h-[96px] w-[min(420px,70vw)] rounded-[14px] text-[13px]"
+              placeholder={"exec\nspawn"}
+            />
+          </SettingsRow>
+        </SettingsGroup>
+      </section>
+
+      <section>
+        <SettingsSectionTitle>{tx("settings.sections.workframeModules", "Blocks")}</SettingsSectionTitle>
+        <SettingsGroup>
+          {activeProfile.modules.map((module) => (
+            <SettingsRow
+              key={module.id}
+              title={module.label}
+              description={`${module.id} · ${module.description}`}
+            >
+              <div className="flex items-center justify-end gap-3">
+                <PriorityPicker
+                  value={module.priority}
+                  onChange={(priority) =>
+                    updateModule(activeProfile.name, module.id, (currentModule) => ({
+                      ...currentModule,
+                      priority,
+                    }))
+                  }
+                />
+                <ToggleButton
+                  checked={module.enabled}
+                  onChange={(enabled) =>
+                    updateModule(activeProfile.name, module.id, (currentModule) => ({
+                      ...currentModule,
+                      enabled,
+                    }))
+                  }
+                  ariaLabel={`${module.label} ${tx("settings.rows.enabled", "Enabled")}`}
+                  label={module.enabled ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
+                />
+              </div>
+            </SettingsRow>
+          ))}
+        </SettingsGroup>
+      </section>
+
+      <section>
+        <SettingsSectionTitle>{tx("settings.sections.workframeGuidance", "Guidance")}</SettingsSectionTitle>
+        <SettingsGroup>
+          <SettingsRow
+            title={tx("settings.rows.extraShouldDo", "Extra should do")}
+            description={tx("settings.help.extraShouldDo", "One policy line per row.")}
+          >
+            <Textarea
+              value={extraShouldDo}
+              onChange={(event) =>
+                updateProfile(activeProfile.name, (profile) => ({
+                  ...profile,
+                  extra_should_do: event.target.value
+                    .split("\n")
+                    .map((line) => line.trim())
+                    .filter(Boolean),
+                }))
+              }
+              className="min-h-[96px] w-[min(420px,70vw)] rounded-[14px] text-[13px]"
+            />
+          </SettingsRow>
+          <SettingsRow
+            title={tx("settings.rows.extraShouldAvoid", "Extra should avoid")}
+            description={tx("settings.help.extraShouldAvoid", "One policy line per row.")}
+          >
+            <Textarea
+              value={extraShouldAvoid}
+              onChange={(event) =>
+                updateProfile(activeProfile.name, (profile) => ({
+                  ...profile,
+                  extra_should_avoid: event.target.value
+                    .split("\n")
+                    .map((line) => line.trim())
+                    .filter(Boolean),
+                }))
+              }
+              className="min-h-[96px] w-[min(420px,70vw)] rounded-[14px] text-[13px]"
+            />
+          </SettingsRow>
+        </SettingsGroup>
+      </section>
+    </div>
+  );
+}
+
 function AdvancedSettings({
   form,
   dirty,
@@ -7488,6 +7980,52 @@ function SegmentedControl({
   );
 }
 
+function PriorityPicker({
+  value,
+  onChange,
+}: {
+  value: WorkframePriority;
+  onChange: (value: WorkframePriority) => void;
+}) {
+  const options: Array<{ value: WorkframePriority; label: string }> = [
+    { value: "critical", label: "Critical" },
+    { value: "high", label: "High" },
+    { value: "medium", label: "Medium" },
+    { value: "low", label: "Low" },
+  ];
+  const selected = options.find((option) => option.value === value) ?? options[2];
+  return (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          className="h-8 w-[116px] justify-between rounded-full border-input bg-background px-3 text-[12px] font-normal shadow-none"
+        >
+          <span className="truncate">{selected.label}</span>
+          <ChevronDown className="ml-2 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-[140px]">
+        {options.map((option) => (
+          <DropdownMenuItem
+            key={option.value}
+            onSelect={() => onChange(option.value)}
+            className={cn(
+              "flex cursor-default items-center justify-between gap-2 rounded-[12px] px-2.5 py-2 text-[13px]",
+              "focus:bg-muted/85 focus:text-foreground",
+              option.value === value && "bg-muted/80 text-foreground focus:bg-muted",
+            )}
+          >
+            <span>{option.label}</span>
+            {option.value === value ? <Check className="h-3.5 w-3.5" aria-hidden /> : null}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function ToggleButton({
   checked,
   onChange,
@@ -7555,5 +8093,42 @@ function NumberInput({
       />
       {suffix ? <span className="text-[12px] text-muted-foreground">{suffix}</span> : null}
     </div>
+  );
+}
+
+function NullableNumberInput({
+  value,
+  min,
+  max,
+  step,
+  placeholder,
+  onChange,
+}: {
+  value: number | null;
+  min: number;
+  max: number;
+  step?: number;
+  placeholder?: string;
+  onChange: (value: number | null) => void;
+}) {
+  return (
+    <Input
+      type="number"
+      min={min}
+      max={max}
+      step={step}
+      value={value ?? ""}
+      placeholder={placeholder}
+      onChange={(event) => {
+        const textValue = event.target.value.trim();
+        if (!textValue) {
+          onChange(null);
+          return;
+        }
+        const parsed = Number(textValue);
+        if (Number.isFinite(parsed)) onChange(parsed);
+      }}
+      className="h-8 w-28 max-w-full rounded-full text-[13px]"
+    />
   );
 }

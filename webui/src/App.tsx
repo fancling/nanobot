@@ -51,7 +51,11 @@ import type {
 } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { fetchSettings, fetchWorkspaces } from "@/lib/api";
+import {
+  fetchReaderState,
+  fetchSettings,
+  fetchWorkspaces,
+} from "@/lib/api";
 import {
   createRuntimeHost,
   getHostApi,
@@ -96,6 +100,7 @@ const SETTINGS_SECTION_KEYS: SettingsSectionKey[] = [
   "image",
   "voice",
   "browser",
+  "workframe",
   "apps",
   "automations",
   "skills",
@@ -245,6 +250,27 @@ function readerMarkerSignature(state: ReaderState | null): string {
     documentKind: state.documentKind ?? "",
     sourceFileName: state.sourceFileName ?? "",
   });
+}
+
+function cloneReaderStateForNewSession(source: ReaderState): ReaderState {
+  return {
+    version: 1,
+    documentId: source.documentId,
+    title: source.title,
+    rawText: source.rawText,
+    focusedParagraphIndex: source.focusedParagraphIndex ?? 0,
+    selectedText: "",
+    note: "",
+    question: "",
+    mode: "slow_reading",
+    collapsed: false,
+    documentKind: source.documentKind,
+    readerModeOpen: false,
+    readerSession: true,
+    sourceFileName: source.sourceFileName,
+    sections: source.sections,
+    activeSectionIndex: source.activeSectionIndex ?? 0,
+  };
 }
 
 function AuthForm({
@@ -591,7 +617,7 @@ function Shell({
   const {
     sessions,
     loading,
-    refresh,
+    refresh: refreshSessions,
     createChat,
     createChatGuarded,
     forkChat,
@@ -717,12 +743,17 @@ function Shell({
   const runningChatIdList = useMemo(() => Array.from(runningChatIds), [runningChatIds]);
   const updatedChatIdList = useMemo(() => Array.from(updatedChatIds), [updatedChatIds]);
   const activeChatId = activeSession?.chatId ?? null;
-  const activeReaderLoadResult = useMemo(() => {
+  const activeReaderLocalLoadResult = useMemo(() => {
     if (view !== "reader" || !activeSession?.chatId) return null;
     return loadReaderStateResult(activeSession.chatId);
   }, [activeSession?.chatId, view]);
+  const activeReaderHasServerMarker = activeSession?.reader?.reader_session === true;
   const activeReaderChatId = view === "reader" && activeSession?.chatId
-    && (isReaderSessionState(activeReaderLoadResult?.state ?? null) || activeReaderLoadResult?.storageFailed)
+    && (
+      activeReaderHasServerMarker
+      || isReaderSessionState(activeReaderLocalLoadResult?.state ?? null)
+      || activeReaderLocalLoadResult?.storageFailed
+    )
     ? activeSession.chatId
     : null;
   useEffect(() => {
@@ -768,22 +799,41 @@ function Shell({
       setReaderPersistenceFailed(false);
       return;
     }
-    setReaderState(activeReaderLoadResult?.state ?? null);
-    setReaderPersistenceFailed(activeReaderLoadResult?.storageFailed ?? false);
-  }, [activeReaderChatId, activeReaderLoadResult]);
+    const fallbackState = activeReaderLocalLoadResult?.state ?? null;
+    setReaderState(fallbackState);
+    setReaderPersistenceFailed(activeReaderLocalLoadResult?.storageFailed ?? false);
+
+    if (!activeSession?.key) return;
+    let cancelled = false;
+    fetchReaderState(token, activeSession.key)
+      .then((remoteState) => {
+        if (cancelled || !remoteState) return;
+        setReaderState(remoteState);
+        saveReaderState(activeReaderChatId, remoteState);
+        setReaderPersistenceFailed(false);
+      })
+      .catch(() => {
+        if (!cancelled && !fallbackState) setReaderPersistenceFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeReaderChatId, activeReaderLocalLoadResult, activeSession?.key, token]);
 
   useEffect(() => {
     if (view !== "reader" || !activeSession?.key || !activeSession.chatId) return;
-    if (activeReaderLoadResult?.storageFailed) return;
-    if (isReaderSessionState(activeReaderLoadResult?.state ?? null)) return;
+    if (activeReaderHasServerMarker) return;
+    if (activeReaderLocalLoadResult?.storageFailed) return;
+    if (isReaderSessionState(activeReaderLocalLoadResult?.state ?? null)) return;
     navigate({
       view: "chat",
       activeKey: activeSession.key,
       settingsSection: "overview",
     }, { replace: true });
   }, [
-    activeReaderLoadResult?.state,
-    activeReaderLoadResult?.storageFailed,
+    activeReaderHasServerMarker,
+    activeReaderLocalLoadResult?.state,
+    activeReaderLocalLoadResult?.storageFailed,
     activeSession?.chatId,
     activeSession?.key,
     navigate,
@@ -1099,7 +1149,8 @@ function Shell({
         setDraftWorkspaceScope(null);
       }
       setWorkspaceError(null);
-      const nextView = selectedChatId && isReaderSessionState(loadReaderStateResult(selectedChatId).state)
+      const nextView = selected?.reader?.reader_session === true
+        || (selectedChatId && isReaderSessionState(loadReaderStateResult(selectedChatId).state))
         ? "reader"
         : "chat";
       navigate({ view: nextView, activeKey: key, settingsSection: "overview" });
@@ -1350,10 +1401,27 @@ function Shell({
     if (persisted && markerChanged) {
       setReaderMarkerVersion((version) => version + 1);
     }
+    const remoteSave = typeof client.saveReaderState === "function"
+      ? client.saveReaderState(chatId, nextState)
+      : Promise.resolve();
+    void remoteSave
+      .then(() => {
+        if (chatId === activeReaderChatIdRef.current) {
+          setReaderPersistenceFailed(false);
+        }
+        if (markerChanged) {
+          void refreshSessions();
+        }
+      })
+      .catch(() => {
+        if (chatId === activeReaderChatIdRef.current) {
+          setReaderPersistenceFailed(true);
+        }
+      });
     if (chatId === activeReaderChatIdRef.current) {
       setReaderPersistenceFailed(!persisted);
     }
-  }, []);
+  }, [client, refreshSessions]);
 
   const onReaderChange = useCallback((patch: Partial<ReaderState>) => {
     if (!activeReaderChatId || !readerState) return;
@@ -1366,6 +1434,7 @@ function Shell({
     chatId: string,
     state: ReaderState | null,
     previousState?: ReaderState | null,
+    workspaceScope?: WorkspaceScopePayload | null,
   ): Promise<string> => {
     const existing = state?.workframeId?.trim();
     if (existing) return existing;
@@ -1382,7 +1451,7 @@ function Shell({
         try {
           return await client.newWorkframe(CHAT_CREATE_TIMEOUT_MS, {
             surface: "reader",
-            workspaceScope: activeWorkspaceScope,
+            workspaceScope: workspaceScope ?? activeWorkspaceScope,
           });
         } finally {
           releaseQueue();
@@ -1400,6 +1469,62 @@ function Shell({
     }
     return workframeId;
   }, [activeWorkspaceScope, client, persistReaderState]);
+
+  const loadReaderStateForSession = useCallback(async (
+    session: ChatSummary,
+  ): Promise<ReaderState | null> => {
+    const localState = loadReaderStateResult(session.chatId).state;
+    if (localState) return localState;
+    try {
+      return await fetchReaderState(token, session.key);
+    } catch {
+      return null;
+    }
+  }, [token]);
+
+  const onCreateReaderSessionFromBook = useCallback((sourceSessionKey: string) => {
+    void (async () => {
+      const sourceSession = sessions.find((session) => session.key === sourceSessionKey);
+      if (!sourceSession) return;
+      const sourceState = await loadReaderStateForSession(sourceSession);
+      if (!sourceState) return;
+      const workspaceScope = sourceSession.workspaceScope ?? activeWorkspaceScope;
+      try {
+        const chatId = await createChat(workspaceScope);
+        if (workspaceScope) {
+          setWorkspaceOverrides((current) => ({
+            ...current,
+            [chatId]: normalizeWorkspaceScope(workspaceScope),
+          }));
+        }
+        const nextState = cloneReaderStateForNewSession(sourceState);
+        const workframeId = await ensureReaderWorkframeId(
+          chatId,
+          nextState,
+          null,
+          workspaceScope,
+        );
+        const persistedState = { ...nextState, workframeId };
+        setReaderState(persistedState);
+        navigate({
+          view: "reader",
+          activeKey: `websocket:${chatId}`,
+          settingsSection: "overview",
+        });
+        setMobileSidebarOpen(false);
+      } catch (error) {
+        console.error("Failed to create Reader session", error);
+        setReaderPersistenceFailed(true);
+      }
+    })();
+  }, [
+    activeWorkspaceScope,
+    createChat,
+    ensureReaderWorkframeId,
+    loadReaderStateForSession,
+    navigate,
+    sessions,
+  ]);
 
   const onReaderImportEpub = useCallback(async (file: File) => {
     const importTicket = readerImportTicketRef.current + 1;
@@ -1564,7 +1689,7 @@ function Shell({
     });
   }, [client, t]);
 
-  const onTurnEnd = useDeferredTitleRefresh(activeSession, refresh);
+  const onTurnEnd = useDeferredTitleRefresh(activeSession, refreshSessions);
 
   const onConfirmDelete = useCallback(async () => {
     if (!pendingDelete) return;
@@ -1864,6 +1989,9 @@ function Shell({
               <div className="absolute inset-0 flex flex-col">
                 <ReaderPage
                   state={readerState}
+                  readerSessions={sessions}
+                  readerMarkerVersion={readerMarkerVersion}
+                  titleOverrides={sidebarState.title_overrides}
                   disabled={false}
                   persistenceFailed={readerPersistenceFailed}
                   onChange={onReaderChange}
@@ -1890,6 +2018,9 @@ function Shell({
                     })();
                   }}
                   onBackToChat={onBackToChat}
+                  onOpenSession={onSelectChat}
+                  onCreateSessionFromBook={onCreateReaderSessionFromBook}
+                  onRequestDeleteSession={onRequestDelete}
                 />
               </div>
             ) : null}

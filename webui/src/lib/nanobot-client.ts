@@ -10,6 +10,7 @@ import type {
   ReadingSnapshot,
   WorkspaceScopePayload,
 } from "./types";
+import type { ReaderState } from "./reading";
 import { createHostWebSocket } from "./runtime";
 
 /** WebSocket readyState constants, referenced by value to stay portable
@@ -108,6 +109,12 @@ interface PendingTranscription {
   timer: ReturnType<typeof setTimeout>;
 }
 
+interface PendingReaderStateSave {
+  resolve: () => void;
+  reject: (err: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
 export interface NanobotClientOptions {
   url: string;
   reconnect?: boolean;
@@ -149,6 +156,7 @@ export class NanobotClient {
   private pendingNewChat: PendingNewChat | null = null;
   private pendingNewWorkframe: PendingNewWorkframe | null = null;
   private pendingTranscriptions = new Map<string, PendingTranscription>();
+  private pendingReaderStateSaves = new Map<string, PendingReaderStateSave>();
   // Frames queued while the socket is not yet OPEN
   private sendQueue: Outbound[] = [];
   private reconnectAttempts = 0;
@@ -472,6 +480,27 @@ export class NanobotClient {
     });
   }
 
+  saveReaderState(
+    chatId: string,
+    state: ReaderState,
+    timeoutMs: number = 20_000,
+  ): Promise<void> {
+    const requestId = crypto.randomUUID();
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingReaderStateSaves.delete(requestId);
+        reject(new Error("reader state save timed out"));
+      }, timeoutMs);
+      this.pendingReaderStateSaves.set(requestId, { resolve, reject, timer });
+      this.queueSend({
+        type: "reader_state_update",
+        request_id: requestId,
+        chat_id: chatId,
+        state,
+      });
+    });
+  }
+
   setWorkspaceScope(chatId: string, workspaceScope: WorkspaceScopePayload): void {
     this.knownChats.add(chatId);
     this.queueSend({
@@ -563,6 +592,16 @@ export class NanobotClient {
 
     if (parsed.event === "transcription_error") {
       this.rejectTranscription(parsed.request_id, parsed.detail || "error");
+      return;
+    }
+
+    if (parsed.event === "reader_state_saved") {
+      this.resolveReaderStateSave(parsed.request_id);
+      return;
+    }
+
+    if (parsed.event === "reader_state_error") {
+      this.rejectReaderStateSave(parsed.request_id, parsed.detail || "reader_state_error");
       return;
     }
 
@@ -670,6 +709,7 @@ export class NanobotClient {
       this.pendingNewWorkframe = null;
     }
     this.rejectAllTranscriptions("socket closed");
+    this.rejectAllReaderStateSaves("socket closed");
     // Surface structured reasons *before* reconnect logic so the UI can
     // display the error even while the client transparently reconnects.
     // Browsers populate ``CloseEvent.code`` with the wire-level close code;
@@ -723,6 +763,32 @@ export class NanobotClient {
       clearTimeout(pending.timer);
       pending.reject(new Error(detail));
       this.pendingTranscriptions.delete(requestId);
+    }
+  }
+
+  private resolveReaderStateSave(requestId: string | undefined): void {
+    if (!requestId) return;
+    const pending = this.pendingReaderStateSaves.get(requestId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    this.pendingReaderStateSaves.delete(requestId);
+    pending.resolve();
+  }
+
+  private rejectReaderStateSave(requestId: string | undefined, detail: string): void {
+    if (!requestId) return;
+    const pending = this.pendingReaderStateSaves.get(requestId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    this.pendingReaderStateSaves.delete(requestId);
+    pending.reject(new Error(detail));
+  }
+
+  private rejectAllReaderStateSaves(detail: string): void {
+    for (const [requestId, pending] of this.pendingReaderStateSaves) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error(detail));
+      this.pendingReaderStateSaves.delete(requestId);
     }
   }
 

@@ -15,6 +15,7 @@ from urllib.parse import quote, urlencode
 
 import httpx
 import pytest
+from websockets.asyncio.client import connect
 
 from nanobot.channels.websocket import WebSocketChannel, WebSocketConfig
 from nanobot.cron.service import CronService
@@ -191,6 +192,74 @@ async def test_sessions_routes_require_bearer_token(
         body = msgs.json()
         assert body["key"] == "websocket:abc"
         assert [m["role"] for m in body["messages"]] == ["user", "assistant"]
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_reader_state_websocket_update_persists_reader_payload(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path / "data")
+    sm = _seed_session(tmp_path, key="websocket:reader-chat")
+    port = _free_port()
+    channel = _ch(bus, session_manager=sm, port=port)
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        boot = await _http_get(f"http://127.0.0.1:{port}/webui/bootstrap")
+        token = boot.json()["token"]
+        auth = {"Authorization": f"Bearer {token}"}
+        state = {
+            "version": 1,
+            "documentId": "doc-1",
+            "title": "Book",
+            "rawText": "First.\n\nSecond.",
+            "focusedParagraphIndex": 1,
+            "selectedText": "",
+            "note": "",
+            "question": "",
+            "mode": "slow_reading",
+            "collapsed": False,
+            "documentKind": "epub",
+            "readerSession": True,
+            "workframeId": "frame-1",
+        }
+
+        async with connect(f"ws://127.0.0.1:{port}/?client_id=reader-test") as ws:
+            ready = json.loads(await ws.recv())
+            assert ready["event"] == "ready"
+            await ws.send(
+                json.dumps(
+                    {
+                        "type": "reader_state_update",
+                        "request_id": "reader-save-1",
+                        "chat_id": "reader-chat",
+                        "state": state,
+                    }
+                )
+            )
+            saved = json.loads(await ws.recv())
+            assert saved == {
+                "event": "reader_state_saved",
+                "request_id": "reader-save-1",
+                "chat_id": "reader-chat",
+            }
+
+        loaded = await _http_get(
+            f"http://127.0.0.1:{port}/api/sessions/websocket%3Areader-chat/reader-state",
+            headers=auth,
+        )
+        assert loaded.status_code == 200
+        assert loaded.json()["state"]["title"] == "Book"
+
+        listing = await _http_get(f"http://127.0.0.1:{port}/api/sessions", headers=auth)
+        row = next(row for row in listing.json()["sessions"] if row["key"] == "websocket:reader-chat")
+        assert row["reader"]["reader_session"] is True
+        assert row["reader"]["workframe_id"] == "frame-1"
     finally:
         await channel.stop()
         await server_task

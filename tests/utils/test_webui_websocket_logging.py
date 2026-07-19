@@ -6,6 +6,7 @@ import logging
 
 from nanobot.webui.websocket_logging import (
     OPENING_HANDSHAKE_FAILED_MESSAGE,
+    UNEXPECTED_INTERNAL_ERROR_MESSAGE,
     WebSocketHandshakeNoiseFilter,
 )
 
@@ -36,3 +37,21 @@ def test_websocket_handshake_noise_filter_keeps_real_errors() -> None:
 
     assert filter_.filter(_log_record(OPENING_HANDSHAKE_FAILED_MESSAGE, RuntimeError("boom")))
     assert filter_.filter(_log_record("connection handler failed", BrokenPipeError()))
+
+
+def test_websocket_handshake_noise_filter_suppresses_websockets_eof_assert() -> None:
+    from websockets.protocol import Protocol, Side
+
+    filter_ = WebSocketHandshakeNoiseFilter()
+    protocol = Protocol(side=Side.SERVER)
+    protocol.eof_sent = True
+    try:
+        protocol.send_eof()
+    except AssertionError as exc:
+        eof_assert = exc
+    else:  # pragma: no cover - defensive: this is the upstream behavior being filtered.
+        raise AssertionError("send_eof did not raise")
+
+    assert not filter_.filter(_log_record(UNEXPECTED_INTERNAL_ERROR_MESSAGE, eof_assert))
+    assert not filter_.filter(_log_record(OPENING_HANDSHAKE_FAILED_MESSAGE, eof_assert))
+    assert filter_.filter(_log_record(UNEXPECTED_INTERNAL_ERROR_MESSAGE, AssertionError()))

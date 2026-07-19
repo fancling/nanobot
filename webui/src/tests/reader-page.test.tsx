@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ReaderPage } from "@/components/reader/ReaderPage";
 import type { ReaderState } from "@/lib/reading";
-import type { UIMessage } from "@/lib/types";
+import type { ChatSummary, UIMessage } from "@/lib/types";
 import { useSessionHistory } from "@/hooks/useSessions";
 import { useClient } from "@/providers/ClientProvider";
 
@@ -46,6 +46,7 @@ describe("ReaderPage", () => {
   });
 
   beforeEach(() => {
+    window.localStorage.clear();
     useClientMock.mockReturnValue({
       client: {
         onError: vi.fn(() => vi.fn()),
@@ -100,6 +101,113 @@ describe("ReaderPage", () => {
     const file = new File(["epub"], "sample.epub", { type: "application/epub+zip" });
     fireEvent.change(input, { target: { files: [file] } });
     expect(onImportEpub).toHaveBeenCalledWith(file);
+  });
+
+  it("renders saved reader books before their associated sessions", () => {
+    window.localStorage.setItem(
+      "nanobot.webui.readerShell.v1:book-chat",
+      JSON.stringify(state({
+        documentId: "book-random-1",
+        title: "Stored Book",
+        focusedParagraphIndex: 1,
+        sourceFileName: "stored.epub",
+      })),
+    );
+    window.localStorage.setItem(
+      "nanobot.webui.readerShell.v1:book-chat-2",
+      JSON.stringify(state({
+        documentId: "book-random-2",
+        title: "Stored Book",
+        focusedParagraphIndex: 0,
+        sourceFileName: "stored.epub",
+      })),
+    );
+    const sessions: ChatSummary[] = [
+      {
+        key: "websocket:plain-chat",
+        channel: "websocket",
+        chatId: "plain-chat",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        preview: "Plain chat",
+      },
+      {
+        key: "websocket:book-chat",
+        channel: "websocket",
+        chatId: "book-chat",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:30:00Z",
+        preview: "Book chat",
+        reader: {
+          reader_session: true,
+          document_id: "book-random-1",
+          title: "Server Book",
+          document_kind: "epub",
+          source_file_name: "server.epub",
+          focused_paragraph_index: 0,
+        },
+      },
+      {
+        key: "websocket:book-chat-2",
+        channel: "websocket",
+        chatId: "book-chat-2",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:35:00Z",
+        title: "Second session",
+        preview: "Book chat",
+        reader: {
+          reader_session: true,
+          document_id: "book-random-2",
+          title: "Server Book",
+          document_kind: "epub",
+          source_file_name: "server.epub",
+          focused_paragraph_index: 0,
+        },
+      },
+    ];
+    const onOpenSession = vi.fn();
+    const onCreateSessionFromBook = vi.fn();
+    const onRequestDeleteSession = vi.fn();
+
+    render(
+      <ReaderPage
+        state={null}
+        readerSessions={sessions}
+        titleOverrides={{ "websocket:book-chat": "Pinned Title" }}
+        disabled={false}
+        persistenceFailed={false}
+        onChange={vi.fn()}
+        onImportEpub={vi.fn()}
+        onSendReading={vi.fn()}
+        onBackToChat={vi.fn()}
+        onOpenSession={onOpenSession}
+        onCreateSessionFromBook={onCreateSessionFromBook}
+        onRequestDeleteSession={onRequestDeleteSession}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Reader library" })).toBeInTheDocument();
+    expect(screen.getByText("Stored Book")).toBeInTheDocument();
+    expect(screen.getByText(/stored\.epub/i)).toBeInTheDocument();
+    expect(screen.getByText("2 sessions")).toBeInTheDocument();
+    expect(screen.queryByText("Plain chat")).not.toBeInTheDocument();
+    expect(screen.queryByText("Pinned Title")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open Reader book: Stored Book" }));
+
+    expect(screen.getByRole("heading", { name: "Stored Book" })).toBeInTheDocument();
+    expect(screen.getByText("2 associated sessions")).toBeInTheDocument();
+    expect(screen.getByText("Pinned Title")).toBeInTheDocument();
+    expect(screen.getByText("Second session")).toBeInTheDocument();
+    expect(screen.getAllByText("2 / 2 paragraphs").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Create Reader session for book: Stored Book" }));
+    expect(onCreateSessionFromBook).toHaveBeenCalledWith("websocket:book-chat-2");
+
+    fireEvent.click(screen.getByRole("button", { name: "Open Reader session: Pinned Title" }));
+    expect(onOpenSession).toHaveBeenCalledWith("websocket:book-chat");
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete Reader session: Pinned Title" }));
+    expect(onRequestDeleteSession).toHaveBeenCalledWith("websocket:book-chat", "Pinned Title");
   });
 
   it("sends reader questions from the active book", () => {

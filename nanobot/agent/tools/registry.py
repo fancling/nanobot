@@ -180,3 +180,85 @@ class ToolRegistry:
 
     def __contains__(self, name: str) -> bool:
         return name in self._tools
+
+
+class FilteredToolRegistry(ToolRegistry):
+    """View of a tool registry restricted by exact tool names."""
+
+    def __init__(
+        self,
+        base: ToolRegistry,
+        *,
+        allowlist: list[str] | tuple[str, ...] | None = None,
+        denylist: list[str] | tuple[str, ...] | None = None,
+        enabled: bool = True,
+    ):
+        self._base = base
+        self._allowlist = {name for name in (allowlist or []) if name}
+        self._denylist = {name for name in (denylist or []) if name}
+        self._enabled = enabled
+        self._cached_definitions: list[dict[str, Any]] | None = None
+
+    def register(self, tool: Tool) -> None:
+        self._base.register(tool)
+        self._cached_definitions = None
+
+    def unregister(self, name: str) -> None:
+        self._base.unregister(name)
+        self._cached_definitions = None
+
+    def _is_allowed(self, name: str) -> bool:
+        if not self._enabled:
+            return False
+        if self._allowlist and name not in self._allowlist:
+            return False
+        return name not in self._denylist
+
+    def get(self, name: str) -> Tool | None:
+        if not self._is_allowed(name):
+            return None
+        return self._base.get(name)
+
+    def has(self, name: str) -> bool:
+        return self._is_allowed(name) and self._base.has(name)
+
+    def get_definitions(self) -> list[dict[str, Any]]:
+        if self._cached_definitions is not None:
+            return self._cached_definitions
+        self._cached_definitions = [
+            schema
+            for schema in self._base.get_definitions()
+            if self._is_allowed(self._schema_name(schema))
+        ]
+        return self._cached_definitions
+
+    def prepare_call(
+        self,
+        name: str,
+        params: Any,
+    ) -> tuple[Tool | None, Any, str | None]:
+        if not self._is_allowed(name):
+            return None, params, (
+                f"Error: Tool '{name}' is not enabled for this workframe profile. "
+                f"Available: {', '.join(self.tool_names)}"
+            )
+        return self._base.prepare_call(name, params)
+
+    async def execute(self, name: str, params: Any) -> Any:
+        if not self._is_allowed(name):
+            hint = "\n\n[Analyze the error above and try a different approach.]"
+            return (
+                f"Error: Tool '{name}' is not enabled for this workframe profile. "
+                f"Available: {', '.join(self.tool_names)}"
+            ) + hint
+        return await self._base.execute(name, params)
+
+    @property
+    def tool_names(self) -> list[str]:
+        return [name for name in self._base.tool_names if self._is_allowed(name)]
+
+    def __len__(self) -> int:
+        return len(self.tool_names)
+
+    def __contains__(self, name: str) -> bool:
+        return self.has(name)

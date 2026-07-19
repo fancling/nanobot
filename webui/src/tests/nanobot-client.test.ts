@@ -565,6 +565,51 @@ describe("NanobotClient", () => {
     });
   });
 
+  it("saves reader state over the websocket protocol", async () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+
+    const promise = client.saveReaderState("reader-chat", {
+      version: 1,
+      documentId: "doc-1",
+      title: "Book",
+      rawText: "First.\n\nSecond.",
+      focusedParagraphIndex: 1,
+      selectedText: "",
+      note: "",
+      question: "",
+      mode: "slow_reading",
+      collapsed: false,
+      readerSession: true,
+      documentKind: "epub",
+      workframeId: "frame-1",
+    });
+    const frame = JSON.parse(lastSocket().sent.at(-1) as string);
+
+    expect(frame).toMatchObject({
+      type: "reader_state_update",
+      chat_id: "reader-chat",
+      state: expect.objectContaining({
+        documentId: "doc-1",
+        focusedParagraphIndex: 1,
+        workframeId: "frame-1",
+      }),
+    });
+    expect(typeof frame.request_id).toBe("string");
+
+    lastSocket().fakeMessage({
+      event: "reader_state_saved",
+      request_id: frame.request_id,
+      chat_id: "reader-chat",
+    });
+    await expect(promise).resolves.toBeUndefined();
+  });
+
   it("re-attaches workframes with the workframe protocol after reconnect", async () => {
     const workframeId = "22222222-2222-4222-8222-222222222222";
     const client = new NanobotClient({

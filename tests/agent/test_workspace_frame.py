@@ -7,7 +7,10 @@ from nanobot.agent.context import ContextBuilder
 from nanobot.agent.workspace_frame import (
     WorkspaceFrame,
     WorkspaceFrameActivation,
+    WorkspaceFrameAssemblyProfile,
+    WorkspaceFrameAssemblyRegistry,
     WorkspaceFrameBuilder,
+    WorkspaceFrameBuildInput,
     WorkspaceFrameFocus,
     WorkspaceFrameLifecycle,
     WorkspaceFrameMeta,
@@ -18,6 +21,11 @@ from nanobot.agent.workspace_frame import (
     WorkspaceFrameVisibility,
 )
 from nanobot.bus.events import InboundMessage
+from nanobot.config.schema import (
+    WorkframeConfig,
+    WorkframeModuleConfig,
+    WorkframeProfileConfig,
+)
 from nanobot.session.manager import Session
 
 
@@ -476,6 +484,59 @@ def test_builder_adds_recent_raw_default_to_partial_token_budget(tmp_path: Path)
     assert frame.meta.token_budget["other"] == 1
 
 
+def test_builder_applies_configured_profile_controls(tmp_path: Path) -> None:
+    workframe_config = WorkframeConfig(
+        profiles={
+            "generic": WorkframeProfileConfig(
+                modules={
+                    "tool.contract": WorkframeModuleConfig(enabled=False),
+                    "runtime.current": WorkframeModuleConfig(priority="low"),
+                },
+                recent_raw_token_budget=12,
+                response_mode="debug_frame",
+                depth="deep",
+                extra_should_do=["Prefer configured policy."],
+                extra_should_avoid=["Avoid disabled blocks."],
+            )
+        }
+    )
+    context = ContextBuilder(
+        workspace=tmp_path,
+        timezone="UTC",
+        workframe_config=workframe_config,
+    )
+    session = Session(key="cli:direct")
+    session.add_message("user", "old request with enough text to be truncated")
+    msg = InboundMessage(
+        channel="cli",
+        sender_id="direct",
+        chat_id="direct",
+        content="new request",
+    )
+
+    frame = WorkspaceFrameBuilder(context).build(
+        session=session,
+        history=session.get_history(include_timestamps=True),
+        msg=msg,
+        current_input="new request",
+        current_event_content="new request",
+        pending_summary=None,
+        runtime_lines=[],
+        workspace=tmp_path,
+        tool_names=["read_file"],
+    )
+
+    module_ids = {module.module_id for module in frame.modules}
+    assert "tool.contract" not in module_ids
+    runtime = next(module for module in frame.modules if module.module_id == "runtime.current")
+    assert runtime.activation.priority == "low"
+    assert frame.meta.token_budget["conversation.recent_raw"] == 12
+    assert frame.policy.response_mode == "debug_frame"
+    assert frame.policy.depth == "deep"
+    assert "Prefer configured policy." in frame.policy.should_do
+    assert "Avoid disabled blocks." in frame.policy.should_avoid
+
+
 def test_builder_adds_reading_scene_module(tmp_path: Path) -> None:
     context = ContextBuilder(workspace=tmp_path)
     session = Session("websocket:reading-chat")
@@ -523,12 +584,21 @@ def test_builder_adds_reading_scene_module(tmp_path: Path) -> None:
 
     reading = next(module for module in frame.modules if module.module_id == "scene.reading")
     assert reading.module_type == "scene"
-    assert reading.activation.priority == "high"
+    assert reading.activation.priority == "critical"
     assert reading.provenance.source == "webui.reading_shell"
     assert reading.content["snapshot"]["focus"]["focused_text"] == "Focused passage."
+    assert frame.focus.event_type == "reader_message"
+    assert frame.focus.active_topic == "Essay"
+    assert frame.focus.active_question == "What is happening here?"
+    assert frame.policy.response_mode == "task_execution"
+    assert (
+        "Use the focused passage, selected text, and note when they are relevant to the current input."
+        in frame.policy.should_do
+    )
+    assert "assembly_profile.reader" in frame.meta.builder_trace
 
     rendered = WorkspaceFrameRenderer().render(frame)
-    assert '<module id="scene.reading" type="scene" priority="high">' in rendered
+    assert '<module id="scene.reading" type="scene" priority="critical">' in rendered
     assert "current reading scene" in rendered
     assert "Focused passage." in rendered
 
@@ -556,3 +626,56 @@ def test_builder_omits_reading_scene_for_normal_message(tmp_path: Path) -> None:
     )
 
     assert all(module.module_id != "scene.reading" for module in frame.modules)
+
+
+def test_builder_uses_registered_surface_profile(tmp_path: Path) -> None:
+    class NotesProfile(WorkspaceFrameAssemblyProfile):
+        name = "notes"
+
+        def build_foreground_modules(
+            self,
+            builder: WorkspaceFrameBuilder,
+            _request: WorkspaceFrameBuildInput,
+            now: datetime,
+        ) -> list[WorkspaceFrameModule]:
+            return [
+                builder._module(
+                    "feature.notes",
+                    "feature",
+                    {"mode": "capture"},
+                    now,
+                    priority="critical",
+                    source="test.notes",
+                )
+            ]
+
+    context = ContextBuilder(workspace=tmp_path)
+    session = Session("websocket:notes-chat")
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="client-1",
+        chat_id="notes-chat",
+        content="capture this",
+        metadata={"surface": "notes"},
+    )
+    registry = WorkspaceFrameAssemblyRegistry([
+        WorkspaceFrameAssemblyProfile(),
+        NotesProfile(),
+    ])
+
+    frame = WorkspaceFrameBuilder(context, profiles=registry).build(
+        session=session,
+        history=[],
+        msg=msg,
+        current_input="capture this",
+        current_event_content={"text": "capture this", "media_count": 0},
+        pending_summary=None,
+        runtime_lines=[],
+        workspace=tmp_path,
+        tool_names=[],
+    )
+
+    notes = next(module for module in frame.modules if module.module_id == "feature.notes")
+    assert notes.provenance.source == "test.notes"
+    assert notes.content == {"mode": "capture"}
+    assert "assembly_profile.notes" in frame.meta.builder_trace

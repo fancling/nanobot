@@ -22,6 +22,20 @@ function normalizeWhitespace(value: string): string {
     .trim();
 }
 
+function toHex(bytes: ArrayBuffer): string {
+  return Array.from(new Uint8Array(bytes))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function stableEpubDocumentId(buffer: ArrayBuffer, title: string, fileName: string): Promise<string> {
+  if (crypto.subtle?.digest) {
+    const digest = await crypto.subtle.digest("SHA-256", buffer);
+    return `epub-sha256:${toHex(digest)}`;
+  }
+  return `epub:${title.trim().toLowerCase()}:${fileName.trim().toLowerCase()}`;
+}
+
 const BLOCK_BOUNDARY_ELEMENTS = new Set([
   "ADDRESS",
   "ARTICLE",
@@ -179,9 +193,10 @@ export async function importEpubDocument(file: File): Promise<ImportedReaderDocu
   }
 
   const rawText = normalizeWhitespace(sections.map((section) => section.rawText).join("\n\n"));
+  const documentId = await stableEpubDocumentId(buffer, title, file.name);
 
   return {
-    documentId: crypto.randomUUID(),
+    documentId,
     title,
     rawText,
     documentKind: "epub",

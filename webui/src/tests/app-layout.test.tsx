@@ -415,6 +415,7 @@ describe("App layout", () => {
     const readerMain = await screen.findByRole("main", { name: /reader page/i });
     expect(readerMain).toBeInTheDocument();
     expect(window.location.hash).toBe("#/reader");
+    expect(within(readerMain).getByText("Reading sessions")).toBeInTheDocument();
     expect(
       within(readerMain).getAllByRole("button", { name: "Import EPUB" })
         .some((button) => !button.hasAttribute("disabled")),
@@ -466,6 +467,77 @@ describe("App layout", () => {
       }),
     );
     expect(screen.getAllByRole("main")).toHaveLength(1);
+  });
+
+  it("creates an isolated reader session from a saved book", async () => {
+    createChatSpy.mockResolvedValueOnce("book-chat-new");
+    newWorkframeSpy.mockResolvedValueOnce("33333333-3333-4333-8333-333333333333");
+    window.localStorage.setItem(
+      `${READER_STATE_STORAGE_PREFIX}book-chat`,
+      JSON.stringify({
+        version: 1,
+        documentId: "book-1",
+        title: "Book",
+        rawText: "First paragraph.\n\nSecond paragraph.",
+        focusedParagraphIndex: 1,
+        selectedText: "selected",
+        note: "old note",
+        question: "old question",
+        mode: "slow_reading",
+        collapsed: false,
+        documentKind: "epub",
+        readerSession: true,
+        workframeId: "22222222-2222-4222-8222-222222222222",
+        sourceFileName: "book.epub",
+      }),
+    );
+    mockSessions = [
+      {
+        key: "websocket:book-chat",
+        channel: "websocket",
+        chatId: "book-chat",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        title: "Book",
+        preview: "Book",
+      },
+    ];
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Reader" }));
+    const readerMain = await screen.findByRole("main", { name: /reader page/i });
+    fireEvent.click(within(readerMain).getByRole("button", { name: "Open Reader book: Book" }));
+    fireEvent.click(
+      within(readerMain).getByRole("button", { name: "Create Reader session for book: Book" }),
+    );
+
+    await waitFor(() => expect(createChatSpy).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(newWorkframeSpy).toHaveBeenCalledTimes(1));
+    expect(newWorkframeSpy).toHaveBeenCalledWith(
+      expect.any(Number),
+      expect.objectContaining({ surface: "reader" }),
+    );
+    await waitFor(() =>
+      expect(window.location.hash).toBe("#/reader?chat=websocket%3Abook-chat-new"),
+    );
+    await waitFor(() =>
+      expect(JSON.parse(
+        window.localStorage.getItem(`${READER_STATE_STORAGE_PREFIX}book-chat-new`) ?? "null",
+      )).toMatchObject({
+        documentId: "book-1",
+        title: "Book",
+        focusedParagraphIndex: 1,
+        selectedText: "",
+        note: "",
+        question: "",
+        readerSession: true,
+        workframeId: "33333333-3333-4333-8333-333333333333",
+        sourceFileName: "book.epub",
+      }),
+    );
   });
 
   it("sends reader questions to the reader workframe", async () => {

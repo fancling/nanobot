@@ -47,6 +47,7 @@ from nanobot.webui.http_utils import (
     query_first as _query_first,
 )
 from nanobot.webui.mcp_presets_api import normalize_mcp_preset_mentions
+from nanobot.webui.reader_store import ReaderStoreError, write_reader_state
 from nanobot.webui.transcription_ws import webui_transcription_event
 from nanobot.webui.websocket_logging import websockets_server_logger
 
@@ -769,6 +770,46 @@ class WebSocketChannel(BaseChannel):
                 scope="metadata",
                 workspace_scope=scope.payload(),
             )
+            return
+        if t == "reader_state_update":
+            cid = envelope.get("chat_id")
+            request_id = envelope.get("request_id")
+            if not _is_valid_chat_id(cid):
+                await self._send_event(
+                    connection,
+                    "reader_state_error",
+                    request_id=request_id if isinstance(request_id, str) else None,
+                    detail="invalid chat_id",
+                )
+                return
+            try:
+                await asyncio.to_thread(write_reader_state, cid, envelope.get("state"))
+            except ReaderStoreError as exc:
+                await self._send_event(
+                    connection,
+                    "reader_state_error",
+                    request_id=request_id if isinstance(request_id, str) else None,
+                    chat_id=cid,
+                    detail=str(exc),
+                )
+                return
+            except OSError:
+                self.logger.warning("Failed to persist Reader state for {}", cid, exc_info=True)
+                await self._send_event(
+                    connection,
+                    "reader_state_error",
+                    request_id=request_id if isinstance(request_id, str) else None,
+                    chat_id=cid,
+                    detail="failed to save reader state",
+                )
+                return
+            await self._send_event(
+                connection,
+                "reader_state_saved",
+                request_id=request_id if isinstance(request_id, str) else None,
+                chat_id=cid,
+            )
+            await self._send_event(connection, "session_updated", chat_id=cid, scope="metadata")
             return
         if t == "transcribe_audio":
             event, payload = await webui_transcription_event(envelope)

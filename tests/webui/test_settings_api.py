@@ -20,6 +20,7 @@ from nanobot.webui.settings_api import (
     update_network_safety_settings,
     update_provider_settings,
     update_transcription_settings,
+    update_workframe_settings,
 )
 
 DYNAMIC_PROVIDER_NAME = "my-company-api"
@@ -400,6 +401,112 @@ def test_settings_payload_includes_exec_path_flags(
 
     assert payload["advanced"]["exec_path_prepend_set"] is True
     assert payload["advanced"]["exec_path_append_set"] is True
+
+
+def test_settings_payload_includes_workframe_profiles(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = settings_payload()
+
+    profiles = {profile["name"]: profile for profile in payload["workframe"]["profiles"]}
+    assert profiles["generic"]["response_mode"] == "task_execution"
+    assert profiles["reader"]["response_mode"] == "task_execution"
+    reader_modules = {module["id"]: module for module in profiles["reader"]["modules"]}
+    assert reader_modules["scene.reading"]["enabled"] is True
+    assert reader_modules["scene.reading"]["priority"] == "critical"
+    assert profiles["reader"]["model_parameters"]["model"] is None
+    assert profiles["reader"]["model_parameters"]["defaults"]["model"] == "anthropic/claude-opus-4-5"
+    assert profiles["reader"]["tool_filters"] == {
+        "enabled": True,
+        "allowlist": [],
+        "denylist": [],
+    }
+
+
+def test_update_workframe_settings_writes_profile_config(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = update_workframe_settings(
+        {
+            "profiles": [
+                {
+                    "name": "reader",
+                    "responseMode": "reading_debug",
+                    "depth": "deep",
+                    "recentRawTokenBudget": 1024,
+                    "modelParameters": {
+                        "model": "anthropic/claude-sonnet-4-5",
+                        "maxTokens": 4096,
+                        "temperature": 0.2,
+                        "reasoningEffort": "high",
+                        "contextWindowTokens": 262144,
+                    },
+                    "toolFilters": {
+                        "enabled": False,
+                        "allowlist": ["read_file", "web_fetch"],
+                        "denylist": ["exec"],
+                    },
+                    "extraShouldDo": ["Use focused passage first."],
+                    "extraShouldAvoid": ["Ignore stale history."],
+                    "modules": [
+                        {
+                            "id": "scene.reading",
+                            "enabled": True,
+                            "priority": "high",
+                        },
+                        {
+                            "id": "conversation.recent_raw",
+                            "enabled": False,
+                            "priority": "low",
+                        },
+                    ],
+                }
+            ]
+        }
+    )
+
+    assert payload["requires_restart"] is True
+    reader = next(
+        profile for profile in payload["workframe"]["profiles"] if profile["name"] == "reader"
+    )
+    modules = {module["id"]: module for module in reader["modules"]}
+    assert reader["response_mode"] == "reading_debug"
+    assert reader["recent_raw_token_budget"] == 1024
+    assert reader["model_parameters"]["model"] == "anthropic/claude-sonnet-4-5"
+    assert reader["model_parameters"]["max_tokens"] == 4096
+    assert reader["model_parameters"]["temperature"] == 0.2
+    assert reader["model_parameters"]["reasoning_effort"] == "high"
+    assert reader["model_parameters"]["context_window_tokens"] == 262144
+    assert reader["tool_filters"]["enabled"] is False
+    assert reader["tool_filters"]["allowlist"] == ["read_file", "web_fetch"]
+    assert reader["tool_filters"]["denylist"] == ["exec"]
+    assert modules["scene.reading"]["priority"] == "high"
+    assert modules["conversation.recent_raw"]["enabled"] is False
+
+    saved = load_config(config_path)
+    saved_reader = saved.agents.defaults.workframe.profiles["reader"]
+    assert saved_reader.response_mode == "reading_debug"
+    assert saved_reader.recent_raw_token_budget == 1024
+    assert saved_reader.model == "anthropic/claude-sonnet-4-5"
+    assert saved_reader.max_tokens == 4096
+    assert saved_reader.temperature == 0.2
+    assert saved_reader.reasoning_effort == "high"
+    assert saved_reader.context_window_tokens == 262144
+    assert saved_reader.tools_enabled is False
+    assert saved_reader.tool_allowlist == ["read_file", "web_fetch"]
+    assert saved_reader.tool_denylist == ["exec"]
+    assert saved_reader.modules["scene.reading"].priority == "high"
+    assert saved_reader.modules["conversation.recent_raw"].enabled is False
 
 
 def test_settings_payload_includes_effective_transcription_config(

@@ -36,6 +36,7 @@ from nanobot.webui.settings_api import (
     update_provider_settings,
     update_transcription_settings,
     update_web_search_settings,
+    update_workframe_settings,
 )
 from nanobot.webui.version_check import check_for_update
 
@@ -43,6 +44,8 @@ QueryParams = dict[str, list[str]]
 
 _MCP_VALUES_HEADER = "X-Nanobot-MCP-Values"
 _MCP_VALUES_HEADER_MAX_BYTES = 64 * 1024
+_WORKFRAME_VALUES_HEADER = "X-Nanobot-Workframe-Values"
+_WORKFRAME_VALUES_HEADER_MAX_BYTES = 64 * 1024
 
 _MCP_PRESET_ACTIONS_BY_PATH = {
     "/api/settings/mcp-presets/enable": "enable",
@@ -107,6 +110,8 @@ class WebUISettingsRouter:
             return self._handle_settings_transcription_update(request)
         if path == "/api/settings/network-safety/update":
             return self._handle_settings_network_safety_update(request)
+        if path == "/api/settings/workframe/update":
+            return self._handle_settings_workframe_update(request)
         if path == "/api/settings/cli-apps":
             return await self._handle_settings_cli_apps(request)
         if path == "/api/settings/cli-apps/install":
@@ -182,6 +187,20 @@ class WebUISettingsRouter:
                 merged[key] = [text]
         return merged
 
+    def _parse_workframe_settings_payload(self, request: WsRequest) -> dict[str, Any]:
+        raw = request.headers.get(_WORKFRAME_VALUES_HEADER)
+        if not raw:
+            raise WebUISettingsError("missing workframe settings payload")
+        if len(raw.encode("utf-8")) > _WORKFRAME_VALUES_HEADER_MAX_BYTES:
+            raise WebUISettingsError("workframe settings payload is too large")
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise WebUISettingsError("invalid workframe settings payload") from exc
+        if not isinstance(payload, dict):
+            raise WebUISettingsError("workframe settings payload must be a JSON object")
+        return payload
+
     def _handle_settings(self, request: WsRequest) -> Response:
         if not self._authorized(request):
             return self._unauthorized()
@@ -207,6 +226,15 @@ class WebUISettingsRouter:
         except WebUISettingsError as e:
             return self._error_response(e.status, e.message)
         return self._json_response(self._with_restart_state(payload, section="runtime"))
+
+    def _handle_settings_workframe_update(self, request: WsRequest) -> Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        try:
+            payload = update_workframe_settings(self._parse_workframe_settings_payload(request))
+        except WebUISettingsError as e:
+            return self._error_response(e.status, e.message)
+        return self._json_response(self._with_restart_state(payload, section="workframe"))
 
     def _handle_settings_model_configuration_create(self, request: WsRequest) -> Response:
         if not self._authorized(request):

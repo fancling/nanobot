@@ -66,6 +66,12 @@ from nanobot.webui.http_utils import (
     safe_host_header as _safe_host_header,
 )
 from nanobot.webui.media_gateway import WebUIMediaGateway
+from nanobot.webui.reader_store import (
+    delete_reader_state,
+    read_reader_state,
+    reader_chat_id_from_key,
+    reader_summary_for_chat_id,
+)
 from nanobot.webui.session_automations import (
     all_automations_payload,
     serialize_automation_jobs,
@@ -364,6 +370,10 @@ class GatewayHTTPHandler:
         if m:
             return self._handle_webui_thread_get(request, m.group(1))
 
+        m = re.match(r"^/api/sessions/([^/]+)/reader-state$", got)
+        if m:
+            return self._handle_reader_state(request, m.group(1))
+
         m = re.match(r"^/api/sessions/([^/]+)/file-preview$", got)
         if m:
             return self._handle_file_preview(request, m.group(1))
@@ -403,6 +413,9 @@ class GatewayHTTPHandler:
                 row["run_started_at"] = started_at
             scope = self.workspaces.scope_for_session_key(key)
             row["workspace_scope"] = scope.payload()
+            reader_summary = reader_summary_for_chat_id(chat_id)
+            if reader_summary is not None:
+                row["reader"] = reader_summary
             cleaned.append(row)
         return {"sessions": cleaned}
 
@@ -481,6 +494,25 @@ class GatewayHTTPHandler:
         data["workspace_scope"] = scope.payload()
         return _http_json_response(data)
 
+    def _handle_reader_state(self, request: WsRequest, key: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if self.session_manager is None:
+            return _http_error(503, "session manager unavailable")
+        decoded_key = _decode_api_key(key)
+        if decoded_key is None:
+            return _http_error(400, "invalid session key")
+        chat_id = reader_chat_id_from_key(decoded_key)
+        if chat_id is None:
+            return _http_error(404, "session not found")
+        method = str(getattr(request, "method", "GET")).upper()
+        if method not in {"GET", "HEAD"}:
+            return _http_error(405, "method not allowed")
+        state = read_reader_state(chat_id)
+        if state is None:
+            return _http_error(404, "reader state not found")
+        return _http_json_response({"state": state})
+
     def _handle_file_preview(self, request: WsRequest, key: str) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
@@ -543,7 +575,17 @@ class GatewayHTTPHandler:
             for job in automation_jobs:
                 self.cron_service.remove_job(job.id)
         deleted = self.session_manager.delete_session(decoded_key)
+        chat_id = decoded_key.split(":", 1)[1]
+        reader_state = read_reader_state(chat_id)
         delete_webui_thread(decoded_key)
+        if reader_state is not None:
+            workframe_id = reader_state.get("workframeId")
+            if isinstance(workframe_id, str) and workframe_id.strip():
+                workframe_key = f"workframe:{workframe_id.strip()}"
+                if self.workframe_session_manager is not None:
+                    self.workframe_session_manager.delete_session(workframe_key)
+                delete_webui_thread(f"websocket:{workframe_id.strip()}")
+            delete_reader_state(chat_id)
         return _http_json_response({"deleted": bool(deleted)})
 
     # -- Automation routes --------------------------------------------------

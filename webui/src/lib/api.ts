@@ -21,10 +21,12 @@ import type {
   SlashCommand,
   TranscriptionSettingsUpdate,
   WebSearchSettingsUpdate,
+  WorkframeSettingsUpdate,
   WorkspacesPayload,
   WebuiThreadPersistedPayload,
   WorkspaceScopePayload,
 } from "./types";
+import type { ReaderState } from "./reading";
 import { fetchWithTimeout } from "./http";
 
 const API_READ_TIMEOUT_MS = 20_000;
@@ -89,6 +91,10 @@ function mcpValuesHeader(values: Record<string, unknown>): HeadersInit | undefin
   return { "X-Nanobot-MCP-Values": JSON.stringify(payload) };
 }
 
+function workframeValuesHeader(values: WorkframeSettingsUpdate): HeadersInit {
+  return { "X-Nanobot-Workframe-Values": JSON.stringify(values) };
+}
+
 function automationValuesHeader(values: AutomationUpdatePayload): HeadersInit {
   return { "X-Nanobot-Automation-Values": encodeURIComponent(JSON.stringify(values)) };
 }
@@ -111,6 +117,7 @@ export async function listSessions(
     preview?: string;
     run_started_at?: number | null;
     workspace_scope?: WorkspaceScopePayload | null;
+    reader?: ChatSummary["reader"];
   };
   const body = await request<{ sessions: Row[] }>(
     `${base}/api/sessions`,
@@ -127,7 +134,27 @@ export async function listSessions(
     preview: s.preview ?? "",
     runStartedAt: s.run_started_at ?? null,
     workspaceScope: s.workspace_scope ?? null,
+    reader: s.reader ?? null,
   }));
+}
+
+export async function fetchReaderState(
+  token: string,
+  key: string,
+  base: string = "",
+): Promise<ReaderState | null> {
+  const res = await fetchWithTimeout(
+    `${base}/api/sessions/${encodeURIComponent(key)}/reader-state`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      credentials: "same-origin",
+    },
+    API_READ_TIMEOUT_MS,
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
+  const body = (await res.json()) as { state?: ReaderState | null };
+  return body.state ?? null;
 }
 
 /** Disk-backed WebUI display thread snapshot (separate from agent session). */
@@ -669,5 +696,17 @@ export async function updateTranscriptionSettings(
   return request<SettingsPayload>(
     `${base}/api/settings/transcription/update?${query}`,
     token,
+  );
+}
+
+export async function updateWorkframeSettings(
+  token: string,
+  update: WorkframeSettingsUpdate,
+  base: string = "",
+): Promise<SettingsPayload> {
+  return request<SettingsPayload>(
+    `${base}/api/settings/workframe/update`,
+    token,
+    { headers: workframeValuesHeader(update) },
   );
 }

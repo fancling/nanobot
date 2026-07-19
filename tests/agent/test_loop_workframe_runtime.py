@@ -9,10 +9,12 @@ import pytest
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.frame_request import FrameRequestAdapter
 from nanobot.agent.loop import AgentLoop, TurnRuntime
+from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.file_state import FileStateStore
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.config.schema import WorkframeConfig, WorkframeProfileConfig
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.session.manager import Session, SessionManager
 
@@ -27,13 +29,16 @@ class _Provider:
 
 
 class _Tools:
-    tool_names = ["read_file"]
+    tool_names = ["read_file", "web_fetch", "exec"]
 
     def get(self, _name: str):
         return None
 
     def get_definitions(self):
-        return []
+        return [
+            {"type": "function", "function": {"name": name, "parameters": {}}}
+            for name in self.tool_names
+        ]
 
 
 class _Commands:
@@ -160,7 +165,131 @@ def test_workframe_runtime_uses_isolated_session_and_memory_roots(tmp_path: Path
 
     assert loop.workframe.sessions.sessions_dir == tmp_path / "workframes" / "sessions"
     assert loop.workframe.context.memory.memory_dir == tmp_path / "workframes" / "memory"
+
+
+def test_workframe_run_overrides_use_surface_profile_config(tmp_path: Path) -> None:
+    loop = _loop(tmp_path)
+    loop.workframe_config = WorkframeConfig(
+        profiles={
+            "reader": WorkframeProfileConfig(
+                model="reader-model",
+                max_tokens=2048,
+                temperature=0.2,
+                reasoning_effort="high",
+                context_window_tokens=262144,
+            )
+        }
+    )
+
+    overrides = loop._workframe_run_overrides({"surface": "reader"})
+
+    assert overrides == {
+        "model": "reader-model",
+        "temperature": 0.2,
+        "max_tokens": 2048,
+        "reasoning_effort": "high",
+        "context_window_tokens": 262144,
+    }
+
+
+@pytest.mark.asyncio
+async def test_run_agent_loop_applies_workframe_run_overrides(tmp_path: Path) -> None:
+    loop = _loop(tmp_path)
+    captured = {}
+
+    async def _run(spec):
+        captured["spec"] = spec
+        return AgentRunResult(final_content="ok", messages=[])
+
+    loop.runner = SimpleNamespace(run=_run)
+    session = Session(key="workframe:frame-a")
+
+    await loop._run_agent_loop(
+        [{"role": "user", "content": "hello"}],
+        session=session,
+        metadata={"surface": "reader"},
+        session_key=session.key,
+        session_manager=loop.workframe.sessions,
+        run_overrides={
+            "model": "reader-model",
+            "temperature": 0.2,
+            "max_tokens": 2048,
+            "reasoning_effort": "high",
+            "context_window_tokens": 262144,
+        },
+    )
+
+    spec = captured["spec"]
+    assert spec.model == "reader-model"
+    assert spec.temperature == 0.2
+    assert spec.max_tokens == 2048
+    assert spec.reasoning_effort == "high"
+    assert spec.context_window_tokens == 262144
     assert loop.context.memory.memory_dir == tmp_path / "memory"
+
+
+@pytest.mark.asyncio
+async def test_run_agent_loop_applies_workframe_tool_filters(tmp_path: Path) -> None:
+    loop = _loop(tmp_path)
+    loop.workframe_config = WorkframeConfig(
+        profiles={
+            "reader": WorkframeProfileConfig(
+                tool_allowlist=["read_file", "web_fetch"],
+                tool_denylist=["web_fetch"],
+            )
+        }
+    )
+    captured = {}
+
+    async def _run(spec):
+        captured["spec"] = spec
+        return AgentRunResult(final_content="ok", messages=[])
+
+    loop.runner = SimpleNamespace(run=_run)
+    session = Session(key="workframe:frame-a")
+
+    await loop._run_agent_loop(
+        [{"role": "user", "content": "hello"}],
+        session=session,
+        metadata={"surface": "reader"},
+        session_key=session.key,
+        session_manager=loop.workframe.sessions,
+    )
+
+    spec = captured["spec"]
+    assert spec.tools.tool_names == ["read_file"]
+    assert [
+        schema["function"]["name"]
+        for schema in spec.tools.get_definitions()
+    ] == ["read_file"]
+
+
+@pytest.mark.asyncio
+async def test_run_agent_loop_can_disable_workframe_tools(tmp_path: Path) -> None:
+    loop = _loop(tmp_path)
+    loop.workframe_config = WorkframeConfig(
+        profiles={"reader": WorkframeProfileConfig(tools_enabled=False)}
+    )
+    captured = {}
+
+    async def _run(spec):
+        captured["spec"] = spec
+        return AgentRunResult(final_content="ok", messages=[])
+
+    loop.runner = SimpleNamespace(run=_run)
+    session = Session(key="workframe:frame-a")
+
+    await loop._run_agent_loop(
+        [{"role": "user", "content": "hello"}],
+        session=session,
+        metadata={"surface": "reader"},
+        session_key=session.key,
+        session_manager=loop.workframe.sessions,
+    )
+
+    spec = captured["spec"]
+    assert spec.tools.tool_names == []
+    assert spec.tools.get_definitions() == []
 
 
 def test_turn_runtime_selects_workframe_from_metadata(tmp_path: Path) -> None:

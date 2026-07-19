@@ -63,9 +63,11 @@ class ContextBuilder:
         timezone: str | None = None,
         disabled_skills: list[str] | None = None,
         memory_workspace: Path | None = None,
+        workframe_config: Any | None = None,
     ):
         self.workspace = workspace
         self.timezone = timezone
+        self.workframe_config = workframe_config
         self.memory = MemoryStore(memory_workspace or workspace)
         self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
 

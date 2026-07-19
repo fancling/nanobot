@@ -3,7 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Mapping
 
-from nanobot.agent.workspace_frame import WorkspaceFrameBuilder, WorkspaceFrameRenderer
+from nanobot.agent.workspace_frame import (
+    WorkspaceFrameAssemblyRegistry,
+    WorkspaceFrameBuilder,
+    WorkspaceFrameRenderer,
+)
 from nanobot.utils.image_generation_intent import image_generation_prompt
 
 
@@ -13,9 +17,10 @@ class FrameRequestAdapter:
         context: Any,
         builder: WorkspaceFrameBuilder | None = None,
         renderer: WorkspaceFrameRenderer | None = None,
+        profiles: WorkspaceFrameAssemblyRegistry | None = None,
     ) -> None:
         self.context = context
-        self.builder = builder or WorkspaceFrameBuilder(context)
+        self.builder = builder or WorkspaceFrameBuilder(context, profiles=profiles)
         self.renderer = renderer or WorkspaceFrameRenderer()
 
     def build_frame_only_messages(

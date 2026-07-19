@@ -234,6 +234,18 @@ export interface ChatSummary {
   /** Unix epoch seconds when this session currently has a turn in flight. */
   runStartedAt?: number | null;
   workspaceScope?: WorkspaceScopePayload | null;
+  reader?: ReaderSessionSummary | null;
+}
+
+export interface ReaderSessionSummary {
+  reader_session: boolean;
+  document_id: string;
+  title: string;
+  document_kind: "text" | "markdown" | "epub" | string;
+  source_file_name?: string;
+  workframe_id?: string;
+  active_section_index?: number;
+  focused_paragraph_index?: number | null;
 }
 
 export type WorkspaceAccessMode = "restricted" | "full";
@@ -464,6 +476,7 @@ export interface SettingsPayload {
     };
     unified_session: boolean;
   };
+  workframe: WorkframeSettingsPayload;
   usage?: {
     days: Array<{
       date: string;
@@ -524,10 +537,87 @@ export interface SettingsPayload {
     exec_path_append_set: boolean;
   };
   requires_restart: boolean;
-  restart_required_sections?: Array<"runtime" | "browser" | "image">;
+  restart_required_sections?: Array<"runtime" | "browser" | "image" | "workframe">;
   version?: {
     current: string;
   };
+}
+
+export type WorkframePriority = "critical" | "high" | "medium" | "low";
+
+export interface WorkframeModuleSettings {
+  id: string;
+  label: string;
+  description: string;
+  enabled: boolean;
+  default_enabled: boolean;
+  priority: WorkframePriority;
+  default_priority: WorkframePriority;
+}
+
+export interface WorkframeProfileSettings {
+  name: string;
+  label: string;
+  response_mode: string;
+  default_response_mode: string;
+  depth: string;
+  default_depth: string;
+  recent_raw_token_budget: number;
+  default_recent_raw_token_budget: number;
+  model_parameters: {
+    model: string | null;
+    max_tokens: number | null;
+    temperature: number | null;
+    reasoning_effort: string | null;
+    context_window_tokens: number | null;
+    defaults: {
+      model: string;
+      max_tokens: number;
+      temperature: number;
+      reasoning_effort: string | null;
+      context_window_tokens: number;
+    };
+  };
+  tool_filters: {
+    enabled: boolean;
+    allowlist: string[];
+    denylist: string[];
+  };
+  extra_should_do: string[];
+  extra_should_avoid: string[];
+  modules: WorkframeModuleSettings[];
+}
+
+export interface WorkframeSettingsPayload {
+  profiles: WorkframeProfileSettings[];
+}
+
+export interface WorkframeSettingsUpdate {
+  profiles: Array<{
+    name: string;
+    responseMode: string;
+    depth: string;
+    recentRawTokenBudget: number;
+    modelParameters: {
+      model: string | null;
+      maxTokens: number | null;
+      temperature: number | null;
+      reasoningEffort: string | null;
+      contextWindowTokens: number | null;
+    };
+    toolFilters: {
+      enabled: boolean;
+      allowlist: string[];
+      denylist: string[];
+    };
+    extraShouldDo: string[];
+    extraShouldAvoid: string[];
+    modules: Array<{
+      id: string;
+      enabled: boolean;
+      priority: WorkframePriority;
+    }>;
+  }>;
 }
 
 export interface AppPackageRef {
@@ -861,6 +951,8 @@ export type InboundEvent =
       detail?: string;
       provider?: string;
     }
+  | { event: "reader_state_saved"; request_id?: string; chat_id: string }
+  | { event: "reader_state_error"; request_id?: string; chat_id?: string; detail?: string }
   | { event: "error"; chat_id?: string; detail?: string; reason?: string };
 
 /** Base64-encoded image attached to an outbound ``message`` envelope.
@@ -970,6 +1062,7 @@ export type Outbound =
   | { type: "attach_workframe"; workframe_id: string }
   | { type: "set_workspace_scope"; chat_id: string; workspace_scope: WorkspaceScopePayload }
   | { type: "transcribe_audio"; request_id: string; data_url: string; duration_ms?: number }
+  | { type: "reader_state_update"; request_id: string; chat_id: string; state: unknown }
   | {
       type: "message";
       chat_id: string;

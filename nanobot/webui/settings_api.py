@@ -22,7 +22,12 @@ from nanobot.audio.transcription_registry import (
     transcription_provider_names,
 )
 from nanobot.config.loader import get_config_path, load_config, save_config
-from nanobot.config.schema import ModelPresetConfig, ProviderConfig
+from nanobot.config.schema import (
+    ModelPresetConfig,
+    ProviderConfig,
+    WorkframeModuleConfig,
+    WorkframeProfileConfig,
+)
 from nanobot.providers.image_generation import (
     get_image_gen_provider,
     image_gen_provider_names,
@@ -66,6 +71,7 @@ _BROWSER_RESTART_BEHAVIOR_BY_SECTION = {
     "providers": "none",
     "runtime": "engineRestart",
     "browser": "engineRestart",
+    "workframe": "engineRestart",
     "image": "engineRestart",
     "apps": "engineRestart",
     "advanced": "appRestart",
@@ -149,6 +155,207 @@ _MODEL_LIST_OFFICIAL_PROVIDERS = {
     "xiaomi_mimo",
     "zhipu",
 }
+
+_WORKFRAME_PRIORITIES = {"critical", "high", "medium", "low"}
+
+_WORKFRAME_PROFILE_DEFINITIONS: tuple[dict[str, Any], ...] = (
+    {
+        "name": "generic",
+        "label": "Generic",
+        "response_mode": "task_execution",
+        "depth": "medium",
+        "recent_raw_token_budget": 8_000,
+        "model": None,
+        "max_tokens": None,
+        "temperature": None,
+        "reasoning_effort": None,
+        "context_window_tokens": None,
+        "tools_enabled": True,
+        "tool_allowlist": (),
+        "tool_denylist": (),
+        "modules": (
+            {
+                "id": "self.identity",
+                "label": "Identity",
+                "description": "Bot identity, runtime platform, workspace path, and platform policy.",
+                "priority": "critical",
+            },
+            {
+                "id": "bootstrap.agents",
+                "label": "AGENTS.md",
+                "description": "Workspace-level operating instructions when AGENTS.md exists.",
+                "priority": "critical",
+            },
+            {
+                "id": "bootstrap.soul",
+                "label": "SOUL.md",
+                "description": "Workspace personality or behavior notes when SOUL.md exists.",
+                "priority": "critical",
+            },
+            {
+                "id": "bootstrap.user",
+                "label": "USER.md",
+                "description": "Workspace user preferences when USER.md exists.",
+                "priority": "critical",
+            },
+            {
+                "id": "tool.contract",
+                "label": "Tool contract",
+                "description": "Tool-use rules and expectations.",
+                "priority": "critical",
+            },
+            {
+                "id": "memory.long_term",
+                "label": "Long-term memory",
+                "description": "Persisted memory context from MEMORY.md.",
+                "priority": "high",
+            },
+            {
+                "id": "memory.recent_history",
+                "label": "Recent memory history",
+                "description": "Dream memory recent-history lines for continuity.",
+                "priority": "medium",
+            },
+            {
+                "id": "skills.always",
+                "label": "Always-on skills",
+                "description": "Full content for skills that are always active.",
+                "priority": "high",
+            },
+            {
+                "id": "skills.available",
+                "label": "Available skills",
+                "description": "Skill catalog summary available to the model.",
+                "priority": "medium",
+            },
+            {
+                "id": "conversation.recent_raw",
+                "label": "Recent raw conversation",
+                "description": "Uncompressed recent session messages, capped by the token budget.",
+                "priority": "high",
+            },
+            {
+                "id": "conversation.archived_summary",
+                "label": "Archived summary",
+                "description": "Compacted session summary when one is attached to the turn.",
+                "priority": "medium",
+            },
+            {
+                "id": "runtime.current",
+                "label": "Current runtime",
+                "description": "Current event, channel, chat id, session key, time, and runtime lines.",
+                "priority": "critical",
+            },
+            {
+                "id": "tool.available",
+                "label": "Available tools",
+                "description": "Tool names available for this turn.",
+                "priority": "high",
+            },
+        ),
+    },
+    {
+        "name": "reader",
+        "label": "Reader",
+        "response_mode": "task_execution",
+        "depth": "medium",
+        "recent_raw_token_budget": 8_000,
+        "model": None,
+        "max_tokens": None,
+        "temperature": None,
+        "reasoning_effort": None,
+        "context_window_tokens": None,
+        "tools_enabled": True,
+        "tool_allowlist": (),
+        "tool_denylist": (),
+        "modules": (
+            {
+                "id": "scene.reading",
+                "label": "Reading scene",
+                "description": "Current book, focused passage, note, selection, progress, and reader question.",
+                "priority": "critical",
+            },
+            {
+                "id": "self.identity",
+                "label": "Identity",
+                "description": "Bot identity, runtime platform, workspace path, and platform policy.",
+                "priority": "critical",
+            },
+            {
+                "id": "bootstrap.agents",
+                "label": "AGENTS.md",
+                "description": "Workspace-level operating instructions when AGENTS.md exists.",
+                "priority": "critical",
+            },
+            {
+                "id": "bootstrap.soul",
+                "label": "SOUL.md",
+                "description": "Workspace personality or behavior notes when SOUL.md exists.",
+                "priority": "critical",
+            },
+            {
+                "id": "bootstrap.user",
+                "label": "USER.md",
+                "description": "Workspace user preferences when USER.md exists.",
+                "priority": "critical",
+            },
+            {
+                "id": "tool.contract",
+                "label": "Tool contract",
+                "description": "Tool-use rules and expectations.",
+                "priority": "critical",
+            },
+            {
+                "id": "memory.long_term",
+                "label": "Long-term memory",
+                "description": "Persisted reader workframe memory context.",
+                "priority": "high",
+            },
+            {
+                "id": "memory.recent_history",
+                "label": "Recent memory history",
+                "description": "Reader workframe recent-history lines for continuity.",
+                "priority": "medium",
+            },
+            {
+                "id": "skills.always",
+                "label": "Always-on skills",
+                "description": "Full content for skills that are always active.",
+                "priority": "high",
+            },
+            {
+                "id": "skills.available",
+                "label": "Available skills",
+                "description": "Skill catalog summary available to the model.",
+                "priority": "medium",
+            },
+            {
+                "id": "conversation.recent_raw",
+                "label": "Recent raw conversation",
+                "description": "Uncompressed reader session messages, capped by the token budget.",
+                "priority": "high",
+            },
+            {
+                "id": "conversation.archived_summary",
+                "label": "Archived summary",
+                "description": "Compacted reader session summary when one is attached to the turn.",
+                "priority": "medium",
+            },
+            {
+                "id": "runtime.current",
+                "label": "Current runtime",
+                "description": "Current reader event, channel, chat id, session key, time, and runtime lines.",
+                "priority": "critical",
+            },
+            {
+                "id": "tool.available",
+                "label": "Available tools",
+                "description": "Tool names available for this reader turn.",
+                "priority": "high",
+            },
+        ),
+    },
+)
 
 
 class WebUISettingsError(ValueError):
@@ -881,6 +1088,7 @@ def settings_payload(
             },
             "unified_session": defaults.unified_session,
         },
+        "workframe": _workframe_settings_payload(config),
         "usage": token_usage_payload(timezone_name=defaults.timezone),
         "advanced": {
             "restrict_to_workspace": config.tools.restrict_to_workspace,
@@ -912,6 +1120,329 @@ def settings_usage_payload() -> dict[str, Any]:
     """Return the lightweight token usage slice for Overview refreshes."""
     config = load_config()
     return token_usage_payload(timezone_name=config.agents.defaults.timezone)
+
+
+def _workframe_profile_definition(name: str) -> dict[str, Any] | None:
+    for definition in _WORKFRAME_PROFILE_DEFINITIONS:
+        if definition["name"] == name:
+            return definition
+    return None
+
+
+def _workframe_module_definition(profile_definition: dict[str, Any], module_id: str) -> dict[str, Any] | None:
+    for module in profile_definition["modules"]:
+        if module["id"] == module_id:
+            return module
+    return None
+
+
+def _workframe_settings_payload(config: Any) -> dict[str, Any]:
+    configured_profiles = config.agents.defaults.workframe.profiles
+    try:
+        effective_preset = config.resolve_preset()
+    except Exception:
+        effective_preset = config.resolve_default_preset()
+    default_model_parameters = {
+        "model": effective_preset.model,
+        "max_tokens": effective_preset.max_tokens,
+        "temperature": effective_preset.temperature,
+        "reasoning_effort": effective_preset.reasoning_effort,
+        "context_window_tokens": effective_preset.context_window_tokens,
+    }
+    profiles: list[dict[str, Any]] = []
+    for profile_definition in _WORKFRAME_PROFILE_DEFINITIONS:
+        name = profile_definition["name"]
+        configured_profile = configured_profiles.get(name)
+        profiles.append(
+            {
+                "name": name,
+                "label": profile_definition["label"],
+                "response_mode": (
+                    configured_profile.response_mode
+                    if configured_profile and configured_profile.response_mode
+                    else profile_definition["response_mode"]
+                ),
+                "default_response_mode": profile_definition["response_mode"],
+                "depth": (
+                    configured_profile.depth
+                    if configured_profile and configured_profile.depth
+                    else profile_definition["depth"]
+                ),
+                "default_depth": profile_definition["depth"],
+                "recent_raw_token_budget": (
+                    configured_profile.recent_raw_token_budget
+                    if configured_profile
+                    and configured_profile.recent_raw_token_budget is not None
+                    else profile_definition["recent_raw_token_budget"]
+                ),
+                "default_recent_raw_token_budget": profile_definition["recent_raw_token_budget"],
+                "model_parameters": {
+                    "model": configured_profile.model if configured_profile else None,
+                    "max_tokens": configured_profile.max_tokens if configured_profile else None,
+                    "temperature": configured_profile.temperature if configured_profile else None,
+                    "reasoning_effort": configured_profile.reasoning_effort
+                    if configured_profile
+                    else None,
+                    "context_window_tokens": configured_profile.context_window_tokens
+                    if configured_profile
+                    else None,
+                    "defaults": dict(default_model_parameters),
+                },
+                "tool_filters": {
+                    "enabled": (
+                        configured_profile.tools_enabled
+                        if configured_profile and configured_profile.tools_enabled is not None
+                        else profile_definition["tools_enabled"]
+                    ),
+                    "allowlist": list(configured_profile.tool_allowlist)
+                    if configured_profile
+                    else list(profile_definition["tool_allowlist"]),
+                    "denylist": list(configured_profile.tool_denylist)
+                    if configured_profile
+                    else list(profile_definition["tool_denylist"]),
+                },
+                "extra_should_do": (
+                    list(configured_profile.extra_should_do) if configured_profile else []
+                ),
+                "extra_should_avoid": (
+                    list(configured_profile.extra_should_avoid) if configured_profile else []
+                ),
+                "modules": [
+                    _workframe_module_payload(configured_profile, module)
+                    for module in profile_definition["modules"]
+                ],
+            }
+        )
+    return {"profiles": profiles}
+
+
+def _workframe_module_payload(
+    configured_profile: WorkframeProfileConfig | None,
+    module_definition: dict[str, Any],
+) -> dict[str, Any]:
+    configured_module = None
+    if configured_profile is not None:
+        configured_module = configured_profile.modules.get(module_definition["id"])
+    enabled = configured_module.enabled if configured_module is not None else True
+    priority = (
+        configured_module.priority
+        if configured_module is not None and configured_module.priority
+        else module_definition["priority"]
+    )
+    return {
+        "id": module_definition["id"],
+        "label": module_definition["label"],
+        "description": module_definition["description"],
+        "enabled": enabled,
+        "default_enabled": True,
+        "priority": priority,
+        "default_priority": module_definition["priority"],
+    }
+
+
+def _validate_workframe_string_list(value: Any, field_name: str) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise WebUISettingsError(f"{field_name} must be a list")
+    result: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise WebUISettingsError(f"{field_name} must contain strings")
+        item = item.strip()
+        if item:
+            result.append(item)
+    return result
+
+
+def _workframe_optional_string(value: Any, field_name: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise WebUISettingsError(f"{field_name} must be a string")
+    value = value.strip()
+    return value or None
+
+
+def _workframe_optional_int(
+    value: Any,
+    field_name: str,
+    *,
+    minimum: int,
+    maximum: int,
+) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        raise WebUISettingsError(f"{field_name} must be an integer") from None
+    if parsed < minimum or parsed > maximum:
+        raise WebUISettingsError(f"{field_name} must be between {minimum} and {maximum}")
+    return parsed
+
+
+def _workframe_optional_float(
+    value: Any,
+    field_name: str,
+    *,
+    minimum: float,
+    maximum: float,
+) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        raise WebUISettingsError(f"{field_name} must be a number") from None
+    if parsed < minimum or parsed > maximum:
+        raise WebUISettingsError(f"{field_name} must be between {minimum:g} and {maximum:g}")
+    return parsed
+
+
+def update_workframe_settings(payload: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise WebUISettingsError("workframe settings payload must be an object")
+    raw_profiles = payload.get("profiles")
+    if not isinstance(raw_profiles, list):
+        raise WebUISettingsError("workframe profiles must be a list")
+
+    config = load_config()
+    next_profiles: dict[str, WorkframeProfileConfig] = dict(
+        config.agents.defaults.workframe.profiles
+    )
+
+    for raw_profile in raw_profiles:
+        if not isinstance(raw_profile, dict):
+            raise WebUISettingsError("workframe profile must be an object")
+        name = raw_profile.get("name")
+        if not isinstance(name, str):
+            raise WebUISettingsError("workframe profile name is required")
+        definition = _workframe_profile_definition(name)
+        if definition is None:
+            raise WebUISettingsError("unknown workframe profile")
+
+        configured_modules: dict[str, WorkframeModuleConfig] = {}
+        raw_modules = raw_profile.get("modules", [])
+        if not isinstance(raw_modules, list):
+            raise WebUISettingsError("workframe modules must be a list")
+        for raw_module in raw_modules:
+            if not isinstance(raw_module, dict):
+                raise WebUISettingsError("workframe module must be an object")
+            module_id = raw_module.get("id")
+            if not isinstance(module_id, str):
+                raise WebUISettingsError("workframe module id is required")
+            module_definition = _workframe_module_definition(definition, module_id)
+            if module_definition is None:
+                raise WebUISettingsError("unknown workframe module")
+            enabled = raw_module.get("enabled", True)
+            if not isinstance(enabled, bool):
+                raise WebUISettingsError("workframe module enabled must be a boolean")
+            priority = raw_module.get("priority", module_definition["priority"])
+            if not isinstance(priority, str) or priority not in _WORKFRAME_PRIORITIES:
+                raise WebUISettingsError("invalid workframe module priority")
+            configured_modules[module_id] = WorkframeModuleConfig(
+                enabled=enabled,
+                priority=priority,
+            )
+
+        raw_budget = raw_profile.get(
+            "recent_raw_token_budget",
+            raw_profile.get("recentRawTokenBudget", definition["recent_raw_token_budget"]),
+        )
+        try:
+            budget = int(raw_budget)
+        except (TypeError, ValueError):
+            raise WebUISettingsError("recent raw token budget must be an integer") from None
+        if budget < 0 or budget > 50_000:
+            raise WebUISettingsError("recent raw token budget must be between 0 and 50000")
+
+        response_mode = raw_profile.get("response_mode", raw_profile.get("responseMode"))
+        if response_mode is None:
+            response_mode = definition["response_mode"]
+        if not isinstance(response_mode, str) or not response_mode.strip():
+            raise WebUISettingsError("response mode is required")
+
+        depth = raw_profile.get("depth", definition["depth"])
+        if not isinstance(depth, str) or not depth.strip():
+            raise WebUISettingsError("depth is required")
+
+        raw_model_parameters = raw_profile.get("model_parameters", raw_profile.get("modelParameters", {}))
+        if raw_model_parameters is None:
+            raw_model_parameters = {}
+        if not isinstance(raw_model_parameters, dict):
+            raise WebUISettingsError("model parameters must be an object")
+
+        raw_tool_filters = raw_profile.get("tool_filters", raw_profile.get("toolFilters", {}))
+        if raw_tool_filters is None:
+            raw_tool_filters = {}
+        if not isinstance(raw_tool_filters, dict):
+            raise WebUISettingsError("tool filters must be an object")
+        tools_enabled = raw_tool_filters.get("enabled", raw_tool_filters.get("toolsEnabled", True))
+        if not isinstance(tools_enabled, bool):
+            raise WebUISettingsError("tool filters enabled must be a boolean")
+
+        next_profiles[name] = WorkframeProfileConfig(
+            modules=configured_modules,
+            tools_enabled=tools_enabled,
+            tool_allowlist=_validate_workframe_string_list(
+                raw_tool_filters.get("allowlist", raw_tool_filters.get("allowList")),
+                "tool_allowlist",
+            ),
+            tool_denylist=_validate_workframe_string_list(
+                raw_tool_filters.get("denylist", raw_tool_filters.get("denyList")),
+                "tool_denylist",
+            ),
+            model=_workframe_optional_string(
+                raw_model_parameters.get("model"),
+                "model",
+            ),
+            max_tokens=_workframe_optional_int(
+                raw_model_parameters.get("max_tokens", raw_model_parameters.get("maxTokens")),
+                "max_tokens",
+                minimum=1,
+                maximum=200_000,
+            ),
+            temperature=_workframe_optional_float(
+                raw_model_parameters.get("temperature"),
+                "temperature",
+                minimum=0,
+                maximum=2,
+            ),
+            reasoning_effort=_workframe_optional_string(
+                raw_model_parameters.get(
+                    "reasoning_effort",
+                    raw_model_parameters.get("reasoningEffort"),
+                ),
+                "reasoning_effort",
+            ),
+            context_window_tokens=_workframe_optional_int(
+                raw_model_parameters.get(
+                    "context_window_tokens",
+                    raw_model_parameters.get("contextWindowTokens"),
+                ),
+                "context_window_tokens",
+                minimum=4_096,
+                maximum=1_000_000,
+            ),
+            recent_raw_token_budget=budget,
+            response_mode=response_mode.strip(),
+            depth=depth.strip(),
+            extra_should_do=_validate_workframe_string_list(
+                raw_profile.get("extra_should_do", raw_profile.get("extraShouldDo")),
+                "extra_should_do",
+            ),
+            extra_should_avoid=_validate_workframe_string_list(
+                raw_profile.get("extra_should_avoid", raw_profile.get("extraShouldAvoid")),
+                "extra_should_avoid",
+            ),
+        )
+
+    if config.agents.defaults.workframe.profiles != next_profiles:
+        config.agents.defaults.workframe.profiles = next_profiles
+        save_config(config)
+        return settings_payload(requires_restart=True)
+    return settings_payload()
 
 
 def update_agent_settings(query: QueryParams) -> dict[str, Any]:
