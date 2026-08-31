@@ -162,15 +162,18 @@ class ContextBuilder:
         timezone: str | None = None,
         sender_id: str | None = None,
         supplemental_lines: Sequence[str] | None = None,
+        include_current_time: bool = True,
     ) -> str:
         """Build untrusted runtime metadata block appended after user content."""
-        lines = [f"Current Time: {current_time_str(timezone)}"]
+        lines = [f"Current Time: {current_time_str(timezone)}"] if include_current_time else []
         if channel and chat_id:
             lines += [f"Channel: {channel}", f"Chat ID: {chat_id}"]
         if sender_id:
             lines += [f"Sender ID: {sender_id}"]
         if supplemental_lines:
             lines.extend(supplemental_lines)
+        if not lines:
+            return ""
         return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines) + "\n" + ContextBuilder._RUNTIME_CONTEXT_END
 
     @staticmethod
@@ -186,6 +189,16 @@ class ContextBuilder:
             return [{"type": "text", "text": str(value)}]
 
         return _to_blocks(left) + _to_blocks(right)
+
+    @staticmethod
+    def _prepend_message_time(
+        content: str | list[dict[str, Any]],
+        message_time: str,
+    ) -> str | list[dict[str, Any]]:
+        prefix = f"[Message Time: {message_time}]"
+        if isinstance(content, str):
+            return f"{prefix}\n{content}" if content else prefix
+        return [{"type": "text", "text": prefix}, *content]
 
     def _load_bootstrap_files(self, workspace: Path | None = None) -> str:
         """Load all bootstrap files from workspace."""
@@ -244,17 +257,21 @@ class ContextBuilder:
             self.timezone,
             sender_id=sender_id,
             supplemental_lines=extra or None,
+            include_current_time=False,
         )
         user_content = self._build_user_content(current_message, media)
 
         # Merge runtime context and user content into a single user message
         # to avoid consecutive same-role messages that some providers reject.
-        # Runtime context is appended to keep the user-content prefix stable
-        # for prompt-cache hits (the context changes every turn due to time).
-        if isinstance(user_content, str):
-            merged = f"{user_content}\n\n{runtime_ctx}"
+        if runtime_ctx:
+            if isinstance(user_content, str):
+                merged = f"{user_content}\n\n{runtime_ctx}"
+            else:
+                merged = user_content + [{"type": "text", "text": runtime_ctx}]
         else:
-            merged = user_content + [{"type": "text", "text": runtime_ctx}]
+            merged = user_content
+        if current_role == "user":
+            merged = self._prepend_message_time(merged, current_time_str(self.timezone))
         messages = [
             {
                 "role": "system",

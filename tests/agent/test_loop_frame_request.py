@@ -69,7 +69,8 @@ def test_build_initial_messages_uses_cache_friendly_request(tmp_path: Path) -> N
     assert "old user text" in initial[1]["content"]
     assert "old assistant text" in initial[2]["content"]
     assert "new text" in initial[3]["content"]
-    assert "Current Time:" in initial[3]["content"]
+    assert initial[3]["content"].startswith("[Message Time:")
+    assert "Current Time:" not in initial[3]["content"]
     assert "old summary" in initial[0]["content"]
 
 
@@ -231,10 +232,11 @@ def test_build_initial_messages_preserves_structured_media_history_and_current_i
     assert initial[1]["content"][0]["image_url"]["url"].startswith("data:image/png;base64,")
     assert initial[1]["content"][0]["_meta"]["path"] == str(png)
     assert initial[1]["content"][1]["text"] == "caption text"
-    assert initial[1]["content"][2]["image_url"]["url"].startswith("data:image/png;base64,")
-    assert initial[1]["content"][2]["_meta"]["path"] == str(png)
-    assert initial[1]["content"][3]["text"] == "new text"
-    assert "Current Time:" in initial[1]["content"][4]["text"]
+    assert initial[1]["content"][2]["text"].startswith("[Message Time:")
+    assert initial[1]["content"][3]["image_url"]["url"].startswith("data:image/png;base64,")
+    assert initial[1]["content"][3]["_meta"]["path"] == str(png)
+    assert initial[1]["content"][4]["text"] == "new text"
+    assert "Current Time:" not in initial[1]["content"][5]["text"]
 
 
 def test_build_frame_initial_messages_embeds_system_history_in_frame(

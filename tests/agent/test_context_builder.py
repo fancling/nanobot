@@ -306,6 +306,71 @@ class TestBuildSystemPrompt:
 
 
 class TestBuildMessages:
+    def test_current_user_input_starts_with_local_message_time(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "nanobot.agent.context.current_time_str",
+            lambda timezone: f"2026-07-25 18:30 ({timezone})",
+        )
+        builder = _builder(tmp_path, timezone="Asia/Tokyo")
+
+        messages = builder.build_messages(
+            [],
+            "hello",
+            channel="cli",
+            chat_id="direct",
+        )
+
+        assert "Message Time" not in messages[0]["content"]
+        assert messages[-1]["content"].startswith(
+            "[Message Time: 2026-07-25 18:30 (Asia/Tokyo)]\nhello"
+        )
+        assert messages[-1]["content"].count("[Message Time:") == 1
+        assert "Current Time:" not in messages[-1]["content"]
+
+    def test_current_user_time_prefix_stays_with_new_input_when_user_roles_merge(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(
+            "nanobot.agent.context.current_time_str",
+            lambda _timezone: "2026-07-25 18:31 (Asia/Tokyo)",
+        )
+        builder = _builder(tmp_path, timezone="Asia/Tokyo")
+
+        messages = builder.build_messages(
+            [{"role": "user", "content": "previous input"}],
+            "current input",
+        )
+
+        content = messages[-1]["content"]
+        assert content.index("previous input") < content.index("[Message Time:")
+        assert content.index("[Message Time:") < content.index("current input")
+
+    def test_multimodal_current_input_starts_with_local_message_time(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(
+            "nanobot.agent.context.current_time_str",
+            lambda _timezone: "2026-07-25 18:32 (Asia/Tokyo)",
+        )
+        png = tmp_path / "img.png"
+        png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+        builder = _builder(tmp_path, timezone="Asia/Tokyo")
+
+        messages = builder.build_messages([], "check image", media=[str(png)])
+
+        content = messages[-1]["content"]
+        assert isinstance(content, list)
+        assert content[0] == {
+            "type": "text",
+            "text": "[Message Time: 2026-07-25 18:32 (Asia/Tokyo)]",
+        }
+        assert content[1]["type"] == "image_url"
+        assert content[2] == {"type": "text", "text": "check image"}
+
     def test_basic_empty_history(self, tmp_path):
         builder = _builder(tmp_path)
         messages = builder.build_messages([], "hello")

@@ -40,6 +40,7 @@ def test_adapter_builds_frame_only_messages(tmp_path: Path) -> None:
     assert "Runtime flag: active" not in system_content
     assert '"text": "current request"' not in system_content
     assert messages[1]["content"] == "current request"
+    assert "Message Time:" not in messages[1]["content"]
 
 
 def test_adapter_preserves_image_current_event_blocks(tmp_path: Path) -> None:
