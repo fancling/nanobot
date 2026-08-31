@@ -123,6 +123,62 @@ describe("ReaderMode", () => {
     expect(within(chatPanel).getByLabelText(/Reader chat message/i)).toHaveClass("min-h-14");
   });
 
+  it("preserves the reader chat scroll position across transcript refreshes and remounts", () => {
+    window.sessionStorage.clear();
+    const scrollHeightSpy = vi
+      .spyOn(HTMLElement.prototype, "scrollHeight", "get")
+      .mockImplementation(function scrollHeight() {
+        return this.dataset.testid === "reader-chat-scroll" ? 1_200 : 0;
+      });
+    const clientHeightSpy = vi
+      .spyOn(HTMLElement.prototype, "clientHeight", "get")
+      .mockImplementation(function clientHeight() {
+        return this.dataset.testid === "reader-chat-scroll" ? 300 : 0;
+      });
+
+    try {
+      const baseProps = {
+        state: state({ workframeId: "reader-workframe-1" }),
+        chatLoading: false,
+        isStreaming: false,
+        disabled: false,
+        persistenceFailed: false,
+        onChange: vi.fn(),
+        onClose: vi.fn(),
+        onSendReading: vi.fn(),
+      };
+      const initialMessages = [
+        message({ id: "u-1", role: "user", content: "First question", createdAt: 1 }),
+        message({ id: "a-1", role: "assistant", content: "First answer", createdAt: 2 }),
+      ];
+      const { rerender, unmount } = render(
+        <ReaderMode {...baseProps} messages={initialMessages} />,
+      );
+      const scrollArea = screen.getByTestId("reader-chat-scroll");
+      scrollArea.scrollTop = 260;
+      fireEvent.scroll(scrollArea);
+
+      rerender(
+        <ReaderMode
+          {...baseProps}
+          messages={[
+            ...initialMessages,
+            message({ id: "a-2", role: "assistant", content: "Refreshed answer", createdAt: 3 }),
+          ]}
+        />,
+      );
+      expect(scrollArea.scrollTop).toBe(260);
+
+      unmount();
+      render(<ReaderMode {...baseProps} messages={initialMessages} />);
+      expect(screen.getByTestId("reader-chat-scroll").scrollTop).toBe(260);
+    } finally {
+      scrollHeightSpy.mockRestore();
+      clientHeightSpy.mockRestore();
+      window.sessionStorage.clear();
+    }
+  });
+
   it("renders section controls and navigates sections", () => {
     const onChange = vi.fn();
     render(
@@ -538,7 +594,7 @@ describe("ReaderMode", () => {
     expect(screen.getByText("This paragraph sets the contrast.")).toBeInTheDocument();
   });
 
-  it("clears the local pending reader prompt after refreshed history adds an assistant reply", () => {
+  it("keeps the local prompt before live assistant output until canonical history includes it", () => {
     const { rerender } = render(
       <ReaderMode
         state={state({ focusedParagraphIndex: 1 })}
@@ -577,8 +633,15 @@ describe("ReaderMode", () => {
       />,
     );
 
-    expect(screen.queryByText("Waiting for response...")).not.toBeInTheDocument();
+    expect(screen.getByText("Waiting for response...")).toBeInTheDocument();
     expect(screen.getByText("Fresh answer from the model.")).toBeInTheDocument();
+    const renderedMessages = screen.getAllByText(
+      /聊聊这一段|Fresh answer from the model\./,
+    );
+    expect(renderedMessages[renderedMessages.length - 2]).toHaveTextContent("聊聊这一段");
+    expect(renderedMessages[renderedMessages.length - 1]).toHaveTextContent(
+      "Fresh answer from the model.",
+    );
   });
 
   it("keeps the local pending reader prompt visible while history refreshes", () => {

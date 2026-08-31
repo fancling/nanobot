@@ -20,6 +20,7 @@ _RAW_TEXT_MAX_CHARS = 5_000_000
 _TEXT_MAX = 20_000
 _SMALL_TEXT_MAX = 1_000
 _NOTE_MAX = 4_000
+_READER_BRIDGE_TEMPLATE_MAX = 20_000
 
 
 class ReaderStoreError(ValueError):
@@ -115,6 +116,16 @@ def _state(payload: Any) -> dict[str, Any]:
     workframe_id = _text(payload.get("workframeId"), 200).strip()
     if workframe_id:
         result["workframeId"] = workframe_id
+    companion_chat_id = _text(payload.get("companionChatId"), 64).strip()
+    if companion_chat_id:
+        result["companionChatId"] = companion_chat_id
+        result["companionChatTemporary"] = payload.get("companionChatTemporary") is True
+    companion_prompt_template = _text(
+        payload.get("companionPromptTemplate"),
+        _READER_BRIDGE_TEMPLATE_MAX,
+    )
+    if companion_prompt_template:
+        result["companionPromptTemplate"] = companion_prompt_template
     if sections:
         result["sections"] = sections
     return {key: value for key, value in result.items() if value is not None}

@@ -549,6 +549,10 @@ describe("NanobotClient", () => {
           current_question: "question",
         },
       },
+      readerChatBridge: {
+        chatId: "companion-chat",
+        promptTemplate: "Q={{user_prompt}}\nA={{reader_reply}}",
+      },
     });
 
     expect(JSON.parse(lastSocket().sent.at(-1) as string)).toEqual({
@@ -561,6 +565,10 @@ describe("NanobotClient", () => {
         scene: "reading",
         document: { id: "doc-1", title: "Book", kind: "markdown" },
       }),
+      reader_chat_bridge: {
+        chat_id: "companion-chat",
+        prompt_template: "Q={{user_prompt}}\nA={{reader_reply}}",
+      },
       webui: true,
     });
   });
@@ -972,6 +980,7 @@ describe("NanobotClient", () => {
     lastSocket().fakeOpen();
 
     client.sendMessage("chat-reading", "聊聊这一段", undefined, {
+      // @ts-expect-error Legacy readingSnapshot is not an ordinary message option.
       readingSnapshot: {
         version: 1,
         scene: "reading",
@@ -991,7 +1000,7 @@ describe("NanobotClient", () => {
           bad_response_risk: "avoid generic summary",
         },
       },
-    } as any);
+    });
 
     const sent = JSON.parse(lastSocket().sent.at(-1) ?? "{}");
     expect(sent.type).toBe("message");

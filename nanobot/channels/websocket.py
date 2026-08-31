@@ -18,7 +18,7 @@ from websockets.asyncio.server import ServerConnection, serve, unix_serve
 from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request as WsRequest
 
-from nanobot.bus.events import OUTBOUND_META_AGENT_UI, OutboundMessage
+from nanobot.bus.events import OUTBOUND_META_AGENT_UI, InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
@@ -47,6 +47,16 @@ from nanobot.webui.http_utils import (
     query_first as _query_first,
 )
 from nanobot.webui.mcp_presets_api import normalize_mcp_preset_mentions
+from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
+from nanobot.webui.reader_bridge import (
+    READER_BRIDGE_COMPANION_TURN_ID_KEY,
+    READER_BRIDGE_DISPATCH_METADATA_KEY,
+    READER_BRIDGE_METADATA_KEY,
+    ReaderBridgeError,
+    latest_persisted_reader_turn,
+    normalize_reader_bridge,
+    render_reader_bridge_prompt,
+)
 from nanobot.webui.reader_store import ReaderStoreError, write_reader_state
 from nanobot.webui.transcription_ws import webui_transcription_event
 from nanobot.webui.websocket_logging import websockets_server_logger
@@ -871,6 +881,18 @@ class WebSocketChannel(BaseChannel):
                         reason=str(exc),
                     )
                     return
+            try:
+                reader_bridge = normalize_reader_bridge(envelope.get("reader_chat_bridge"))
+            except ReaderBridgeError as exc:
+                await self._send_event(
+                    connection,
+                    "error",
+                    detail="reader_chat_bridge_rejected",
+                    reason=str(exc),
+                )
+                return
+            if reader_bridge is not None:
+                metadata[READER_BRIDGE_METADATA_KEY] = reader_bridge
 
             if raw_media is not None:
                 media_paths, reason = self._save_envelope_media(raw_media)
@@ -1040,6 +1062,65 @@ class WebSocketChannel(BaseChannel):
             )
             return None
 
+    async def _enqueue_reader_bridge_turn(self, msg: OutboundMessage) -> bool:
+        """Relay the persisted Reader turn; return whether a chat turn was queued."""
+        bridge = msg.metadata.get(READER_BRIDGE_METADATA_KEY)
+        if not isinstance(bridge, dict):
+            return False
+        workframe_sessions = self.gateway.workframe_session_manager
+        if workframe_sessions is None:
+            self.logger.warning("Reader chat bridge skipped: workframe sessions unavailable")
+            return False
+
+        workframe_id = str(msg.chat_id)
+        session = workframe_sessions.get_or_create(_workframe_session_key(workframe_id))
+        turn = latest_persisted_reader_turn(session.messages)
+        if turn is None:
+            self.logger.warning(
+                "Reader chat bridge skipped: no persisted turn for {}",
+                workframe_id,
+            )
+            return False
+
+        chat_id = bridge.get("chat_id")
+        prompt_template = bridge.get("prompt_template")
+        if not isinstance(chat_id, str) or not isinstance(prompt_template, str):
+            return False
+        user_prompt, reader_reply = turn
+        content = render_reader_bridge_prompt(
+            prompt_template,
+            user_prompt=user_prompt,
+            reader_reply=reader_reply,
+        )
+        companion_turn_metadata = self._transcripts.client_turn_metadata(None)
+        companion_turn_id = companion_turn_metadata[WEBUI_TURN_METADATA_KEY]
+        self._transcripts.append_user_message(
+            chat_id,
+            content,
+            metadata=companion_turn_metadata,
+        )
+        await self.bus.publish_inbound(
+            InboundMessage(
+                channel="websocket",
+                sender_id="reader",
+                # User-visible output and run-state events belong to Reader,
+                # while session history and ordinary context belong to chat_id.
+                chat_id=workframe_id,
+                content=content,
+                metadata={
+                    READER_BRIDGE_DISPATCH_METADATA_KEY: {
+                        "workframe_id": workframe_id,
+                        "chat_session_key": f"websocket:{chat_id}",
+                        READER_BRIDGE_COMPANION_TURN_ID_KEY: companion_turn_id,
+                    },
+                    "context_chat_id": chat_id,
+                    "surface": "reader_companion",
+                },
+                session_key_override=f"websocket:{chat_id}",
+            )
+        )
+        return True
+
     # -- Outbound WebSocket events -----------------------------------------
 
     async def stop(self) -> None:
@@ -1110,6 +1191,14 @@ class WebSocketChannel(BaseChannel):
             return
         # Signal that the agent has fully finished processing the current turn.
         if msg.metadata.get("_turn_end"):
+            dispatch = msg.metadata.get(READER_BRIDGE_DISPATCH_METADATA_KEY)
+            if not isinstance(dispatch, dict):
+                queued = await self._enqueue_reader_bridge_turn(msg)
+                if queued:
+                    # Refresh the first (Reader) answer now, but keep the
+                    # frontend turn open until the companion observation ends.
+                    await self.send_session_updated(msg.chat_id, scope="thread")
+                    return
             lat = msg.metadata.get("latency_ms")
             lat_i = int(lat) if isinstance(lat, (int, float)) else None
             gs = msg.metadata.get("goal_state")
@@ -1121,6 +1210,30 @@ class WebSocketChannel(BaseChannel):
                 metadata=msg.metadata,
             )
             await self.send_session_updated(msg.chat_id, scope="thread")
+            if isinstance(dispatch, dict):
+                companion_session_key = dispatch.get("chat_session_key")
+                if (
+                    isinstance(companion_session_key, str)
+                    and companion_session_key.startswith("websocket:")
+                ):
+                    companion_chat_id = companion_session_key.split(":", 1)[1]
+                    companion_turn_id = dispatch.get(
+                        READER_BRIDGE_COMPANION_TURN_ID_KEY
+                    )
+                    companion_metadata = (
+                        {WEBUI_TURN_METADATA_KEY: companion_turn_id}
+                        if isinstance(companion_turn_id, str) and companion_turn_id
+                        else None
+                    )
+                    await self.send_turn_end(
+                        companion_chat_id,
+                        latency_ms=lat_i,
+                        metadata=companion_metadata,
+                    )
+                    await self.send_session_updated(
+                        companion_chat_id,
+                        scope="thread",
+                    )
             return
         if msg.metadata.get("_session_updated"):
             if conns:
@@ -1181,10 +1294,41 @@ class WebSocketChannel(BaseChannel):
             transcript_overrides={"text": text},
         )
         raw = json.dumps(payload, ensure_ascii=False)
-        if not conns:
-            return
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" ")
+
+        if msg.metadata.get("_reader_companion_reply") is True:
+            companion_session_key = msg.metadata.get("companion_session_key")
+            if (
+                isinstance(companion_session_key, str)
+                and companion_session_key.startswith("websocket:")
+            ):
+                companion_chat_id = companion_session_key.split(":", 1)[1]
+                if companion_chat_id != msg.chat_id:
+                    companion_payload = dict(payload)
+                    companion_payload["chat_id"] = companion_chat_id
+                    companion_turn_id = msg.metadata.get(
+                        READER_BRIDGE_COMPANION_TURN_ID_KEY
+                    )
+                    companion_metadata = (
+                        {WEBUI_TURN_METADATA_KEY: companion_turn_id}
+                        if isinstance(companion_turn_id, str) and companion_turn_id
+                        else None
+                    )
+                    self._transcripts.prepare_and_append(
+                        companion_chat_id,
+                        companion_payload,
+                        metadata=companion_metadata,
+                        phase=phase,
+                        transcript_overrides={"text": text},
+                    )
+                    companion_raw = json.dumps(companion_payload, ensure_ascii=False)
+                    for connection in list(self._subs.get(companion_chat_id, ())):
+                        await self._safe_send_to(
+                            connection,
+                            companion_raw,
+                            label=" companion ",
+                        )
 
     async def send_reasoning_delta(
         self,

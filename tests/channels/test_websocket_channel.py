@@ -45,6 +45,13 @@ from nanobot.webui.http_utils import (
 from nanobot.webui.http_utils import (
     parse_request_path as _parse_request_path,
 )
+from nanobot.webui.reader_bridge import (
+    DEFAULT_READER_BRIDGE_TEMPLATE,
+    READER_BRIDGE_COMPANION_TURN_ID_KEY,
+    READER_BRIDGE_DISPATCH_METADATA_KEY,
+    READER_BRIDGE_METADATA_KEY,
+    READER_BRIDGE_SILENCE_MESSAGE,
+)
 from nanobot.webui.settings_api import settings_payload, update_provider_settings
 from nanobot.webui.transcript import append_transcript_object, read_transcript_lines
 
@@ -393,6 +400,135 @@ async def test_workframe_message_envelope_accepts_reading_snapshot_metadata(
     assert inbound.metadata["surface"] == "reader"
     assert inbound.metadata["reading_snapshot"]["scene"] == "reading"
     assert inbound.metadata["reading_snapshot"]["focus"]["focused_text"] == "Focused passage."
+
+
+@pytest.mark.asyncio
+async def test_workframe_message_envelope_accepts_reader_chat_bridge(
+    bus: MagicMock,
+) -> None:
+    channel = _ch(bus)
+    conn = MagicMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {
+            "type": "workframe_message",
+            "workframe_id": _READING_WORKFRAME_ID,
+            "content": "question",
+            "reader_chat_bridge": {"chat_id": "companion-chat"},
+        },
+    )
+
+    inbound = bus.publish_inbound.await_args.args[0]
+    assert inbound.metadata[READER_BRIDGE_METADATA_KEY] == {
+        "chat_id": "companion-chat",
+        "prompt_template": DEFAULT_READER_BRIDGE_TEMPLATE,
+    }
+
+
+@pytest.mark.asyncio
+async def test_reader_chat_bridge_enqueues_persisted_workframe_turn(tmp_path: Path) -> None:
+    bus = MessageBus()
+    workframe_sessions = SessionManager(tmp_path / "workframes")
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
+        bus,
+        gateway=_basic_handler(
+            bus,
+            workframe_session_manager=workframe_sessions,
+            workspace_path=tmp_path,
+        ),
+    )
+    session = workframe_sessions.get_or_create(f"workframe:{_READING_WORKFRAME_ID}")
+    session.add_message("user", "raw question")
+    session.add_message("assistant", "reader answer")
+    workframe_sessions.save(session)
+
+    await channel._enqueue_reader_bridge_turn(
+        OutboundMessage(
+            channel="websocket",
+            chat_id=_READING_WORKFRAME_ID,
+            content="",
+            metadata={
+                READER_BRIDGE_METADATA_KEY: {
+                    "chat_id": "companion-chat",
+                    "prompt_template": "Q={{user_prompt}}\nA={{reader_reply}}",
+                }
+            },
+        )
+    )
+
+    inbound = bus.inbound.get_nowait()
+    assert inbound.content == "Q=raw question\nA=reader answer"
+    assert inbound.chat_id == _READING_WORKFRAME_ID
+    assert inbound.session_key_override == "websocket:companion-chat"
+    dispatch = inbound.metadata[READER_BRIDGE_DISPATCH_METADATA_KEY]
+    companion_turn_id = dispatch[READER_BRIDGE_COMPANION_TURN_ID_KEY]
+
+    await channel.send(
+        OutboundMessage(
+            channel="websocket",
+            chat_id=_READING_WORKFRAME_ID,
+            content="companion answer",
+            metadata={
+                "_reader_companion_reply": True,
+                "companion_session_key": "websocket:companion-chat",
+                READER_BRIDGE_COMPANION_TURN_ID_KEY: companion_turn_id,
+            },
+        )
+    )
+    await channel.send(
+        OutboundMessage(
+            channel="websocket",
+            chat_id=_READING_WORKFRAME_ID,
+            content="",
+            metadata={
+                "_turn_end": True,
+                READER_BRIDGE_DISPATCH_METADATA_KEY: dispatch,
+            },
+        )
+    )
+
+    companion_lines = read_transcript_lines("websocket:companion-chat")
+    assert [line["event"] for line in companion_lines] == [
+        "user",
+        "message",
+        "turn_end",
+    ]
+    assert companion_lines[0]["text"] == "Q=raw question\nA=reader answer"
+    assert companion_lines[1]["text"] == "companion answer"
+    assert {
+        line["turn_id"] for line in companion_lines
+    } == {companion_turn_id}
+
+
+@pytest.mark.asyncio
+async def test_reader_skip_reflection_is_displayed_only_in_companion_transcript(
+    bus: MagicMock,
+) -> None:
+    channel = _ch(bus)
+    reflection = "I noticed the point, but the Reader response was already complete."
+    content = f"{READER_BRIDGE_SILENCE_MESSAGE}\n\n{reflection}"
+
+    await channel.send(
+        OutboundMessage(
+            channel="websocket",
+            chat_id="companion-chat",
+            content=content,
+            metadata={
+                "_reader_companion_silence": True,
+                "webui_turn_id": "reader-skip-turn-1",
+            },
+        )
+    )
+
+    [line] = read_transcript_lines("websocket:companion-chat")
+    assert line["event"] == "message"
+    assert line["text"] == content
+    assert line["turn_id"] == "reader-skip-turn-1"
+    assert read_transcript_lines(f"workframe:{_READING_WORKFRAME_ID}") == []
 
 
 @pytest.mark.asyncio

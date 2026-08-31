@@ -2013,9 +2013,29 @@ function Shell({
                       client.sendWorkframeMessage(workframeId, content, {
                         surface: "reader",
                         readingSnapshot: snapshot,
+                        ...(state.companionChatId?.trim()
+                          ? {
+                              readerChatBridge: {
+                                chatId: state.companionChatId.trim(),
+                                ...(state.companionPromptTemplate
+                                  ? { promptTemplate: state.companionPromptTemplate }
+                                  : {}),
+                              },
+                            }
+                          : {}),
                         ...(activeWorkspaceScope ? { workspaceScope: activeWorkspaceScope } : {}),
                       });
                     })();
+                  }}
+                  onCreateCompanionChat={async () => {
+                    const chatId = await createChat(activeWorkspaceScope);
+                    if (activeWorkspaceScope) {
+                      setWorkspaceOverrides((current) => ({
+                        ...current,
+                        [chatId]: normalizeWorkspaceScope(activeWorkspaceScope),
+                      }));
+                    }
+                    return chatId;
                   }}
                   onBackToChat={onBackToChat}
                   onOpenSession={onSelectChat}

@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ReaderPage } from "@/components/reader/ReaderPage";
+import { useNanobotStream } from "@/hooks/useNanobotStream";
 import type { ReaderState } from "@/lib/reading";
 import type { ChatSummary, UIMessage } from "@/lib/types";
 import { useSessionHistory } from "@/hooks/useSessions";
@@ -9,6 +10,10 @@ import { useClient } from "@/providers/ClientProvider";
 
 vi.mock("@/hooks/useSessions", () => ({
   useSessionHistory: vi.fn(),
+}));
+
+vi.mock("@/hooks/useNanobotStream", () => ({
+  useNanobotStream: vi.fn(),
 }));
 
 vi.mock("@/providers/ClientProvider", () => ({
@@ -39,6 +44,7 @@ function state(overrides: Partial<ReaderState> = {}): ReaderState {
 
 describe("ReaderPage", () => {
   const useSessionHistoryMock = vi.mocked(useSessionHistory);
+  const useNanobotStreamMock = vi.mocked(useNanobotStream);
   const useClientMock = vi.mocked(useClient);
 
   afterEach(() => {
@@ -71,6 +77,18 @@ describe("ReaderPage", () => {
       forkBoundaryMessageCount: null,
       hasPendingToolCalls: false,
     });
+    useNanobotStreamMock.mockImplementation((_chatId, initialMessages = []) => ({
+      messages: initialMessages,
+      isStreaming: false,
+      runStartedAt: null,
+      goalState: undefined,
+      send: vi.fn(),
+      transcribeAudio: vi.fn(),
+      stop: vi.fn(),
+      setMessages: vi.fn(),
+      streamError: null,
+      dismissStreamError: vi.fn(),
+    }));
   });
 
   it("renders an empty reader page without an active book", () => {
@@ -237,6 +255,70 @@ describe("ReaderPage", () => {
     );
   });
 
+  it("selects an existing or newly-created companion chat", async () => {
+    const onChange = vi.fn();
+    const onCreateCompanionChat = vi.fn().mockResolvedValue("new-companion");
+    const sessions: ChatSummary[] = [
+      {
+        key: "websocket:existing-companion",
+        channel: "websocket",
+        chatId: "existing-companion",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        title: "Existing companion",
+        preview: "",
+      },
+    ];
+    const { rerender } = render(
+      <ReaderPage
+        state={state()}
+        readerSessions={sessions}
+        disabled={false}
+        persistenceFailed={false}
+        onChange={onChange}
+        onImportEpub={vi.fn()}
+        onSendReading={vi.fn()}
+        onBackToChat={vi.fn()}
+        onCreateCompanionChat={onCreateCompanionChat}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Companion chat"), {
+      target: { value: "existing-companion" },
+    });
+    expect(onChange).toHaveBeenCalledWith({
+      companionChatId: "existing-companion",
+      companionChatTemporary: false,
+    });
+
+    rerender(
+      <ReaderPage
+        state={state({ companionChatId: "existing-companion" })}
+        readerSessions={sessions}
+        disabled={false}
+        persistenceFailed={false}
+        onChange={onChange}
+        onImportEpub={vi.fn()}
+        onSendReading={vi.fn()}
+        onBackToChat={vi.fn()}
+        onCreateCompanionChat={onCreateCompanionChat}
+      />,
+    );
+    expect(screen.getByText(/Companion input wrapper/)).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText("Companion chat"), {
+        target: { value: "__new_companion__" },
+      });
+      await Promise.resolve();
+    });
+    expect(onCreateCompanionChat).toHaveBeenCalledOnce();
+    expect(onChange).toHaveBeenCalledWith({
+      companionChatId: "new-companion",
+      companionChatTemporary: true,
+    });
+  });
+
   it("renders the active workframe history in the reader chat", () => {
     const messages: UIMessage[] = [
       { id: "u-1", role: "user", content: "Explain this image", createdAt: 1 },
@@ -272,6 +354,52 @@ describe("ReaderPage", () => {
     const chatPanel = screen.getByRole("complementary", { name: /reader chat/i });
     expect(chatPanel).toHaveTextContent("Explain this image");
     expect(chatPanel).toHaveTextContent("The passage is contrasting memory and place.");
+  });
+
+  it("renders live workframe thinking and answer deltas before history refreshes", () => {
+    useNanobotStreamMock.mockReturnValue({
+      messages: [{
+        id: "a-live",
+        role: "assistant",
+        content: "The answer is arriving",
+        reasoning: "Following the passage context",
+        reasoningStreaming: true,
+        isStreaming: true,
+        createdAt: 2,
+      }],
+      isStreaming: true,
+      runStartedAt: 1,
+      goalState: undefined,
+      send: vi.fn(),
+      transcribeAudio: vi.fn(),
+      stop: vi.fn(),
+      setMessages: vi.fn(),
+      streamError: null,
+      dismissStreamError: vi.fn(),
+    });
+
+    render(
+      <ReaderPage
+        state={state()}
+        disabled={false}
+        persistenceFailed={false}
+        onChange={vi.fn()}
+        onImportEpub={vi.fn()}
+        onSendReading={vi.fn()}
+        onBackToChat={vi.fn()}
+      />,
+    );
+
+    expect(useNanobotStreamMock).toHaveBeenCalledWith(
+      "11111111-1111-4111-8111-111111111111",
+      [],
+      false,
+      expect.any(Function),
+    );
+    const chatPanel = screen.getByRole("complementary", { name: /reader chat/i });
+    expect(chatPanel).toHaveTextContent("Following the passage context");
+    expect(chatPanel).toHaveTextContent("The answer is arriving");
+    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
   });
 
   it("does not read reader history from the ordinary chat session without a workframe", () => {

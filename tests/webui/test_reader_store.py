@@ -22,6 +22,9 @@ def _payload() -> dict[str, object]:
         "documentKind": "epub",
         "readerSession": True,
         "workframeId": "frame-1",
+        "companionChatId": "chat-companion",
+        "companionChatTemporary": True,
+        "companionPromptTemplate": "Q={{user_prompt}}\nA={{reader_reply}}",
         "sourceFileName": "book.epub",
         "activeSectionIndex": 2,
         "sections": [
@@ -48,6 +51,9 @@ def test_write_read_and_summarize_reader_state() -> None:
     assert saved["readerSession"] is True
     assert saved["focusedParagraphIndex"] == 1
     assert saved["workframeId"] == "frame-1"
+    assert saved["companionChatId"] == "chat-companion"
+    assert saved["companionChatTemporary"] is True
+    assert saved["companionPromptTemplate"] == "Q={{user_prompt}}\nA={{reader_reply}}"
     assert reader_store.read_reader_state("chat-a") == saved
     assert reader_store.reader_summary_for_chat_id("chat-a") == {
         "reader_session": True,

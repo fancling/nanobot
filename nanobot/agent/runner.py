@@ -113,6 +113,8 @@ class AgentRunSpec:
     goal_active_predicate: Callable[[], bool] | None = None
     goal_continue_message: GoalContinueMessage | None = None
     finalize_on_max_iterations: bool = True
+    tool_choice: str | dict[str, Any] | None = None
+    terminal_tool_names: frozenset[str] = frozenset()
 
 
 @dataclass(slots=True)
@@ -499,6 +501,18 @@ class AgentRunner:
                         "pending_tool_calls": [],
                     },
                 )
+                terminal_tool_called = any(
+                    tool_call.name in spec.terminal_tool_names
+                    and event.get("status") == "ok"
+                    for tool_call, event in zip(response.tool_calls, new_events)
+                )
+                if terminal_tool_called:
+                    context.final_content = final_content
+                    context.stop_reason = stop_reason
+                    if hook.wants_streaming():
+                        await hook.on_stream_end(context, resuming=False)
+                    await hook.after_iteration(context)
+                    break
                 empty_content_retries = 0
                 length_recovery_count = 0
                 # Checkpoint 1: drain injections after tools, before next LLM call
@@ -714,6 +728,8 @@ class AgentRunner:
             kwargs["max_tokens"] = spec.max_tokens
         if spec.reasoning_effort is not None:
             kwargs["reasoning_effort"] = spec.reasoning_effort
+        if tools and spec.tool_choice is not None:
+            kwargs["tool_choice"] = spec.tool_choice
         return kwargs
 
     async def _request_model(

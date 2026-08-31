@@ -28,6 +28,10 @@ from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.helpers import strip_think, truncate_text
 from nanobot.utils.llm_runtime import LLMRuntime
+from nanobot.webui.reader_bridge import (
+    READER_BRIDGE_DISPATCH_METADATA_KEY,
+    READER_BRIDGE_METADATA_KEY,
+)
 
 WEBUI_SESSION_METADATA_KEY = "webui"
 WEBUI_TITLE_METADATA_KEY = "title"
@@ -204,6 +208,14 @@ async def publish_turn_run_status(
 ) -> None:
     """Notify WebSocket clients while a user turn is executing (timing strip)."""
     if msg.channel != "websocket":
+        return
+    if (
+        status == "idle"
+        and READER_BRIDGE_METADATA_KEY in msg.metadata
+        and READER_BRIDGE_DISPATCH_METADATA_KEY not in msg.metadata
+    ):
+        # The companion observation is the second phase of the same visible
+        # Reader turn. Its own idle event closes the run after optional reply.
         return
     cid = str(msg.chat_id)
     meta: dict[str, Any] = {

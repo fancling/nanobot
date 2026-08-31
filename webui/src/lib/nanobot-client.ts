@@ -464,6 +464,10 @@ export class NanobotClient {
       workspaceScope?: WorkspaceScopePayload | null;
       turnId?: string;
       readingSnapshot?: ReadingSnapshot;
+      readerChatBridge?: {
+        chatId: string;
+        promptTemplate?: string;
+      };
     },
   ): void {
     this.knownWorkframes.add(workframeId);
@@ -476,6 +480,16 @@ export class NanobotClient {
       ...(options?.workspaceScope ? { workspace_scope: options.workspaceScope } : {}),
       ...(options?.turnId ? { turn_id: options.turnId } : {}),
       ...(options?.readingSnapshot ? { reading_snapshot: options.readingSnapshot } : {}),
+      ...(options?.readerChatBridge
+        ? {
+            reader_chat_bridge: {
+              chat_id: options.readerChatBridge.chatId,
+              ...(options.readerChatBridge.promptTemplate
+                ? { prompt_template: options.readerChatBridge.promptTemplate }
+                : {}),
+            },
+          }
+        : {}),
       webui: true,
     });
   }

@@ -1,6 +1,15 @@
 import type { ReadingSnapshot } from "@/lib/types";
 
 export const READER_STATE_STORAGE_PREFIX = "nanobot.webui.readerShell.v1:";
+export const DEFAULT_READER_COMPANION_PROMPT_TEMPLATE = `The following exchange just happened between this user and a Reader sub-persona.
+
+<reader_user>
+{{user_prompt}}
+</reader_user>
+
+<reader_assistant>
+{{reader_reply}}
+</reader_assistant>`;
 
 export interface ReaderParagraph {
   id: string;
@@ -32,6 +41,9 @@ export interface ReaderState {
   readerModeOpen?: boolean;
   readerSession?: boolean;
   workframeId?: string;
+  companionChatId?: string;
+  companionChatTemporary?: boolean;
+  companionPromptTemplate?: string;
   sourceFileName?: string;
   sections?: ReaderSection[];
   activeSectionIndex?: number;
@@ -145,6 +157,10 @@ function parseReaderStatePayload(parsed: unknown): ReaderState | null {
 
   const readerSession = maybe.readerSession === true;
   const workframeId = normalizeText(maybe.workframeId);
+  const companionChatId = normalizeText(maybe.companionChatId);
+  const companionPromptTemplate = typeof maybe.companionPromptTemplate === "string"
+    ? maybe.companionPromptTemplate
+    : "";
   const sourceFileName = normalizeText(maybe.sourceFileName);
   const sections = normalizeReaderSections(maybe.sections);
 
@@ -166,6 +182,9 @@ function parseReaderStatePayload(parsed: unknown): ReaderState | null {
     readerModeOpen: maybe.readerModeOpen === true,
     readerSession,
     workframeId: workframeId || undefined,
+    companionChatId: companionChatId || undefined,
+    companionChatTemporary: maybe.companionChatTemporary === true,
+    companionPromptTemplate: companionPromptTemplate || undefined,
     sourceFileName: sourceFileName || undefined,
     sections,
     activeSectionIndex: normalizeInt(maybe.activeSectionIndex, 0),

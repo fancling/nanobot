@@ -3,9 +3,11 @@ import { ArrowLeft, BookOpen, ChevronRight, FileText, Plus, Trash2, Upload } fro
 
 import { ReaderMode } from "@/components/thread/reader/ReaderMode";
 import { Button } from "@/components/ui/button";
+import { useNanobotStream } from "@/hooks/useNanobotStream";
 import { useSessionHistory } from "@/hooks/useSessions";
 import type { StreamError } from "@/lib/nanobot-client";
 import {
+  DEFAULT_READER_COMPANION_PROMPT_TEMPLATE,
   getActiveReaderText,
   isReaderSessionState,
   loadReaderStateResult,
@@ -29,6 +31,7 @@ interface ReaderPageProps {
   onOpenSession?: (key: string) => void;
   onCreateSessionFromBook?: (sourceSessionKey: string) => void;
   onRequestDeleteSession?: (key: string, label: string) => void;
+  onCreateCompanionChat?: () => Promise<string>;
 }
 
 interface ReaderSessionItem {
@@ -226,20 +229,35 @@ export function ReaderPage({
   onOpenSession,
   onCreateSessionFromBook,
   onRequestDeleteSession,
+  onCreateCompanionChat,
 }: ReaderPageProps) {
   const { client } = useClient();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const appliedHistoryVersionRef = useRef<Map<string, number>>(new Map());
   const [streamError, setStreamError] = useState<StreamError | null>(null);
   const [selectedBookId, setSelectedBookId] = useState<string | null>(null);
+  const [companionCreating, setCompanionCreating] = useState(false);
+  const [workframeRunning, setWorkframeRunning] = useState(false);
   const workframeId = state?.workframeId?.trim() || null;
   const historyKey = workframeId ? `websocket:${workframeId}` : null;
   const {
-    messages,
+    messages: historicalMessages,
     loading: chatLoading,
     refresh: refreshHistory,
+    version: historyVersion,
     hasPendingToolCalls,
   } = useSessionHistory(historyKey);
   const activeWorkframeId = workframeId;
+  const {
+    messages,
+    isStreaming: liveStreaming,
+    setMessages,
+  } = useNanobotStream(
+    activeWorkframeId,
+    historicalMessages,
+    hasPendingToolCalls,
+    refreshHistory,
+  );
   const shellClassName = "flex min-h-0 flex-1 flex-col bg-background";
   const bookGroups = useMemo(
     () => readerLibraryGroups(readerSessions, titleOverrides, readerMarkerVersion),
@@ -258,6 +276,47 @@ export function ReaderPage({
       refreshHistory();
     });
   }, [activeWorkframeId, client, refreshHistory]);
+
+  useEffect(() => {
+    if (
+      !activeWorkframeId
+      || chatLoading
+      || liveStreaming
+      || workframeRunning
+    ) return;
+    const appliedVersion = appliedHistoryVersionRef.current.get(activeWorkframeId) ?? -1;
+    if (historyVersion <= appliedVersion) return;
+    appliedHistoryVersionRef.current.set(activeWorkframeId, historyVersion);
+    setMessages(historicalMessages);
+  }, [
+    activeWorkframeId,
+    chatLoading,
+    historicalMessages,
+    historyVersion,
+    liveStreaming,
+    setMessages,
+    workframeRunning,
+  ]);
+
+  useEffect(() => {
+    if (!activeWorkframeId) {
+      setWorkframeRunning(false);
+      return;
+    }
+    if (
+      typeof client.getRunStartedAt !== "function"
+      || typeof client.onRunStatus !== "function"
+    ) {
+      setWorkframeRunning(false);
+      return;
+    }
+    setWorkframeRunning(client.getRunStartedAt(activeWorkframeId) != null);
+    return client.onRunStatus((chatId, startedAt) => {
+      if (chatId === activeWorkframeId) {
+        setWorkframeRunning(startedAt != null);
+      }
+    });
+  }, [activeWorkframeId, client]);
 
   useEffect(() => {
     setStreamError(null);
@@ -294,6 +353,15 @@ export function ReaderPage({
   );
 
   if (state) {
+    const companionChatId = state.companionChatId?.trim() || "";
+    const companionSession = readerSessions.find(
+      (session) => session.chatId === companionChatId,
+    );
+    const companionLabel = companionSession
+      ? companionSession.title?.trim() || fallbackSessionTitle(companionSession)
+      : companionChatId
+        ? `Chat ${companionChatId.slice(0, 6)}`
+        : "";
     return (
     <main aria-label="Reader page" className={shellClassName}>
       <header className="flex items-center justify-between gap-3 border-b border-border bg-muted/20 px-4 py-3">
@@ -318,6 +386,49 @@ export function ReaderPage({
         </div>
 
         <div className="flex items-center gap-2">
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span className="hidden sm:inline">Companion</span>
+            <select
+              aria-label="Companion chat"
+              className="h-9 max-w-48 rounded-md border border-input bg-background px-2 text-sm text-foreground"
+              value={companionChatId}
+              disabled={disabled || companionCreating}
+              onChange={(event) => {
+                const next = event.currentTarget.value;
+                if (next === "__new_companion__") {
+                  if (!onCreateCompanionChat) return;
+                  setCompanionCreating(true);
+                  void onCreateCompanionChat()
+                    .then((chatId) => {
+                      onChange({
+                        companionChatId: chatId,
+                        companionChatTemporary: true,
+                      });
+                    })
+                    .catch(() => undefined)
+                    .finally(() => setCompanionCreating(false));
+                  return;
+                }
+                onChange({
+                  companionChatId: next || undefined,
+                  companionChatTemporary: false,
+                });
+              }}
+            >
+              <option value="">Off</option>
+              {companionChatId && !companionSession ? (
+                <option value={companionChatId}>{companionLabel}</option>
+              ) : null}
+              {readerSessions.map((session) => (
+                <option key={session.key} value={session.chatId}>
+                  {session.title?.trim() || fallbackSessionTitle(session)}
+                </option>
+              ))}
+              {onCreateCompanionChat ? (
+                <option value="__new_companion__">New temporary chat…</option>
+              ) : null}
+            </select>
+          </label>
           <Button
             type="button"
             variant="outline"
@@ -331,6 +442,39 @@ export function ReaderPage({
           {importInput}
         </div>
       </header>
+      {companionChatId ? (
+        <details className="border-b border-border bg-muted/10 px-4 py-2">
+          <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+            Companion input wrapper · {companionLabel}
+          </summary>
+          <div className="mt-2 space-y-2">
+            <textarea
+              aria-label="Companion input wrapper"
+              className="min-h-36 w-full resize-y rounded-md border border-input bg-background p-2 font-mono text-xs text-foreground"
+              value={
+                state.companionPromptTemplate
+                ?? DEFAULT_READER_COMPANION_PROMPT_TEMPLATE
+              }
+              onChange={(event) => {
+                onChange({ companionPromptTemplate: event.currentTarget.value });
+              }}
+            />
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-muted-foreground">
+                Keep both {"{{user_prompt}}"} and {"{{reader_reply}}"} placeholders.
+              </p>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => onChange({ companionPromptTemplate: undefined })}
+              >
+                Reset wrapper
+              </Button>
+            </div>
+          </div>
+        </details>
+      ) : null}
       {persistenceFailed ? (
         <p className="px-4 py-2 text-xs text-muted-foreground">
           Reader draft persistence is unavailable in this browser context.
@@ -340,7 +484,12 @@ export function ReaderPage({
         state={state}
         messages={messages}
         chatLoading={chatLoading}
-        isStreaming={hasPendingToolCalls || messages.some((message) => message.isStreaming)}
+        isStreaming={
+          workframeRunning
+          || liveStreaming
+          || hasPendingToolCalls
+          || messages.some((message) => message.isStreaming)
+        }
         disabled={disabled}
         persistenceFailed={persistenceFailed}
         streamError={streamError}

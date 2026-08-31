@@ -29,6 +29,7 @@ from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
 from nanobot.agent.tools.file_state import FileStateStore, bind_file_states, reset_file_states
 from nanobot.agent.tools.message import MessageTool
+from nanobot.agent.tools.reader_reply import ReaderReplyTool, ReaderSkipTool
 from nanobot.agent.tools.registry import FilteredToolRegistry, ToolRegistry
 from nanobot.agent.tools.self import MyTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
@@ -66,6 +67,12 @@ from nanobot.utils.image_generation_intent import image_generation_prompt
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.runtime import (
     EMPTY_FINAL_RESPONSE_MESSAGE,
+)
+from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
+from nanobot.webui.reader_bridge import (
+    READER_BRIDGE_COMPANION_TURN_ID_KEY,
+    READER_BRIDGE_DISPATCH_METADATA_KEY,
+    READER_BRIDGE_SILENCE_MESSAGE,
 )
 
 if TYPE_CHECKING:
@@ -327,6 +334,7 @@ class AgentLoop:
         # When a session has an active task, new messages for that session
         # are routed here instead of creating a new task.
         self._pending_queues: dict[str, asyncio.Queue] = {}
+        self._reader_bridge_active_sessions: set[str] = set()
         self._cron_turns = CronTurnCoordinator(
             publish_inbound=self.bus.publish_inbound,
             dispatch=self._dispatch,
@@ -373,6 +381,11 @@ class AgentLoop:
         if model_preset:
             self.set_model_preset(model_preset, publish_update=False)
         self._register_default_tools()
+        self._reader_reply_tool = ReaderReplyTool(
+            send_callback=self.bus.publish_outbound,
+            workframe_sessions=self.workframe.sessions,
+        )
+        self._reader_skip_tool = ReaderSkipTool(self._reader_reply_tool)
         self._runtime_vars: dict[str, Any] = {}
         self._current_iteration: int = 0
         self.commands = CommandRouter()
@@ -919,6 +932,25 @@ class AgentLoop:
             enabled=tools_enabled is not False,
         )
 
+    def _reader_bridge_tools(self) -> ToolRegistry:
+        """Return the deliberately tiny tool surface for an observation turn."""
+        registry = ToolRegistry()
+        tool = getattr(self, "_reader_reply_tool", None)
+        if not isinstance(tool, ReaderReplyTool):
+            tool = ReaderReplyTool(
+                send_callback=self.bus.publish_outbound,
+                workframe_sessions=self.workframe.sessions,
+            )
+            self._reader_reply_tool = tool
+        tool.start_turn()
+        registry.register(tool)
+        skip_tool = getattr(self, "_reader_skip_tool", None)
+        if not isinstance(skip_tool, ReaderSkipTool):
+            skip_tool = ReaderSkipTool(tool)
+            self._reader_skip_tool = skip_tool
+        registry.register(skip_tool)
+        return registry
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
@@ -1055,6 +1087,10 @@ class AgentLoop:
 
         session_metadata = session.metadata if session is not None else None
         run_overrides = run_overrides or {}
+        reader_bridge_turn = isinstance(
+            (metadata or {}).get(READER_BRIDGE_DISPATCH_METADATA_KEY),
+            dict,
+        )
         active_tools = tools or self.tools
         if tools is None:
             active_tools = self._workframe_tools_for_metadata(metadata, active_tools)
@@ -1083,7 +1119,7 @@ class AgentLoop:
                 stream_progress_deltas=on_stream is not None,
                 retry_wait_callback=on_retry_wait,
                 checkpoint_callback=_checkpoint,
-                injection_callback=_drain_pending,
+                injection_callback=None if reader_bridge_turn else _drain_pending,
                 # Sustained goals may legitimately exceed NANOBOT_LLM_TIMEOUT_S; idle stall
                 # is still capped by NANOBOT_STREAM_IDLE_TIMEOUT_S in streaming providers.
                 llm_timeout_s=runner_wall_llm_timeout_s(
@@ -1099,6 +1135,9 @@ class AgentLoop:
                     session_metadata=session_metadata,
                     message_metadata=metadata,
                 ),
+                terminal_tool_names=frozenset({"reader_reply", "reader_skip"})
+                if reader_bridge_turn
+                else frozenset(),
             ))
         finally:
             reset_workspace_scope(workspace_token)
@@ -1168,18 +1207,27 @@ class AgentLoop:
                     effective_key,
                 )
                 continue
-            # If this session already has an active pending queue (i.e. a task
-            # is processing this session), route the message there for mid-turn
-            # injection instead of creating a competing task.
-            if effective_key in self._pending_queues:
-                # Non-priority commands must not be queued for injection;
-                # dispatch them directly (same pattern as priority commands).
-                if allow_command_shortcuts and self.commands.is_dispatchable_command(raw):
-                    await self._dispatch_command_inline(
-                        msg, effective_key, raw,
-                        self.commands.dispatch,
-                    )
-                    continue
+            if (
+                effective_key in self._pending_queues
+                and allow_command_shortcuts
+                and self.commands.is_dispatchable_command(raw)
+            ):
+                await self._dispatch_command_inline(
+                    msg, effective_key, raw,
+                    self.commands.dispatch,
+                )
+                continue
+            # Reader observations must keep their own tools, metadata, and reply
+            # destination. Neither inject them into another turn nor inject
+            # normal follow-ups into an observation; dispatch waits on the lock.
+            reader_bridge_turn = isinstance(
+                msg.metadata.get(READER_BRIDGE_DISPATCH_METADATA_KEY), dict,
+            )
+            if (
+                effective_key in self._pending_queues
+                and not reader_bridge_turn
+                and effective_key not in getattr(self, "_reader_bridge_active_sessions", ())
+            ):
                 pending_msg = msg
                 if effective_key != msg.session_key:
                     pending_msg = dataclasses.replace(
@@ -1215,6 +1263,9 @@ class AgentLoop:
         session_key = self._effective_session_key(msg)
         if session_key != msg.session_key:
             msg = dataclasses.replace(msg, session_key_override=session_key)
+        reader_bridge_turn = isinstance(
+            msg.metadata.get(READER_BRIDGE_DISPATCH_METADATA_KEY), dict,
+        )
         lock = self._session_locks.setdefault(session_key, asyncio.Lock())
         gate = self._concurrency_gate or nullcontext()
 
@@ -1225,6 +1276,8 @@ class AgentLoop:
                 # active mid-turn injection queue for this session.
                 pending = asyncio.Queue(maxsize=20)
                 self._pending_queues[session_key] = pending
+                if reader_bridge_turn:
+                    self._reader_bridge_active_sessions.add(session_key)
                 try:
                     on_stream = on_stream_end = None
                     if msg.metadata.get("_wants_stream"):
@@ -1336,6 +1389,8 @@ class AgentLoop:
                     queue = None
                     if self._pending_queues.get(session_key) is pending:
                         queue = self._pending_queues.pop(session_key, None)
+                        if reader_bridge_turn:
+                            self._reader_bridge_active_sessions.discard(session_key)
                     else:
                         queue = pending
                     if queue is not None:
@@ -1529,6 +1584,19 @@ class AgentLoop:
             )
 
         key = session_key or msg.session_key
+        on_retry_wait: Callable[[str], Awaitable[None]] | None = None
+        reader_bridge_turn = isinstance(
+            msg.metadata.get(READER_BRIDGE_DISPATCH_METADATA_KEY),
+            dict,
+        )
+        if reader_bridge_turn and tools is None:
+            tools = self._reader_bridge_tools()
+        if reader_bridge_turn:
+            async def _silent_reader_bridge_progress(*_args: Any, **_kwargs: Any) -> None:
+                return None
+
+            on_progress = on_progress or _silent_reader_bridge_progress
+            on_retry_wait = _silent_reader_bridge_progress
         runtime = self._turn_runtime_for_message(msg)
         t0 = time.time()
         ctx = TurnContext(
@@ -1545,9 +1613,11 @@ class AgentLoop:
             on_progress=on_progress,
             on_stream=on_stream,
             on_stream_end=on_stream_end,
+            on_retry_wait=on_retry_wait,
             pending_queue=pending_queue,
             ephemeral=ephemeral,
             tools=tools,
+            suppress_response=reader_bridge_turn,
         )
 
         while ctx.state is not TurnState.DONE:
@@ -1823,6 +1893,10 @@ class AgentLoop:
     async def _state_save(self, ctx: TurnContext) -> str:
         runtime = self._runtime_for_context(ctx)
         turn_continuation.prepare_save_boundary(ctx)
+        reader_bridge_turn = isinstance(
+            ctx.msg.metadata.get(READER_BRIDGE_DISPATCH_METADATA_KEY),
+            dict,
+        )
 
         if (
             (ctx.final_content is None or not ctx.final_content.strip())
@@ -1837,10 +1911,95 @@ class AgentLoop:
             else ctx.turn_wall_started_at
         )
         ctx.turn_latency_ms = max(0, int((time.time() - latency_started_at) * 1000))
-        self._save_turn(
-            ctx.session, ctx.all_messages, ctx.save_skip,
-            turn_latency_ms=ctx.turn_latency_ms,
-        )
+        if reader_bridge_turn:
+            reply_tool = ctx.tools.get("reader_reply") if ctx.tools is not None else None
+            dispatch = ctx.msg.metadata.get(READER_BRIDGE_DISPATCH_METADATA_KEY)
+            if (
+                isinstance(reply_tool, ReaderReplyTool)
+                and reply_tool.decision() is None
+                and ctx.stop_reason == "completed"
+                and ctx.final_content
+                and ctx.final_content.strip()
+                and isinstance(dispatch, dict)
+            ):
+                workframe_id = dispatch.get("workframe_id")
+                companion_session_key = dispatch.get("chat_session_key")
+                companion_turn_id = dispatch.get(READER_BRIDGE_COMPANION_TURN_ID_KEY)
+                if isinstance(workframe_id, str) and workframe_id:
+                    result = await reply_tool.deliver(
+                        ctx.final_content,
+                        workframe_id=workframe_id,
+                        companion_session_key=companion_session_key
+                        if isinstance(companion_session_key, str)
+                        else None,
+                        companion_turn_id=companion_turn_id
+                        if isinstance(companion_turn_id, str)
+                        else None,
+                    )
+                    if result.startswith("Error"):
+                        logger.warning(
+                            "Reader companion natural reply delivery failed for {}: {}",
+                            ctx.session_key,
+                            result,
+                        )
+            reply = reply_tool.sent_content() if isinstance(reply_tool, ReaderReplyTool) else None
+            if reply:
+                ctx.session.add_message(
+                    "assistant",
+                    reply,
+                    reader_companion_reply=True,
+                    latency_ms=ctx.turn_latency_ms,
+                )
+            elif isinstance(reply_tool, ReaderReplyTool) and reply_tool.decision() == "skip":
+                skip_content = reply_tool.skip_content()
+                silence_message = (
+                    f"{READER_BRIDGE_SILENCE_MESSAGE}\n\n{skip_content}"
+                    if skip_content
+                    else READER_BRIDGE_SILENCE_MESSAGE
+                )
+                ctx.session.add_message(
+                    "assistant",
+                    silence_message,
+                    reader_companion_silence=True,
+                    latency_ms=ctx.turn_latency_ms,
+                )
+                if isinstance(dispatch, dict):
+                    companion_session_key = dispatch.get("chat_session_key")
+                    companion_turn_id = dispatch.get(
+                        READER_BRIDGE_COMPANION_TURN_ID_KEY
+                    )
+                    if (
+                        isinstance(companion_session_key, str)
+                        and companion_session_key.startswith("websocket:")
+                    ):
+                        silence_metadata: dict[str, Any] = {
+                            "_reader_companion_silence": True,
+                            "latency_ms": ctx.turn_latency_ms,
+                        }
+                        if isinstance(companion_turn_id, str) and companion_turn_id:
+                            silence_metadata.update({
+                                READER_BRIDGE_COMPANION_TURN_ID_KEY:
+                                    companion_turn_id,
+                                WEBUI_TURN_METADATA_KEY: companion_turn_id,
+                            })
+                        await self.bus.publish_outbound(
+                            OutboundMessage(
+                                channel="websocket",
+                                chat_id=companion_session_key.split(":", 1)[1],
+                                content=silence_message,
+                                metadata=silence_metadata,
+                            )
+                        )
+            else:
+                logger.warning(
+                    "Reader companion turn ended without reader_reply or reader_skip for {}",
+                    ctx.session_key,
+                )
+        else:
+            self._save_turn(
+                ctx.session, ctx.all_messages, ctx.save_skip,
+                turn_latency_ms=ctx.turn_latency_ms,
+            )
         self._runtime_events().record_turn_latency(
             ctx.session_key,
             ctx.turn_latency_ms,

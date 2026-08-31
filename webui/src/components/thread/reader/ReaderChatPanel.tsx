@@ -1,4 +1,11 @@
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import {
+  type FormEvent,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { ArrowUp, Bot, X } from "lucide-react";
 
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
@@ -16,6 +23,34 @@ import type { ReadingSnapshot, UIMessage } from "@/lib/types";
 type PendingReaderPrompt = UIMessage & {
   baselineMessageCount: number;
 };
+
+const READER_CHAT_SCROLL_STORAGE_PREFIX = "nanobot-webui.reader-chat.scroll.v1:";
+const READER_CHAT_NEAR_BOTTOM_PX = 32;
+
+interface ReaderChatScrollMetrics {
+  top: number;
+  height: number;
+  viewportHeight: number;
+}
+
+function readStoredScrollTop(key: string): number | null {
+  try {
+    const stored = window.sessionStorage.getItem(key);
+    if (stored === null) return null;
+    const value = Number(stored);
+    return Number.isFinite(value) && value >= 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function storeScrollTop(key: string, top: number): void {
+  try {
+    window.sessionStorage.setItem(key, String(Math.max(0, Math.round(top))));
+  } catch {
+    // Reader chat still works when session storage is unavailable.
+  }
+}
 
 interface ReaderChatPanelProps {
   state: ReaderState;
@@ -46,6 +81,9 @@ export function ReaderChatPanel({
 }: ReaderChatPanelProps) {
   const [draft, setDraft] = useState("");
   const [pendingPrompt, setPendingPrompt] = useState<PendingReaderPrompt | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const scrollMetricsRef = useRef<ReaderChatScrollMetrics | null>(null);
+  const restoredScrollKeyRef = useRef<string | null>(null);
   const paragraphs = useMemo(() => parseReaderParagraphs(state.rawText), [state.rawText]);
   const activeParagraphIndex = state.focusedParagraphIndex === null
     ? null
@@ -53,16 +91,55 @@ export function ReaderChatPanel({
       ? Math.max(0, Math.min(state.focusedParagraphIndex, paragraphs.length - 1))
       : 0;
   const focused = activeParagraphIndex === null ? undefined : paragraphs[activeParagraphIndex];
-  const canSend = paragraphs.length > 0 && !disabled;
-  const displayMessages = pendingPrompt ? [...messages, pendingPrompt] : messages;
+  const canSend = paragraphs.length > 0 && !disabled && !isStreaming;
+  const displayMessages = pendingPrompt
+    ? [
+        ...messages.slice(0, pendingPrompt.baselineMessageCount),
+        pendingPrompt,
+        ...messages.slice(pendingPrompt.baselineMessageCount),
+      ]
+    : messages;
+  const scrollStorageKey = `${READER_CHAT_SCROLL_STORAGE_PREFIX}${
+    state.workframeId?.trim() || state.documentId
+  }`;
+
+  useLayoutEffect(() => {
+    const element = scrollRef.current;
+    if (!element) return;
+
+    const previous = scrollMetricsRef.current;
+    const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
+    if (restoredScrollKeyRef.current !== scrollStorageKey) {
+      if (loading) return;
+      const storedTop = readStoredScrollTop(scrollStorageKey);
+      element.scrollTop = storedTop === null
+        ? 0
+        : Math.min(storedTop, maxScrollTop);
+      restoredScrollKeyRef.current = scrollStorageKey;
+    } else if (previous) {
+      const wasNearBottom =
+        previous.height - previous.top - previous.viewportHeight <= READER_CHAT_NEAR_BOTTOM_PX;
+      element.scrollTop = wasNearBottom
+        ? maxScrollTop
+        : Math.min(previous.top, maxScrollTop);
+    }
+
+    scrollMetricsRef.current = {
+      top: element.scrollTop,
+      height: element.scrollHeight,
+      viewportHeight: element.clientHeight,
+    };
+    storeScrollTop(scrollStorageKey, element.scrollTop);
+  }, [displayMessages, loading, scrollStorageKey]);
 
   useEffect(() => {
     if (!pendingPrompt) return;
-    const promptInHistory = messages.some(
+    const promptInHistory = messages
+      .slice(pendingPrompt.baselineMessageCount)
+      .some(
       (message) => message.role === "user" && message.content === pendingPrompt.content,
     );
-    const historyAdvanced = messages.length > pendingPrompt.baselineMessageCount;
-    if (promptInHistory || historyAdvanced) {
+    if (promptInHistory) {
       setPendingPrompt(null);
     }
   }, [messages, pendingPrompt]);
@@ -73,7 +150,7 @@ export function ReaderChatPanel({
 
   const send = (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
-    if (paragraphs.length === 0 || disabled) return;
+    if (!canSend) return;
     const question = draft.trim() || (focused ? "聊聊这一段" : "聊聊这本书");
     const nextState: ReaderState = {
       ...state,
@@ -147,7 +224,20 @@ export function ReaderChatPanel({
         ) : null}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
+      <div
+        ref={scrollRef}
+        data-testid="reader-chat-scroll"
+        className="min-h-0 flex-1 overflow-y-auto px-3 py-2"
+        onScroll={(event) => {
+          const element = event.currentTarget;
+          scrollMetricsRef.current = {
+            top: element.scrollTop,
+            height: element.scrollHeight,
+            viewportHeight: element.clientHeight,
+          };
+          storeScrollTop(scrollStorageKey, element.scrollTop);
+        }}
+      >
         {loading && displayMessages.length === 0 ? (
           <p className="text-sm text-muted-foreground">Loading book conversation...</p>
         ) : displayMessages.length > 0 ? (
@@ -194,7 +284,7 @@ export function ReaderChatPanel({
                   ? "Ask about this book"
                   : "Select a paragraph first"
             }
-            disabled={disabled}
+            disabled={!canSend}
           />
           <Button
             type="submit"

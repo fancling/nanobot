@@ -1086,5 +1086,9 @@ export type Outbound =
       workspace_scope?: WorkspaceScopePayload;
       turn_id?: string;
       reading_snapshot?: ReadingSnapshot;
+      reader_chat_bridge?: {
+        chat_id: string;
+        prompt_template?: string;
+      };
       webui?: true;
     };
