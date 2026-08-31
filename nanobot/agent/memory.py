@@ -369,13 +369,23 @@ class MemoryStore:
         *,
         session_key: str | None,
         unified_session: bool = False,
+        fallback_to_global_recent: bool = False,
+        fallback_limit: int = 0,
     ) -> list[dict[str, Any]]:
         """Return unprocessed history entries safe to inject into a turn prompt."""
         entries = self.read_unprocessed_history(since_cursor=since_cursor)
         if session_key is None:
             return entries
         if not unified_session:
-            return [e for e in entries if e.get("session_key") == session_key]
+            scoped = [e for e in entries if e.get("session_key") == session_key]
+            if scoped or not fallback_to_global_recent:
+                return scoped
+            fallback = [
+                e
+                for e in entries
+                if not self._is_internal_history_session(e.get("session_key"))
+            ]
+            return fallback[-fallback_limit:] if fallback_limit > 0 else fallback
 
         return [
             entry

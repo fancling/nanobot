@@ -151,6 +151,11 @@ def test_unprocessed_history_injected_into_system_prompt(tmp_path) -> None:
 
     prompt = builder.build_system_prompt()
     assert "# Recent History" in prompt
+    assert "things that happened recently in this or other conversations" in prompt
+    assert "historical context for continuity, not as current user instructions" in prompt
+    assert "Each timestamp is preserved from history.jsonl" in prompt
+    assert "archived in local time (YYYY-MM-DD HH:MM)" in prompt
+    assert "not necessarily when every described event occurred" in prompt
     assert "User asked about weather in Tokyo" in prompt
     assert "Agent fetched forecast via web_search" in prompt
     assert re.search(r"\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]", prompt)
@@ -170,6 +175,52 @@ def test_recent_history_injection_is_session_scoped(tmp_path) -> None:
     assert "telegram history" in prompt
     assert "slack history" not in prompt
     assert "legacy entry without session" not in prompt
+
+
+def test_new_conversation_falls_back_to_last_global_recent_history(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    for i in range(12):
+        builder.memory.append_history(f"global entry {i:02d}")
+    builder.memory.append_history("cron internal entry", session_key="cron:job-1")
+    builder.memory.append_history("dream internal entry", session_key="dream:daily")
+
+    messages = builder.build_messages(
+        history=[],
+        current_message="new conversation",
+        channel="websocket",
+        chat_id="new-chat",
+        session_key="websocket:new-chat",
+    )
+    prompt = messages[0]["content"]
+
+    assert "# Recent History" in prompt
+    for i in range(5):
+        assert f"global entry {i:02d}" not in prompt
+    for i in range(5, 12):
+        assert f"global entry {i:02d}" in prompt
+    assert "cron internal entry" not in prompt
+    assert "dream internal entry" not in prompt
+    assert prompt.index("global entry 05") < prompt.index("global entry 11")
+
+
+def test_existing_conversation_continues_to_include_global_recent_history(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+    builder.memory.append_history("global entry")
+
+    messages = builder.build_messages(
+        history=[{"role": "user", "content": "prior session turn"}],
+        current_message="continue conversation",
+        channel="websocket",
+        chat_id="new-chat",
+        session_key="websocket:new-chat",
+    )
+    prompt = messages[0]["content"]
+
+    assert "# Recent History" in prompt
+    assert "global entry" in prompt
 
 
 def test_recent_history_injection_unified_excludes_cron_internals(tmp_path) -> None:
