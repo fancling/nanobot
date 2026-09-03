@@ -70,6 +70,41 @@ afterEach(() => {
 });
 
 describe("NanobotClient", () => {
+  it("saves boards only after acknowledgement and rejects conflicts", async () => {
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    lastSocket().fakeOpen();
+    const content = "### Full board\n".repeat(10_000);
+    const saved = { content, revision: "new", exists: true };
+    const pending = client.saveBoard(content, "old", "api-token");
+    const frame = JSON.parse(lastSocket().sent.at(-1) as string);
+    expect(frame).toMatchObject({ type: "board_update", content, revision: "old" });
+    lastSocket().fakeMessage({ event: "board_saved", request_id: frame.request_id, board: saved });
+    await expect(pending).resolves.toEqual(saved);
+    const conflict = client.saveBoard("Stale", "old", "api-token");
+    const conflictFrame = JSON.parse(lastSocket().sent.at(-1) as string);
+    lastSocket().fakeMessage({ event: "board_error", request_id: conflictFrame.request_id, status: 409, detail: "Board changed" });
+    await expect(conflict).rejects.toMatchObject({ status: 409 });
+    client.close();
+  });
+
+  it("does not queue board writes while disconnected or replay timed-out saves", async () => {
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    await expect(client.saveBoard("Offline", null, "api-token")).rejects.toThrow("socket closed");
+    client.connect();
+    lastSocket().fakeOpen();
+    expect(lastSocket().sent).toEqual([]);
+    const timeout = expect(client.saveBoard("Slow", null, "api-token", 10)).rejects.toThrow("timed out");
+    await vi.advanceTimersByTimeAsync(10);
+    await timeout;
+    const closed = client.saveBoard("Pending", null, "api-token");
+    lastSocket().close();
+    await expect(closed).rejects.toThrow("socket closed");
+    client.close();
+  });
+
   it("routes events to the matching chat handler", () => {
     const client = new NanobotClient({
       url: "ws://test",

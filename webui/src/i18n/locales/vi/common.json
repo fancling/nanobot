@@ -1050,5 +1050,45 @@
       "usePath": "Use Path",
       "absolutePathRequired": "Enter an absolute folder path on this machine."
     }
+  },
+  "board": {
+    "title": "Bảng ghi chú",
+    "description": "Nơi chia sẻ công việc đang làm, ý tưởng và những điều cần ghi nhớ.",
+    "refresh": "Làm mới bảng",
+    "overview": "Tổng quan bảng",
+    "total": "Tổng số mục",
+    "entries": "mục",
+    "distribution": "Theo loại",
+    "items": "Tất cả mục",
+    "type": "Loại",
+    "content": "Nội dung",
+    "author": "Người ghi",
+    "updatedAt": "Cập nhật gần nhất",
+    "openHint": "Chọn một mục để xem chi tiết",
+    "uncategorized": "Chưa phân loại",
+    "showAll": "Hiện tất cả",
+    "emptyTitle": "Bảng của bạn đã sẵn sàng",
+    "emptyDescription": "Thêm mục đầu tiên bằng trình chỉnh sửa bên dưới.",
+    "noEntries": "Không tìm thấy mục có cấu trúc. Mở trình chỉnh sửa để xem và sắp xếp nội dung hiện có.",
+    "edit": "Chỉnh sửa bảng",
+    "editHint": "Chỉnh sửa Markdown. Dùng tiêu đề cấp ba cho từng mục và các trường Type, Recorder, Date để hiển thị trong bảng.",
+    "editorLabel": "Markdown của bảng",
+    "save": "Lưu thay đổi",
+    "saving": "Đang lưu…",
+    "saved": "Đã lưu",
+    "cancel": "Hủy",
+    "loading": "Đang tải bảng…",
+    "retry": "Thử lại",
+    "unsaved": "Có thay đổi chưa lưu",
+    "upToDate": "Không có thay đổi chưa lưu",
+    "discardTitle": "Bỏ các thay đổi?",
+    "discardDescription": "Các chỉnh sửa sẽ bị bỏ và phiên bản mới nhất của bảng sẽ được tải lại.",
+    "keepEditing": "Tiếp tục chỉnh sửa",
+    "discard": "Bỏ và tải lại",
+    "errors": {
+      "load": "Không thể tải bảng. Vui lòng thử lại.",
+      "save": "Không thể lưu. Nội dung chỉnh sửa vẫn được giữ lại; hãy kiểm tra kết nối và thử lại.",
+      "conflict": "Bảng đã được sửa ở nơi khác. Các chỉnh sửa vẫn được giữ lại. Hãy sao chép phần cần giữ, rồi hủy và tải lại trước khi lưu."
+    }
   }
 }

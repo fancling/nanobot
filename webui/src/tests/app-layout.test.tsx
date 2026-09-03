@@ -3225,4 +3225,18 @@ describe("App layout", () => {
     expect(updateUrlSpy).toHaveBeenCalledWith("ws://test?token=tok-2");
     unmount();
   });
+  it("opens the board from the sidebar and preserves its direct route", async () => {
+    mockFetchRoutes({ "/api/board": { content: "### Board task\n- Type: Work\n- Recorder: Alice\n- Date: 2026-09-01", revision: "r1", exists: true } });
+    const { unmount } = render(<App />);
+    const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Board" }));
+    expect(await screen.findByRole("button", { name: "Board task" })).toBeInTheDocument();
+    expect(window.location.hash).toBe("#/board");
+    expect(document.title).toContain("Board");
+    unmount();
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "Board", level: 1 })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Board task" })).toBeInTheDocument();
+  });
+
 });

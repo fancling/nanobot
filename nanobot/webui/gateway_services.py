@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from loguru import logger as default_logger
 
+from nanobot.webui.board import BoardStore
 from nanobot.webui.gateway_tokens import GatewayTokenStore
 from nanobot.webui.media_gateway import WebUIMediaGateway
 from nanobot.webui.transcript import WebUITranscriptRecorder
@@ -20,6 +21,7 @@ class GatewayServices:
     """Explicit dependencies shared by WebSocket transport and HTTP routes."""
 
     http: GatewayHTTPHandler
+    board: BoardStore
     tokens: GatewayTokenStore
     media: WebUIMediaGateway
     transcripts: WebUITranscriptRecorder
@@ -49,6 +51,7 @@ def build_gateway_services(
     logger: Any = default_logger,
 ) -> GatewayServices:
     tokens = GatewayTokenStore()
+    board = BoardStore(workspace_path)
     media = WebUIMediaGateway(
         workspace_path=workspace_path,
         logger=logger,
@@ -65,6 +68,7 @@ def build_gateway_services(
         default_restrict_to_workspace=default_restrict_to_workspace,
     )
     http = GatewayHTTPHandler(
+        board=board,
         config=config,
         session_manager=session_manager,
         static_dist_path=static_dist_path,
@@ -85,6 +89,7 @@ def build_gateway_services(
     )
     return GatewayServices(
         http=http,
+        board=board,
         tokens=tokens,
         media=media,
         transcripts=transcripts,

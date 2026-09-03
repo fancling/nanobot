@@ -1050,5 +1050,45 @@
       "usePath": "Use Path",
       "absolutePathRequired": "Enter an absolute folder path on this machine."
     }
+  },
+  "board": {
+    "title": "Board",
+    "description": "A shared place for ongoing work, ideas, and things to remember.",
+    "refresh": "Refresh board",
+    "overview": "Board overview",
+    "total": "Total entries",
+    "entries": "entries",
+    "distribution": "By type",
+    "items": "All entries",
+    "type": "Type",
+    "content": "Content",
+    "author": "Recorder",
+    "updatedAt": "Last updated",
+    "openHint": "Select an entry to view details",
+    "uncategorized": "Uncategorized",
+    "showAll": "Show all",
+    "emptyTitle": "Your board is ready",
+    "emptyDescription": "Add your first entry using the editor below.",
+    "noEntries": "No structured entries found. Open the editor to view and organize the existing content.",
+    "edit": "Edit board",
+    "editHint": "Edit the Markdown source. Use level-three headings for entries and Type, Recorder, and Date fields for the table.",
+    "editorLabel": "Board Markdown",
+    "save": "Save changes",
+    "saving": "Saving…",
+    "saved": "Saved",
+    "cancel": "Cancel",
+    "loading": "Loading board…",
+    "retry": "Retry",
+    "unsaved": "Unsaved changes",
+    "upToDate": "No unsaved changes",
+    "discardTitle": "Discard your changes?",
+    "discardDescription": "Your edits will be discarded and the latest board will be loaded.",
+    "keepEditing": "Keep editing",
+    "discard": "Discard and reload",
+    "errors": {
+      "load": "Could not load the board. Please try again.",
+      "save": "Could not save the board. Your edits are still here; check the connection and try again.",
+      "conflict": "The board was changed elsewhere. Your edits are preserved. Copy anything you want to keep, then cancel and reload before saving again."
+    }
   }
 }

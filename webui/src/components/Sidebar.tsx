@@ -3,6 +3,7 @@ import {
   Archive,
   Brain,
   BookOpen,
+  LayoutList,
   CalendarClock,
   Menu,
   Search,
@@ -42,7 +43,8 @@ interface SidebarProps {
   onOpenAutomations: () => void;
   onOpenSearch: () => void;
   onOpenReader: () => void;
-  activeUtility?: "apps" | "skills" | "automations" | "reader" | null;
+  onOpenBoard: () => void;
+  activeUtility?: "apps" | "skills" | "automations" | "reader" | "board" | null;
   onToggleArchived: () => void;
   onCollapse: () => void;
   onExpand?: () => void;
@@ -163,6 +165,13 @@ export function Sidebar(props: SidebarProps) {
           onClick={props.onOpenReader}
           active={props.activeUtility === "reader"}
           icon={<BookOpen className="h-4 w-4" />}
+        />
+        <SidebarActionButton
+          collapsed={collapsed}
+          label={t("board.title")}
+          onClick={props.onOpenBoard}
+          active={props.activeUtility === "board"}
+          icon={<LayoutList className="h-4 w-4" />}
         />
         <SidebarActionButton
           collapsed={collapsed}

@@ -6,9 +6,13 @@ import platform
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+import tiktoken
+from loguru import logger
+
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.tools import mcp as mcp_tools
+from nanobot.agent.tools.path_utils import resolve_workspace_path
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.apps.cli import utils as cli_app_utils
 from nanobot.bus.events import InboundMessage
@@ -65,6 +69,7 @@ class ContextBuilder:
     _MAX_RECENT_HISTORY = 50
     _GLOBAL_RECENT_HISTORY_FALLBACK = 7
     _MAX_HISTORY_TOKENS = 8_000  # hard cap on recent history section size (tokens)
+    _BOARD_WARNING_TOKENS = 8_000  # warning only; board is always injected in full
     _RUNTIME_CONTEXT_END = "[/Runtime Context]"
 
     def __init__(
@@ -134,6 +139,23 @@ class ContextBuilder:
                     self._MAX_HISTORY_TOKENS,
                 )
                 parts.append("# Recent History\n\n" + history_text)
+
+            board_path = resolve_workspace_path(
+                "memory/board.md",
+                workspace=self.memory.workspace,
+                allowed_dir=self.memory.workspace,
+                include_media_dir=False,
+            )
+            board = self.memory.read_file(board_path).strip()
+            if board:
+                board_tokens = len(tiktoken.get_encoding("cl100k_base").encode_ordinary(board))
+                if board_tokens > self._BOARD_WARNING_TOKENS:
+                    logger.warning(
+                        "Board {} exceeds warning threshold ({} > {} tokens); "
+                        "injecting full content without truncation.",
+                        board_path, board_tokens, self._BOARD_WARNING_TOKENS,
+                    )
+                parts.append("# Board (memory/board.md)\n\n" + board)
 
         if session_summary:
             parts.append(f"[Archived Context Summary]\n\n{session_summary}")

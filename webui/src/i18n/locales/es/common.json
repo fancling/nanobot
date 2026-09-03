@@ -1050,5 +1050,45 @@
       "usePath": "Use Path",
       "absolutePathRequired": "Enter an absolute folder path on this machine."
     }
+  },
+  "board": {
+    "title": "Tablero",
+    "description": "Un espacio compartido para el trabajo en curso, las ideas y lo que quieres recordar.",
+    "refresh": "Actualizar tablero",
+    "overview": "Resumen del tablero",
+    "total": "Total de entradas",
+    "entries": "entradas",
+    "distribution": "Por tipo",
+    "items": "Todas las entradas",
+    "type": "Tipo",
+    "content": "Contenido",
+    "author": "Autor",
+    "updatedAt": "Última actualización",
+    "openHint": "Selecciona una entrada para ver los detalles",
+    "uncategorized": "Sin categoría",
+    "showAll": "Mostrar todo",
+    "emptyTitle": "Tu tablero está listo",
+    "emptyDescription": "Añade la primera entrada con el editor de abajo.",
+    "noEntries": "No se encontraron entradas estructuradas. Abre el editor para ver y organizar el contenido existente.",
+    "edit": "Editar tablero",
+    "editHint": "Edita el Markdown. Usa títulos de nivel tres para las entradas y los campos Type, Recorder y Date para la tabla.",
+    "editorLabel": "Markdown del tablero",
+    "save": "Guardar cambios",
+    "saving": "Guardando…",
+    "saved": "Guardado",
+    "cancel": "Cancelar",
+    "loading": "Cargando tablero…",
+    "retry": "Reintentar",
+    "unsaved": "Cambios sin guardar",
+    "upToDate": "No hay cambios sin guardar",
+    "discardTitle": "¿Descartar los cambios?",
+    "discardDescription": "Se descartarán tus cambios y se cargará la última versión del tablero.",
+    "keepEditing": "Seguir editando",
+    "discard": "Descartar y recargar",
+    "errors": {
+      "load": "No se pudo cargar el tablero. Inténtalo de nuevo.",
+      "save": "No se pudo guardar. Tus cambios se conservan; comprueba la conexión y reinténtalo.",
+      "conflict": "El tablero se modificó en otro lugar. Tus cambios se conservan. Copia lo que quieras mantener, cancela y recarga antes de guardar."
+    }
   }
 }

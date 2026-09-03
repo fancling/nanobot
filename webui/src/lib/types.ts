@@ -1,5 +1,11 @@
 export type Role = "user" | "assistant" | "tool" | "system";
 
+export interface BoardPayload {
+  content: string;
+  revision: string | null;
+  exists: boolean;
+}
+
 /** "trace" rows are intermediate agent breadcrumbs (tool-call hints,
  * progress pings) that should not be rendered as conversational replies. */
 export type MessageKind = "message" | "trace";
@@ -953,6 +959,8 @@ export type InboundEvent =
     }
   | { event: "reader_state_saved"; request_id?: string; chat_id: string }
   | { event: "reader_state_error"; request_id?: string; chat_id?: string; detail?: string }
+  | { event: "board_saved"; request_id: string; board: BoardPayload }
+  | { event: "board_error"; request_id: string; status: number; detail: string }
   | { event: "error"; chat_id?: string; detail?: string; reason?: string };
 
 /** Base64-encoded image attached to an outbound ``message`` envelope.
@@ -1063,6 +1071,7 @@ export type Outbound =
   | { type: "set_workspace_scope"; chat_id: string; workspace_scope: WorkspaceScopePayload }
   | { type: "transcribe_audio"; request_id: string; data_url: string; duration_ms?: number }
   | { type: "reader_state_update"; request_id: string; chat_id: string; state: unknown }
+  | { type: "board_update"; request_id: string; content: string; revision: string | null; api_token: string }
   | {
       type: "message";
       chat_id: string;

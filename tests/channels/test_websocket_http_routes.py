@@ -111,6 +111,59 @@ def bus() -> MagicMock:
     return b
 
 
+@pytest.mark.asyncio
+async def test_board_read_and_save_use_authenticated_gateway_workspace(bus, tmp_path):
+    channel = _ch(bus, workspace_path=tmp_path, port=_free_port())
+    base = f"http://127.0.0.1:{channel.config.port}"
+    ws_url = f"ws://127.0.0.1:{channel.config.port}/"
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        assert (await _http_get(f"{base}/api/board")).status_code == 401
+        async with connect(ws_url) as websocket:
+            await websocket.recv()
+            await websocket.send(json.dumps({"type": "board_update", "content": "Unauthorized"}))
+            assert json.loads(await websocket.recv())["status"] == 401
+        bootstrap = (await _http_get(f"{base}/webui/bootstrap")).json()
+        token = bootstrap["token"]
+        headers = {"Authorization": f"Bearer {token}"}
+        empty = (await _http_get(f"{base}/api/board", headers)).json()
+        assert empty == {"content": "", "revision": None, "exists": False}
+        content = "### 白板内容\n- 类型：学习\n- 记录者：测试\n" * 1000
+        async with connect(f"{ws_url}?token={token}") as websocket:
+            await websocket.recv()
+            await websocket.send(json.dumps({
+                "type": "board_update", "request_id": "save-1",
+                "content": content, "revision": None, "api_token": token,
+            }))
+            saved = json.loads(await websocket.recv())
+            assert saved["event"] == "board_saved"
+            assert saved["request_id"] == "save-1"
+            assert saved["board"]["content"] == content
+            assert (tmp_path / "memory" / "board.md").read_text() == content
+            loaded = (await _http_get(f"{base}/api/board", headers)).json()
+            assert loaded == saved["board"]
+            await websocket.send(json.dumps({
+                "type": "board_update", "request_id": "save-2",
+                "content": "Stale", "revision": None, "api_token": token,
+            }))
+            conflict = json.loads(await websocket.recv())
+            assert conflict["event"] == "board_error"
+            assert conflict["status"] == 409
+            assert (tmp_path / "memory" / "board.md").read_text() == content
+            fresh = (await _http_get(f"{base}/webui/bootstrap")).json()["token"]
+            channel.gateway.tokens.api_tokens[token] = time.monotonic() - 1
+            await websocket.send(json.dumps({
+                "type": "board_update", "request_id": "save-3", "api_token": fresh,
+                "content": "Fresh credential", "revision": saved["board"]["revision"],
+            }))
+            assert json.loads(await websocket.recv())["event"] == "board_saved"
+        bus.publish_inbound.assert_not_called()
+    finally:
+        await channel.stop()
+        await server_task
+
+
 async def _http_get(
     url: str, headers: dict[str, str] | None = None
 ) -> httpx.Response:

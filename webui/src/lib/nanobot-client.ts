@@ -1,4 +1,5 @@
 import type {
+  BoardPayload,
   ConnectionStatus,
   InboundEvent,
   Outbound,
@@ -12,6 +13,7 @@ import type {
 } from "./types";
 import type { ReaderState } from "./reading";
 import { createHostWebSocket } from "./runtime";
+import { ApiError } from "./api";
 
 /** WebSocket readyState constants, referenced by value to stay portable
  * across runtimes that don't expose a global ``WebSocket`` (tests, SSR). */
@@ -157,6 +159,11 @@ export class NanobotClient {
   private pendingNewWorkframe: PendingNewWorkframe | null = null;
   private pendingTranscriptions = new Map<string, PendingTranscription>();
   private pendingReaderStateSaves = new Map<string, PendingReaderStateSave>();
+  private pendingBoardSaves = new Map<string, {
+    resolve: (board: BoardPayload) => void;
+    reject: (error: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
   // Frames queued while the socket is not yet OPEN
   private sendQueue: Outbound[] = [];
   private reconnectAttempts = 0;
@@ -515,6 +522,31 @@ export class NanobotClient {
     });
   }
 
+  saveBoard(content: string, revision: string | null, token: string, timeoutMs = 20_000): Promise<BoardPayload> {
+    const socket = this.socket;
+    if (socket?.readyState !== WS_OPEN) {
+      return Promise.reject(new Error("socket closed"));
+    }
+    const requestId = crypto.randomUUID();
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingBoardSaves.delete(requestId);
+        reject(new Error("board save timed out"));
+      }, timeoutMs);
+      this.pendingBoardSaves.set(requestId, { resolve, reject, timer });
+      try {
+        // A failed save must never be replayed later after the editor reports failure.
+        socket.send(JSON.stringify({
+          type: "board_update", request_id: requestId, content, revision, api_token: token,
+        } satisfies Outbound));
+      } catch (error) {
+        clearTimeout(timer);
+        this.pendingBoardSaves.delete(requestId);
+        reject(error);
+      }
+    });
+  }
+
   setWorkspaceScope(chatId: string, workspaceScope: WorkspaceScopePayload): void {
     this.knownChats.add(chatId);
     this.queueSend({
@@ -611,6 +643,16 @@ export class NanobotClient {
 
     if (parsed.event === "reader_state_saved") {
       this.resolveReaderStateSave(parsed.request_id);
+      return;
+    }
+
+    if (parsed.event === "board_saved" || parsed.event === "board_error") {
+      const pending = this.pendingBoardSaves.get(parsed.request_id);
+      if (!pending) return;
+      clearTimeout(pending.timer);
+      this.pendingBoardSaves.delete(parsed.request_id);
+      if (parsed.event === "board_saved") pending.resolve(parsed.board);
+      else pending.reject(new ApiError(parsed.status, parsed.detail));
       return;
     }
 
@@ -724,6 +766,11 @@ export class NanobotClient {
     }
     this.rejectAllTranscriptions("socket closed");
     this.rejectAllReaderStateSaves("socket closed");
+    for (const pending of this.pendingBoardSaves.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error("socket closed"));
+    }
+    this.pendingBoardSaves.clear();
     // Surface structured reasons *before* reconnect logic so the UI can
     // display the error even while the client transparently reconnects.
     // Browsers populate ``CloseEvent.code`` with the wire-level close code;

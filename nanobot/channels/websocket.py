@@ -34,6 +34,7 @@ from nanobot.utils.media_decode import (
     FileSizeExceeded,
     save_base64_data_url,
 )
+from nanobot.webui.board import BoardError
 from nanobot.webui.cli_apps_api import normalize_cli_app_mentions
 from nanobot.webui.forking import handle_webui_fork_chat
 from nanobot.webui.gateway_services import GatewayServices
@@ -673,6 +674,28 @@ class WebSocketChannel(BaseChannel):
     ) -> None:
         """Route one typed inbound envelope (``new_chat`` / ``attach`` / ``message``)."""
         t = envelope.get("type")
+        if t == "board_update":
+            request_id = envelope.get("request_id")
+            request_id = request_id if isinstance(request_id, str) else None
+            token = envelope.get("api_token")
+            if not isinstance(token, str) or not self._tokens.is_api_token_valid(token):
+                await self._send_event(
+                    connection, "board_error", request_id=request_id,
+                    status=401, detail="Unauthorized",
+                )
+                return
+            try:
+                board = await asyncio.to_thread(
+                    self.gateway.board.update, envelope.get("content"), envelope.get("revision"),
+                )
+            except BoardError as exc:
+                await self._send_event(
+                    connection, "board_error", request_id=request_id,
+                    status=exc.status, detail=str(exc),
+                )
+                return
+            await self._send_event(connection, "board_saved", request_id=request_id, board=board)
+            return
         if t == "new_workframe":
             workframe_id = str(uuid.uuid4())
             scope = await self._workspace_scope_or_error(

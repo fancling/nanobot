@@ -1050,5 +1050,45 @@
       "usePath": "Use Path",
       "absolutePathRequired": "Enter an absolute folder path on this machine."
     }
+  },
+  "board": {
+    "title": "Papan",
+    "description": "Tempat bersama untuk pekerjaan yang sedang berjalan, ide, dan hal yang ingin diingat.",
+    "refresh": "Muat ulang papan",
+    "overview": "Ringkasan papan",
+    "total": "Jumlah entri",
+    "entries": "entri",
+    "distribution": "Menurut jenis",
+    "items": "Semua entri",
+    "type": "Jenis",
+    "content": "Isi",
+    "author": "Pencatat",
+    "updatedAt": "Terakhir diperbarui",
+    "openHint": "Pilih entri untuk melihat detail",
+    "uncategorized": "Tanpa kategori",
+    "showAll": "Tampilkan semua",
+    "emptyTitle": "Papan Anda siap",
+    "emptyDescription": "Tambahkan entri pertama melalui editor di bawah.",
+    "noEntries": "Tidak ada entri terstruktur. Buka editor untuk melihat dan mengatur isi yang ada.",
+    "edit": "Edit papan",
+    "editHint": "Edit Markdown. Gunakan judul tingkat tiga untuk entri serta kolom Type, Recorder, dan Date untuk tabel.",
+    "editorLabel": "Markdown papan",
+    "save": "Simpan perubahan",
+    "saving": "Menyimpan…",
+    "saved": "Tersimpan",
+    "cancel": "Batal",
+    "loading": "Memuat papan…",
+    "retry": "Coba lagi",
+    "unsaved": "Perubahan belum disimpan",
+    "upToDate": "Tidak ada perubahan yang belum disimpan",
+    "discardTitle": "Buang perubahan Anda?",
+    "discardDescription": "Edit Anda akan dibuang dan papan terbaru akan dimuat ulang.",
+    "keepEditing": "Lanjutkan mengedit",
+    "discard": "Buang dan muat ulang",
+    "errors": {
+      "load": "Papan tidak dapat dimuat. Silakan coba lagi.",
+      "save": "Tidak dapat menyimpan. Edit Anda tetap tersimpan di editor; periksa koneksi dan coba lagi.",
+      "conflict": "Papan diubah di tempat lain. Edit Anda tetap ada. Salin perubahan yang ingin disimpan, lalu batalkan dan muat ulang sebelum menyimpan."
+    }
   }
 }

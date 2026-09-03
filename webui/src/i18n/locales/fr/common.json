@@ -1050,5 +1050,45 @@
       "usePath": "Use Path",
       "absolutePathRequired": "Enter an absolute folder path on this machine."
     }
+  },
+  "board": {
+    "title": "Tableau",
+    "description": "Un espace partagé pour les travaux en cours, les idées et les choses à retenir.",
+    "refresh": "Actualiser le tableau",
+    "overview": "Vue d’ensemble du tableau",
+    "total": "Nombre total d’entrées",
+    "entries": "entrées",
+    "distribution": "Par type",
+    "items": "Toutes les entrées",
+    "type": "Type",
+    "content": "Contenu",
+    "author": "Auteur",
+    "updatedAt": "Dernière mise à jour",
+    "openHint": "Sélectionnez une entrée pour voir les détails",
+    "uncategorized": "Sans catégorie",
+    "showAll": "Tout afficher",
+    "emptyTitle": "Votre tableau est prêt",
+    "emptyDescription": "Ajoutez votre première entrée avec l’éditeur ci-dessous.",
+    "noEntries": "Aucune entrée structurée trouvée. Ouvrez l’éditeur pour consulter et organiser le contenu existant.",
+    "edit": "Modifier le tableau",
+    "editHint": "Modifiez le Markdown. Utilisez des titres de niveau trois pour les entrées et les champs Type, Recorder et Date pour le tableau.",
+    "editorLabel": "Markdown du tableau",
+    "save": "Enregistrer les modifications",
+    "saving": "Enregistrement…",
+    "saved": "Enregistré",
+    "cancel": "Annuler",
+    "loading": "Chargement du tableau…",
+    "retry": "Réessayer",
+    "unsaved": "Modifications non enregistrées",
+    "upToDate": "Aucune modification non enregistrée",
+    "discardTitle": "Abandonner vos modifications ?",
+    "discardDescription": "Vos modifications seront abandonnées et la dernière version du tableau sera chargée.",
+    "keepEditing": "Continuer à modifier",
+    "discard": "Abandonner et recharger",
+    "errors": {
+      "load": "Impossible de charger le tableau. Veuillez réessayer.",
+      "save": "Impossible d’enregistrer. Vos modifications sont conservées ; vérifiez la connexion et réessayez.",
+      "conflict": "Le tableau a été modifié ailleurs. Vos modifications sont conservées. Copiez celles à garder, puis annulez et rechargez avant d’enregistrer."
+    }
   }
 }

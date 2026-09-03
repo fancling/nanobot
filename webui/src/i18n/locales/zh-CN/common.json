@@ -1050,5 +1050,45 @@
       "usePath": "使用路径",
       "absolutePathRequired": "请输入这台机器上的绝对文件夹路径。"
     }
+  },
+  "board": {
+    "title": "白板",
+    "description": "一起记录正在做的事、灵感，以及想要记住的内容。",
+    "refresh": "刷新白板",
+    "overview": "白板概览",
+    "total": "内容总数",
+    "entries": "条内容",
+    "distribution": "类型分布",
+    "items": "全部内容",
+    "type": "类型",
+    "content": "内容",
+    "author": "记录者",
+    "updatedAt": "最近更新时间",
+    "openHint": "点击条目查看详情",
+    "uncategorized": "未分类",
+    "showAll": "显示全部",
+    "emptyTitle": "白板准备好了",
+    "emptyDescription": "点击下方编辑，记录第一条内容。",
+    "noEntries": "尚未识别到结构化条目。可在下方编辑器中查看和整理现有内容。",
+    "edit": "编辑白板",
+    "editHint": "编辑 Markdown 原文。以三级标题划分条目，填写类型、记录者和时间后即可显示在表格中。",
+    "editorLabel": "白板 Markdown",
+    "save": "保存修改",
+    "saving": "保存中…",
+    "saved": "已保存",
+    "cancel": "取消",
+    "loading": "正在读取白板…",
+    "retry": "重试",
+    "unsaved": "有未保存的修改",
+    "upToDate": "没有未保存的修改",
+    "discardTitle": "放弃这次修改？",
+    "discardDescription": "将放弃当前编辑内容，并重新读取最新白板。",
+    "keepEditing": "继续编辑",
+    "discard": "放弃并重新读取",
+    "errors": {
+      "load": "白板读取失败，请重试。",
+      "save": "保存失败，编辑内容仍然保留。请检查连接后重试。",
+      "conflict": "白板已在其他地方更新，当前编辑内容仍然保留。请先复制需要保留的修改，再取消编辑并重新读取后保存。"
+    }
   }
 }

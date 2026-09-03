@@ -21,10 +21,14 @@ class GatewayTokenStore:
     api_tokens: dict[str, float] = field(default_factory=dict)
 
     def check_api_token(self, request: WsRequest) -> bool:
-        self._purge_expired_api_tokens()
         token = bearer_token(request.headers) or query_first(
             parse_query(request.path), "token"
         )
+        return self.is_api_token_valid(token)
+
+    def is_api_token_valid(self, token: str | None) -> bool:
+        """Validate the current WebUI credential, including on long-lived sockets."""
+        self._purge_expired_api_tokens()
         if not token:
             return False
         expiry = self.api_tokens.get(token)

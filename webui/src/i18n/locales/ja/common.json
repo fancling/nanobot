@@ -1050,5 +1050,45 @@
       "usePath": "Use Path",
       "absolutePathRequired": "Enter an absolute folder path on this machine."
     }
+  },
+  "board": {
+    "title": "ボード",
+    "description": "進行中の作業、アイデア、覚えておきたいことを共有します。",
+    "refresh": "ボードを更新",
+    "overview": "ボードの概要",
+    "total": "項目の総数",
+    "entries": "件",
+    "distribution": "種類別",
+    "items": "すべての項目",
+    "type": "種類",
+    "content": "内容",
+    "author": "記録者",
+    "updatedAt": "最終更新日",
+    "openHint": "項目を選択して詳細を表示",
+    "uncategorized": "未分類",
+    "showAll": "すべて表示",
+    "emptyTitle": "ボードの準備ができました",
+    "emptyDescription": "下の編集ボタンから最初の項目を追加してください。",
+    "noEntries": "構造化された項目がありません。エディターで既存の内容を確認・整理できます。",
+    "edit": "ボードを編集",
+    "editHint": "Markdown を編集します。レベル3の見出しを項目名にし、Type、Recorder、Date の各フィールドを記入すると表に表示されます。",
+    "editorLabel": "ボードの Markdown",
+    "save": "変更を保存",
+    "saving": "保存中…",
+    "saved": "保存しました",
+    "cancel": "キャンセル",
+    "loading": "ボードを読み込み中…",
+    "retry": "再試行",
+    "unsaved": "未保存の変更があります",
+    "upToDate": "未保存の変更はありません",
+    "discardTitle": "変更を破棄しますか？",
+    "discardDescription": "編集内容を破棄し、最新のボードを読み込みます。",
+    "keepEditing": "編集を続ける",
+    "discard": "破棄して再読み込み",
+    "errors": {
+      "load": "ボードを読み込めませんでした。再試行してください。",
+      "save": "保存できませんでした。編集内容は保持されています。接続を確認して再試行してください。",
+      "conflict": "ボードは別の場所で更新されました。編集内容は保持されています。必要な変更をコピーしてからキャンセルし、再読み込みしてください。"
+    }
   }
 }

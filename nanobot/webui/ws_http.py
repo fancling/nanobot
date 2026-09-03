@@ -27,6 +27,7 @@ from nanobot.command.builtin import builtin_command_palette
 from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob, CronSchedule
 from nanobot.utils.subagent_channel_display import scrub_subagent_messages_for_channel
+from nanobot.webui.board import BoardError, BoardStore
 from nanobot.webui.file_preview import WebUIFilePreviewError, file_preview_payload
 from nanobot.webui.gateway_tokens import GatewayTokenStore, token_response_payload
 from nanobot.webui.http_utils import (
@@ -155,6 +156,7 @@ class GatewayHTTPHandler:
     def __init__(
         self,
         *,
+        board: BoardStore,
         config: Any,  # WebSocketConfig
         session_manager: SessionManager | None,
         static_dist_path: Path | None,
@@ -174,6 +176,7 @@ class GatewayHTTPHandler:
         log: Any = logger,
     ) -> None:
         self.config = config
+        self.board = board
         self.session_manager = session_manager
         self.static_dist_path = static_dist_path
         self.runtime_model_name = runtime_model_name
@@ -242,6 +245,16 @@ class GatewayHTTPHandler:
         # Bootstrap
         if got == "/webui/bootstrap":
             return self._handle_bootstrap(connection, request)
+
+        if got == "/api/board":
+            if not self.check_api_token(request):
+                return _http_error(401, "Unauthorized")
+            if str(getattr(request, "method", "GET")).upper() not in {"GET", "HEAD"}:
+                return _http_error(405, "method not allowed")
+            try:
+                return _http_json_response(await asyncio.to_thread(self.board.read))
+            except BoardError as exc:
+                return _http_error(exc.status, str(exc))
 
         # Settings routes (delegated)
         response = await self.settings_routes.dispatch(request, got)

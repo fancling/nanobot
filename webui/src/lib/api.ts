@@ -1,4 +1,5 @@
 import type {
+  BoardPayload,
   AutomationsPayload,
   AutomationUpdatePayload,
   ChatSummary,
@@ -30,6 +31,10 @@ import type { ReaderState } from "./reading";
 import { fetchWithTimeout } from "./http";
 
 const API_READ_TIMEOUT_MS = 20_000;
+
+export async function fetchBoard(token: string): Promise<BoardPayload> {
+  return request<BoardPayload>("/api/board", token, undefined, API_READ_TIMEOUT_MS);
+}
 
 export class ApiError extends Error {
   status: number;

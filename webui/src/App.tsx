@@ -9,6 +9,7 @@ import {
 import { Moon, PanelLeft, Sun } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { DeleteConfirm } from "@/components/DeleteConfirm";
+import { BoardPage } from "@/components/BoardPage";
 import { RenameChatDialog } from "@/components/RenameChatDialog";
 import { ReaderPage } from "@/components/reader/ReaderPage";
 import { Sidebar } from "@/components/Sidebar";
@@ -86,7 +87,7 @@ const MOBILE_SIDEBAR_WIDTH = `min(${SIDEBAR_WIDTH}px, calc(100vw - 0.75rem))`;
 const TOKEN_REFRESH_MARGIN_MS = 30_000;
 const TOKEN_REFRESH_MIN_DELAY_MS = 5_000;
 const CHAT_CREATE_TIMEOUT_MS = 60_000;
-type ShellView = "chat" | "settings" | "apps" | "automations" | "skills" | "reader";
+type ShellView = "chat" | "settings" | "apps" | "automations" | "skills" | "reader" | "board";
 type ShellRoute = {
   view: ShellView;
   activeKey: string | null;
@@ -158,6 +159,9 @@ function readShellRoute(): ShellRoute {
   }
   if (path === "/reader") {
     return { view: "reader", activeKey, settingsSection: "overview" };
+  }
+  if (path === "/board") {
+    return { view: "board", activeKey, settingsSection: "overview" };
   }
   if (path.startsWith("/chat/")) {
     const encoded = path.slice("/chat/".length);
@@ -1366,6 +1370,12 @@ function Shell({
     setMobileSidebarOpen(false);
   }, [navigate]);
 
+  const onOpenBoard = useCallback(() => {
+    setSessionSearchOpen(false);
+    navigate({ view: "board", activeKey, settingsSection: "overview" });
+    setMobileSidebarOpen(false);
+  }, [activeKey, navigate]);
+
   const onSettingsSectionChange = useCallback(
     (section: SettingsSectionKey) => {
       navigate({
@@ -1770,6 +1780,10 @@ function Shell({
       document.title = t("app.documentTitle.chat", { title: "Reader" });
       return;
     }
+    if (view === "board") {
+      document.title = t("app.documentTitle.chat", { title: t("board.title") });
+      return;
+    }
     document.title = activeSession
       ? t("app.documentTitle.chat", { title: headerTitle })
       : t("app.documentTitle.base");
@@ -1795,8 +1809,9 @@ function Shell({
     onOpenSkills,
     onOpenSearch: onOpenSessionSearch,
     onOpenReader,
+    onOpenBoard,
     activeUtility:
-      view === "apps" || view === "automations" || view === "skills" || view === "reader"
+      view === "apps" || view === "automations" || view === "skills" || view === "reader" || view === "board"
         ? view
         : null,
     onToggleArchived,
@@ -2044,7 +2059,10 @@ function Shell({
                 />
               </div>
             ) : null}
-            {view !== "chat" && view !== "reader" && (
+            <div hidden={view !== "board"} className="absolute inset-0">
+              <BoardPage active={view === "board"} hostChromeInset={showHostChrome} onBackToChat={onBackToChat} />
+            </div>
+            {view !== "chat" && view !== "reader" && view !== "board" && (
               <div className="absolute inset-0 flex flex-col">
                 <SettingsView
                   theme={theme}
