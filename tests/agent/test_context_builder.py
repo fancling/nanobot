@@ -127,9 +127,51 @@ class TestLoadBootstrapFiles:
         builder = _builder(tmp_path)
         result = builder._load_bootstrap_files()
         assert "## AGENTS.md" in result
+        assert "[AGENT PERSONA]" in result
         assert "## SOUL.md" in result
         assert "Rules." in result
         assert "Soul." in result
+
+    def test_soul_and_user_have_distinct_semantic_contexts(self, tmp_path):
+        (tmp_path / "SOUL.md").write_text("Stable identity.", encoding="utf-8")
+        (tmp_path / "USER.md").write_text("Known user preference.", encoding="utf-8")
+        builder = _builder(tmp_path, agent_name="Mochi")
+
+        result = builder._load_bootstrap_files()
+
+        assert "[AGENT PERSONA]" in result
+        assert "Mochi's stable identity, values, and behavioral tendencies" in result
+        assert "distinct from the agent's current affective state" in result
+        assert "[USER CONTEXT]" in result
+        assert "Apply it only when relevant to the current conversation" in result
+        assert "It describes the user, not the agent" in result
+        assert result.index("[AGENT PERSONA]") < result.index("[USER CONTEXT]")
+
+    def test_missing_soul_or_user_omits_its_semantic_context(self, tmp_path):
+        (tmp_path / "AGENTS.md").write_text("Rules.", encoding="utf-8")
+        builder = _builder(tmp_path)
+
+        result = builder._load_bootstrap_files()
+
+        assert "[AGENT PERSONA]" not in result
+        assert "[USER CONTEXT]" not in result
+
+    def test_system_prompt_exposes_context_layer_relationship_and_order(self, tmp_path):
+        (tmp_path / "AGENTS.md").write_text("Rules.", encoding="utf-8")
+        (tmp_path / "SOUL.md").write_text("Stable identity.", encoding="utf-8")
+        (tmp_path / "USER.md").write_text("Known user preference.", encoding="utf-8")
+        builder = _builder(tmp_path, agent_name="Mochi")
+
+        result = builder.build_system_prompt(affective_state_context="[AFFECTIVE STATE]\n\nCalm.")
+
+        assert "[CONTEXT LAYERS]" in result
+        assert "Agent Persona describes who Mochi generally is" in result
+        assert "Affective State describes how Mochi currently feels" in result
+        assert "User Context describes who Mochi is interacting with" in result
+        assert result.index("## AGENTS.md") < result.index("[CONTEXT LAYERS]")
+        assert result.index("[CONTEXT LAYERS]") < result.index("[AGENT PERSONA]")
+        assert result.index("[AGENT PERSONA]") < result.index("[AFFECTIVE STATE]")
+        assert result.index("[AFFECTIVE STATE]") < result.index("[USER CONTEXT]")
 
     def test_all_bootstrap_files(self, tmp_path):
         for name in ContextBuilder.BOOTSTRAP_FILES:

@@ -1007,6 +1007,7 @@ def _run_gateway(
         webui_static_dist=webui_static_dist,
         webui_runtime_surface=webui_runtime_surface,
         webui_runtime_capabilities=webui_runtime_capabilities,
+        affective_state=getattr(agent, "affective_state", None),
     )
 
     def _pick_heartbeat_target() -> tuple[str, str]:

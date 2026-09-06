@@ -174,6 +174,7 @@ class GatewayHTTPHandler:
         cron_service: CronService | None = None,
         cron_pending_job_ids: Callable[[str], set[str]] | None = None,
         log: Any = logger,
+        affective_state: Any | None = None,
     ) -> None:
         self.config = config
         self.board = board
@@ -192,6 +193,7 @@ class GatewayHTTPHandler:
         self.cron_pending_job_ids = cron_pending_job_ids
         self._log = log
         self._runtime_surface = runtime_surface
+        self.affective_state = affective_state
 
         from nanobot.webui.settings_api import runtime_capabilities as _rc
         from nanobot.webui.settings_routes import WebUISettingsRouter
@@ -255,6 +257,20 @@ class GatewayHTTPHandler:
                 return _http_json_response(await asyncio.to_thread(self.board.read))
             except BoardError as exc:
                 return _http_error(exc.status, str(exc))
+
+        if got == "/api/affective-state":
+            if not self.check_api_token(request):
+                return _http_error(401, "Unauthorized")
+            if str(getattr(request, "method", "GET")).upper() not in {"GET", "HEAD"}:
+                return _http_error(405, "method not allowed")
+            if self.affective_state is None:
+                return _http_error(503, "affective state unavailable")
+            try:
+                await self.affective_state.ensure_current()
+                return _http_json_response(self.affective_state.public_payload())
+            except Exception:
+                self._log.warning("Failed to read affective state", exc_info=True)
+                return _http_error(500, "failed to read affective state")
 
         # Settings routes (delegated)
         response = await self.settings_routes.dispatch(request, got)

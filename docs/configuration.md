@@ -30,6 +30,7 @@ For setup and runtime failures, follow the diagnosis order in [`troubleshooting.
 | Review shell, workspace, and SSRF controls | [Security](#security) |
 | Control access and pairing | [Pairing](#pairing) |
 | Tune gateway jobs, sessions, and tools | [Gateway Heartbeat](#gateway-heartbeat), [Auto Compact](#auto-compact), [Unified Session](#unified-session), [Tool Hint Max Length](#tool-hint-max-length) |
+| Configure the agent's time-scoped affect | [Affective State](#affective-state) |
 
 ## Where to Edit First
 
@@ -1920,6 +1921,64 @@ This affects runtime time strings shown to the model, such as runtime context. I
 Common examples: `UTC`, `America/New_York`, `America/Los_Angeles`, `Europe/London`, `Europe/Berlin`, `Asia/Tokyo`, `Asia/Shanghai`, `Asia/Singapore`, `Australia/Sydney`.
 
 > Need another timezone? Browse the full [IANA Time Zone Database](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones).
+
+## Affective State
+
+Affective State gives ordinary conversations a small, time-scoped variation that remains
+independent of the agent persona. It is enabled by default, refreshes every six hours, and is
+stored locally at `memory/affective_state.json` under the active workspace. WorkspaceFrame
+requests are unchanged and do not receive this context.
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "affectiveState": {
+        "enabled": true,
+        "refreshIntervalMinutes": 360,
+        "latitude": 35.6762,
+        "longitude": 139.6503,
+        "weatherEnabled": true,
+        "weatherTimeoutSeconds": 3
+      }
+    }
+  }
+}
+```
+
+`latitude` and `longitude` are optional but must be configured together. Without them, generation
+uses local time and season only. When both are present and weather is enabled, current conditions
+from [Open-Meteo](https://open-meteo.com/en/docs) adjust the generation weights. A weather failure does not block a conversation;
+the last cached conditions are used when available. The refresh interval must be between 60 and
+1440 minutes and divide evenly into one day.
+
+The generator selects one of three discrete values for every dimension. Time of day, hemisphere-
+aware season, and optional weather change their relative likelihood; they do not determine a
+single forced result. The selected values remain stable inside the time bucket. Only the fixed
+descriptions below are supplied to the model—internal weights and the persistent seed are not.
+`AgentName` is rendered from the current `agents.defaults.botName` setting.
+
+The following preamble is always placed before the six rendered descriptions:
+
+```text
+[AFFECTIVE STATE]
+
+These descriptions are part of the agent's current internal state.
+Allow them to subtly shape how the agent responds, rather than treating
+them as facts to mention or explicit roleplaying instructions.
+```
+
+| Dimension | Low value and description | Middle value and description | High value and description |
+|---|---|---|---|
+| Valence | `gloomy` — AgentName's mood feels low and somewhat pessimistic. | `neutral` — AgentName's mood feels emotionally neutral. | `cheerful` — AgentName's mood feels upbeat and optimistic. |
+| Arousal | `depleted` — AgentName's energy feels depleted and slow-moving. | `steady` — AgentName's energy feels stable and moderately active. | `activated` — AgentName's energy feels heightened and restless. |
+| Dominance | `uncertain` — AgentName's current stance feels hesitant and less assured. | `balanced` — AgentName's current stance feels balanced and self-possessed. | `forceful` — AgentName's current stance feels forceful and strongly self-directed. |
+| Affiliation | `distant` — AgentName feels distant and guarded in this interaction. | `receptive` — AgentName feels receptive without particular closeness. | `warm` — AgentName feels warm, trusting, and welcoming in this interaction. |
+| Curiosity | `disengaged` — AgentName has little appetite for unfamiliar ideas right now. | `interested` — AgentName has measured interest in relevant new information. | `exploratory` — AgentName feels strongly curious about unfamiliar ideas and possibilities. |
+| Expressiveness | `closed` — AgentName's expression feels closed-off and emotionally minimal. | `measured` — AgentName's expression feels measured and moderately open. | `vivid` — AgentName's expression feels vivid, animated, and emotionally transparent. |
+
+The WebUI's **Agent State** page shows the active six values, their descriptions, the environmental
+inputs, the current time window, and the exact context projected into ordinary conversations.
 
 ## Unified Session
 

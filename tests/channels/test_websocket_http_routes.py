@@ -17,7 +17,9 @@ import httpx
 import pytest
 from websockets.asyncio.client import connect
 
+from nanobot.agent.affective_state import AffectiveStateService
 from nanobot.channels.websocket import WebSocketChannel, WebSocketConfig
+from nanobot.config.schema import AffectiveStateConfig
 from nanobot.cron.service import CronService
 from nanobot.cron.types import CronJob, CronPayload, CronSchedule
 from nanobot.session.keys import UNIFIED_SESSION_KEY
@@ -50,6 +52,7 @@ def _make_handler(
     runtime_model_name: Any | None = None,
     cron_service: CronService | None = None,
     cron_pending_job_ids: Any | None = None,
+    affective_state: Any | None = None,
 ) -> GatewayServices:
     config = WebSocketConfig.model_validate(cfg) if isinstance(cfg, dict) else cfg
     workspace = workspace_path or Path.cwd()
@@ -66,6 +69,7 @@ def _make_handler(
         runtime_capabilities_overrides=None,
         cron_service=cron_service,
         cron_pending_job_ids=cron_pending_job_ids,
+        affective_state=affective_state,
     )
 
 
@@ -80,6 +84,7 @@ def _ch(
     runtime_model_name: Any | None = None,
     cron_service: CronService | None = None,
     cron_pending_job_ids: Any | None = None,
+    affective_state: Any | None = None,
     **extra: Any,
 ) -> WebSocketChannel:
     cfg: dict[str, Any] = {
@@ -100,6 +105,7 @@ def _ch(
         runtime_model_name=runtime_model_name,
         cron_service=cron_service,
         cron_pending_job_ids=cron_pending_job_ids,
+        affective_state=affective_state,
     )
     return WebSocketChannel(cfg, bus, gateway=gateway)
 
@@ -159,6 +165,48 @@ async def test_board_read_and_save_use_authenticated_gateway_workspace(bus, tmp_
             }))
             assert json.loads(await websocket.recv())["event"] == "board_saved"
         bus.publish_inbound.assert_not_called()
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_affective_state_route_is_authenticated_and_hides_internal_seed(bus, tmp_path):
+    service = AffectiveStateService(
+        tmp_path,
+        AffectiveStateConfig(weather_enabled=False),
+        timezone_name="UTC",
+    )
+    port = _free_port()
+    channel = _ch(
+        bus,
+        workspace_path=tmp_path,
+        port=port,
+        affective_state=service,
+    )
+    base = f"http://127.0.0.1:{port}"
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        denied = await _http_get(f"{base}/api/affective-state")
+        assert denied.status_code == 401
+        token = (await _http_get(f"{base}/webui/bootstrap")).json()["token"]
+        response = await _http_get(
+            f"{base}/api/affective-state",
+            {"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["available"] is True
+        assert set(payload["dimensions"]) == {
+            "valence", "arousal", "dominance", "affiliation", "curiosity", "expressiveness",
+        }
+        assert "seed" not in payload
+        assert payload["context_text"].startswith("[AFFECTIVE STATE]\n\n")
+        assert all(
+            dimension["description"] in payload["context_text"]
+            for dimension in payload["dimensions"].values()
+        )
     finally:
         await channel.stop()
         await server_task

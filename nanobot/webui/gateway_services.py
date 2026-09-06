@@ -31,6 +31,7 @@ class GatewayServices:
     workframe_session_manager: Any | None
     cron_service: Any | None
     cron_pending_job_ids: Callable[[str], set[str]] | None
+    affective_state: Any | None
 
 
 def build_gateway_services(
@@ -49,6 +50,7 @@ def build_gateway_services(
     cron_service: Any | None = None,
     cron_pending_job_ids: Callable[[str], set[str]] | None = None,
     logger: Any = default_logger,
+    affective_state: Any | None = None,
 ) -> GatewayServices:
     tokens = GatewayTokenStore()
     board = BoardStore(workspace_path)
@@ -86,6 +88,7 @@ def build_gateway_services(
         cron_service=cron_service,
         cron_pending_job_ids=cron_pending_job_ids,
         log=logger,
+        affective_state=affective_state,
     )
     return GatewayServices(
         http=http,
@@ -99,4 +102,5 @@ def build_gateway_services(
         workframe_session_manager=workframe_session_manager,
         cron_service=cron_service,
         cron_pending_job_ids=cron_pending_job_ids,
+        affective_state=affective_state,
     )

@@ -5,6 +5,7 @@ import {
   BookOpen,
   LayoutList,
   CalendarClock,
+  CloudSun,
   Menu,
   Search,
   Settings,
@@ -44,7 +45,8 @@ interface SidebarProps {
   onOpenSearch: () => void;
   onOpenReader: () => void;
   onOpenBoard: () => void;
-  activeUtility?: "apps" | "skills" | "automations" | "reader" | "board" | null;
+  onOpenAffectiveState: () => void;
+  activeUtility?: "apps" | "skills" | "automations" | "reader" | "board" | "affect" | null;
   onToggleArchived: () => void;
   onCollapse: () => void;
   onExpand?: () => void;
@@ -172,6 +174,13 @@ export function Sidebar(props: SidebarProps) {
           onClick={props.onOpenBoard}
           active={props.activeUtility === "board"}
           icon={<LayoutList className="h-4 w-4" />}
+        />
+        <SidebarActionButton
+          collapsed={collapsed}
+          label={t("affectiveState.title")}
+          onClick={props.onOpenAffectiveState}
+          active={props.activeUtility === "affect"}
+          icon={<CloudSun className="h-4 w-4" />}
         />
         <SidebarActionButton
           collapsed={collapsed}

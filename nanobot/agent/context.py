@@ -56,6 +56,10 @@ class ContextBuilder:
     """Builds the context (system prompt + messages) for the agent."""
 
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md"]
+    _BOOTSTRAP_CONTEXT_TEMPLATES = {
+        "SOUL.md": "agent/persona_context.md",
+        "USER.md": "agent/user_context.md",
+    }
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
     _RECENT_HISTORY_CONTEXT = (
         "The entries below summarize things that happened recently in this or other "
@@ -79,10 +83,12 @@ class ContextBuilder:
         disabled_skills: list[str] | None = None,
         memory_workspace: Path | None = None,
         workframe_config: Any | None = None,
+        agent_name: str = "nanobot",
     ):
         self.workspace = workspace
         self.timezone = timezone
         self.workframe_config = workframe_config
+        self.agent_name = agent_name
         self.memory = MemoryStore(memory_workspace or workspace)
         self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
 
@@ -96,14 +102,36 @@ class ContextBuilder:
         session_key: str | None = None,
         unified_session: bool = False,
         fallback_to_global_recent_history: bool = False,
+        affective_state_context: str | None = None,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         root = workspace or self.workspace
         parts = [self._get_identity(channel=channel, workspace=root)]
 
-        bootstrap = self._load_bootstrap_files(root)
-        if bootstrap:
-            parts.append(bootstrap)
+        agents_context = self._render_bootstrap_file(root, "AGENTS.md")
+        persona_context = self._render_bootstrap_file(root, "SOUL.md")
+        user_context = self._render_bootstrap_file(root, "USER.md")
+
+        if agents_context:
+            parts.append(agents_context)
+
+        if persona_context or affective_state_context or user_context:
+            parts.append(
+                render_template(
+                    "agent/context_layers.md",
+                    agent_name=self.agent_name,
+                    strip=True,
+                )
+            )
+
+        if persona_context:
+            parts.append(persona_context)
+
+        if affective_state_context:
+            parts.append(affective_state_context.strip())
+
+        if user_context:
+            parts.append(user_context)
 
         parts.append(render_template("agent/tool_contract.md"))
 
@@ -228,12 +256,27 @@ class ContextBuilder:
         root = workspace or self.workspace
 
         for filename in self.BOOTSTRAP_FILES:
-            file_path = root / filename
-            if file_path.exists():
-                content = file_path.read_text(encoding="utf-8")
-                parts.append(f"## {filename}\n\n{content}")
+            rendered = self._render_bootstrap_file(root, filename)
+            if rendered:
+                parts.append(rendered)
 
-        return "\n\n".join(parts) if parts else ""
+        return "\n\n---\n\n".join(parts) if parts else ""
+
+    def _render_bootstrap_file(self, root: Path, filename: str) -> str | None:
+        """Render one workspace bootstrap file with its semantic wrapper."""
+        file_path = root / filename
+        if not file_path.exists():
+            return None
+        content = file_path.read_text(encoding="utf-8")
+        template = self._BOOTSTRAP_CONTEXT_TEMPLATES.get(filename)
+        if template:
+            return render_template(
+                template,
+                content=content,
+                agent_name=self.agent_name,
+                strip=True,
+            )
+        return f"## {filename}\n\n{content}"
 
     @staticmethod
     def _is_template_content(content: str, template_path: str) -> bool:
@@ -263,6 +306,7 @@ class ContextBuilder:
         include_memory_recent_history: bool = True,
         session_key: str | None = None,
         unified_session: bool = False,
+        affective_state_context: str | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         root = workspace or self.workspace
@@ -306,6 +350,7 @@ class ContextBuilder:
                     session_key=session_key,
                     unified_session=unified_session,
                     fallback_to_global_recent_history=True,
+                    affective_state_context=affective_state_context,
                 ),
             },
             *history,

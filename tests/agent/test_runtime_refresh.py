@@ -99,3 +99,17 @@ def test_settings_context_window_refreshes_runtime_state(
     assert payload["requires_restart"] is False
     assert loop.context_window_tokens == 262_144
     assert loop.consolidator.context_window_tokens == 262_144
+
+
+def test_from_config_passes_bot_name_to_affective_state(tmp_path: Path) -> None:
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path)
+    config.agents.defaults.bot_name = "Asakura Ryōko"
+    config.agents.defaults.model = "openai/gpt-4o"
+    config.agents.defaults.provider = "openai"
+    config.providers.openai.api_key = "sk-test"
+
+    loop = AgentLoop.from_config(config)
+
+    assert loop.affective_state.agent_name == "Asakura Ryōko"
+    assert loop.context.agent_name == "Asakura Ryōko"

@@ -6,6 +6,7 @@ import pytest
 import tiktoken
 from loguru import logger
 
+from nanobot.agent.affective_state import AFFECTIVE_CONTEXT_PREAMBLE
 from nanobot.agent.context import ContextBuilder
 
 
@@ -132,3 +133,24 @@ def test_board_symlink_cannot_escape_memory_workspace(tmp_path: Path) -> None:
 
     with pytest.raises(PermissionError):
         builder.build_system_prompt()
+
+
+def test_affective_state_is_an_independent_system_context(tmp_path: Path) -> None:
+    builder = ContextBuilder(tmp_path)
+    (tmp_path / "SOUL.md").write_text("Persona context", encoding="utf-8")
+    (tmp_path / "USER.md").write_text("User context", encoding="utf-8")
+    affect = (
+        f"{AFFECTIVE_CONTEXT_PREAMBLE}\n\n"
+        "Mochi's mood feels low and somewhat pessimistic.\n"
+        "Mochi's energy feels depleted."
+    )
+
+    prompt = builder.build_system_prompt(affective_state_context=affect)
+
+    assert affect in prompt
+    assert "[CONTEXT LAYERS]" in prompt
+    assert "[AGENT PERSONA]" in prompt
+    assert prompt.index("Persona context") < prompt.index("[AFFECTIVE STATE]")
+    assert prompt.index("[AFFECTIVE STATE]") < prompt.index("[USER CONTEXT]")
+    assert prompt.index("[AFFECTIVE STATE]") < prompt.index("# Tool Usage")
+    assert "[AFFECTIVE STATE]" not in builder.build_system_prompt()

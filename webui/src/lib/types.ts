@@ -6,6 +6,45 @@ export interface BoardPayload {
   exists: boolean;
 }
 
+export type AffectiveDimensionName =
+  | "valence"
+  | "arousal"
+  | "dominance"
+  | "affiliation"
+  | "curiosity"
+  | "expressiveness";
+
+export interface AffectiveDimensionPayload {
+  value: string;
+  description: string;
+}
+
+export interface AffectiveWeatherPayload {
+  condition: string;
+  weather_code: number;
+  temperature_c: number | null;
+  precipitation_mm: number | null;
+  cloud_cover_percent: number | null;
+  wind_speed_kmh: number | null;
+  observed_at: string;
+  stale: boolean;
+  provider: string;
+}
+
+export interface AffectiveStatePayload {
+  available: boolean;
+  enabled: boolean;
+  period?: string;
+  valid_until?: string;
+  dimensions?: Record<AffectiveDimensionName, AffectiveDimensionPayload>;
+  context_text?: string;
+  environment?: {
+    season?: string;
+    day_period?: string;
+    weather?: AffectiveWeatherPayload;
+  };
+}
+
 /** "trace" rows are intermediate agent breadcrumbs (tool-call hints,
  * progress pings) that should not be rendered as conversational replies. */
 export type MessageKind = "message" | "trace";

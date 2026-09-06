@@ -63,6 +63,7 @@ class ChannelManager:
         webui_static_dist: bool = True,
         webui_runtime_surface: str = "browser",
         webui_runtime_capabilities: dict[str, Any] | None = None,
+        affective_state: Any | None = None,
     ):
         self.config = config
         self.bus = bus
@@ -74,6 +75,7 @@ class ChannelManager:
         self._webui_static_dist = webui_static_dist
         self._webui_runtime_surface = webui_runtime_surface
         self._webui_runtime_capabilities = dict(webui_runtime_capabilities or {})
+        self._affective_state = affective_state
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
         self._origin_reply_fingerprints: dict[tuple[str, str, str], str] = {}
@@ -133,6 +135,7 @@ class ChannelManager:
                         cron_service=self._cron_service,
                         cron_pending_job_ids=self._webui_cron_pending_job_ids,
                         logger=logger,
+                        affective_state=self._affective_state,
                     )
                     kwargs["gateway"] = gateway
                 channel = cls(section, self.bus, **kwargs)

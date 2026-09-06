@@ -191,6 +191,25 @@ class WorkframeConfig(Base):
     profiles: dict[str, WorkframeProfileConfig] = Field(default_factory=dict)
 
 
+class AffectiveStateConfig(Base):
+    """Time-scoped affective state generation controls."""
+
+    enabled: bool = True
+    refresh_interval_minutes: int = Field(default=360, ge=60, le=1440)
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+    weather_enabled: bool = True
+    weather_timeout_seconds: float = Field(default=3.0, ge=0.5, le=15.0)
+
+    @model_validator(mode="after")
+    def validate_weather_location(self) -> "AffectiveStateConfig":
+        if (self.latitude is None) != (self.longitude is None):
+            raise ValueError("affective state latitude and longitude must be configured together")
+        if 1440 % self.refresh_interval_minutes:
+            raise ValueError("affective state refresh interval must divide evenly into one day")
+        return self
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -241,6 +260,7 @@ class AgentDefaults(Base):
     )  # Consolidation target ratio (0.5 = 50% of budget retained after compression)
     dream: DreamConfig = Field(default_factory=DreamConfig)
     workframe: WorkframeConfig = Field(default_factory=WorkframeConfig)
+    affective_state: AffectiveStateConfig = Field(default_factory=AffectiveStateConfig)
 
 
 class AgentsConfig(Base):

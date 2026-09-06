@@ -17,6 +17,7 @@ from loguru import logger
 
 from nanobot.agent import context as agent_context
 from nanobot.agent import model_presets as preset_helpers
+from nanobot.agent.affective_state import AffectiveStateService
 from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.cron_turns import CronTurnCoordinator
@@ -238,6 +239,8 @@ class AgentLoop:
         preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None = None,
         runtime_events: RuntimeEventBus | None = None,
         runtime_model_publisher: Callable[[str, str | None], None] | None = None,
+        affective_state_config: Any | None = None,
+        agent_name: str | None = None,
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -255,6 +258,12 @@ class AgentLoop:
         self._default_selection_signature = preset_helpers.default_selection_signature(provider_signature)
         self.workspace = workspace
         self.workframe_config = workframe_config
+        self.affective_state = AffectiveStateService(
+            workspace,
+            affective_state_config or defaults.affective_state,
+            timezone_name=timezone,
+            agent_name=agent_name or defaults.bot_name,
+        )
         self.model = model or provider.get_default_model()
         self.max_iterations = (
             max_iterations if max_iterations is not None else defaults.max_tool_iterations
@@ -299,6 +308,7 @@ class AgentLoop:
             timezone=timezone,
             disabled_skills=disabled_skills,
             workframe_config=workframe_config,
+            agent_name=agent_name or defaults.bot_name,
         )
         self.frame_request_adapter = FrameRequestAdapter(self.context)
         self.sessions = session_manager or SessionManager(workspace)
@@ -455,6 +465,7 @@ class AgentLoop:
         resolved = config.resolve_preset()
         model = extra.pop("model", None) or resolved.model
         context_window_tokens = extra.pop("context_window_tokens", None) or resolved.context_window_tokens
+        agent_name = extra.pop("agent_name", None) or defaults.bot_name
         provider_snapshot_loader = extra.pop("provider_snapshot_loader", None)
         preset_snapshot_loader = extra.pop("preset_snapshot_loader", None) or preset_helpers.make_preset_snapshot_loader(
             config,
@@ -485,6 +496,8 @@ class AgentLoop:
             model_presets=preset_helpers.configured_model_presets(config),
             model_preset=defaults.model_preset,
             workframe_config=defaults.workframe,
+            affective_state_config=defaults.affective_state,
+            agent_name=agent_name,
             provider_snapshot_loader=provider_snapshot_loader,
             preset_snapshot_loader=preset_snapshot_loader,
             **extra,
@@ -710,6 +723,7 @@ class AgentLoop:
         history: list[dict[str, Any]],
         pending_summary: str | None,
         include_memory_recent_history: bool = True,
+        affective_state_context: str | None = None,
     ) -> list[dict[str, Any]]:
         """Build the cache-friendly initial message list for an ordinary LLM turn."""
         scope = self.workspace_scopes.for_message(msg, session.metadata)
@@ -731,6 +745,7 @@ class AgentLoop:
             include_memory_recent_history=include_memory_recent_history,
             session_key=session.key,
             unified_session=self._unified_session,
+            affective_state_context=affective_state_context,
         )
 
     @staticmethod
@@ -1818,6 +1833,15 @@ class AgentLoop:
             self.llm_runtime(),
         )
 
+        affective_state_context: str | None = None
+        if not runtime.use_workspace_frame and not ctx.ephemeral:
+            try:
+                affective_snapshot = await self.affective_state.ensure_current()
+                if affective_snapshot is not None:
+                    affective_state_context = affective_snapshot.context_text
+            except Exception:
+                logger.warning("Failed to refresh affective state", exc_info=True)
+
         if runtime.use_workspace_frame:
             workspace_scope = self.workspace_scopes.for_message(ctx.msg, ctx.session.metadata)
             ctx.initial_messages = self._build_workframe_initial_messages(
@@ -1837,6 +1861,7 @@ class AgentLoop:
                 ctx.history,
                 ctx.pending_summary,
                 include_memory_recent_history=not ctx.ephemeral,
+                affective_state_context=affective_state_context,
             )
         ctx.user_persisted_early = self._persist_user_message_early(
             ctx.msg,

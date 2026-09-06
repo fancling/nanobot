@@ -1,5 +1,6 @@
 import type {
   BoardPayload,
+  AffectiveStatePayload,
   AutomationsPayload,
   AutomationUpdatePayload,
   ChatSummary,
@@ -34,6 +35,12 @@ const API_READ_TIMEOUT_MS = 20_000;
 
 export async function fetchBoard(token: string): Promise<BoardPayload> {
   return request<BoardPayload>("/api/board", token, undefined, API_READ_TIMEOUT_MS);
+}
+
+export async function fetchAffectiveState(token: string): Promise<AffectiveStatePayload> {
+  return request<AffectiveStatePayload>(
+    "/api/affective-state", token, undefined, API_READ_TIMEOUT_MS,
+  );
 }
 
 export class ApiError extends Error {
