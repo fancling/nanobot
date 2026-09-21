@@ -47,7 +47,7 @@ AsyncOpenAI: Any = None
 
 _ALLOWED_MSG_KEYS = frozenset({
     "role", "content", "tool_calls", "tool_call_id", "name",
-    "reasoning_content", "extra_content",
+    "reasoning_content", "reasoning_details", "extra_content",
 })
 _ALNUM = string.ascii_letters + string.digits
 
@@ -542,6 +542,9 @@ class OpenAICompatProvider(LLMProvider):
         if strip_reasoning:
             for msg in sanitized:
                 msg.pop("reasoning_content", None)
+        if not (self._spec and self._spec.name == "openrouter"):
+            for msg in sanitized:
+                msg.pop("reasoning_details", None)
 
         def map_id(value: Any) -> Any:
             if not isinstance(value, str):
@@ -983,6 +986,28 @@ class OpenAICompatProvider(LLMProvider):
         return str(value)
 
     @classmethod
+    def _normalize_reasoning_details(cls, value: Any) -> list[dict[str, Any]] | None:
+        """Normalize OpenRouter reasoning detail blocks into plain dictionaries."""
+        if not isinstance(value, list):
+            return None
+        details = []
+        for item in value:
+            item_map = cls._maybe_mapping(item)
+            if item_map:
+                details.append(dict(item_map))
+        return details or None
+
+    @classmethod
+    def _extract_reasoning_details_text(cls, value: Any) -> str | None:
+        """Extract streamed reasoning text from OpenRouter detail blocks."""
+        details = cls._normalize_reasoning_details(value) or []
+        return "".join(
+            text
+            for detail in details
+            if isinstance((text := detail.get("text")), str)
+        ) or None
+
+    @classmethod
     def _extract_thinking_content(cls, value: Any) -> str | None:
         """Extract reasoning text from Mistral-style thinking blocks.
 
@@ -1087,10 +1112,16 @@ class OpenAICompatProvider(LLMProvider):
                 reasoning_content = self._extract_text_content(
                     response_map.get("reasoning_content")
                 )
+                reasoning_details = self._normalize_reasoning_details(
+                    response_map.get("reasoning_details")
+                )
+                if reasoning_content is None:
+                    reasoning_content = self._extract_reasoning_details_text(reasoning_details)
                 if content is not None:
                     return LLMResponse(
                         content=content,
                         reasoning_content=reasoning_content,
+                        reasoning_details=reasoning_details,
                         finish_reason=str(response_map.get("finish_reason") or "stop"),
                         usage=self._extract_usage(response_map),
                     )
@@ -1112,6 +1143,11 @@ class OpenAICompatProvider(LLMProvider):
             reasoning_content = msg0.get("reasoning_content")
             if reasoning_content is None and msg0.get("reasoning"):
                 reasoning_content = self._extract_text_content(msg0.get("reasoning"))
+            reasoning_details = self._normalize_reasoning_details(
+                msg0.get("reasoning_details")
+            )
+            if reasoning_content is None:
+                reasoning_content = self._extract_reasoning_details_text(reasoning_details)
             # Mistral reasoning models return thinking text inside the content
             # array; lift it into reasoning_content so the runner records it
             # under the reasoning trace.
@@ -1130,6 +1166,14 @@ class OpenAICompatProvider(LLMProvider):
                     content = self._extract_text_content(m.get("content"))
                 if reasoning_content is None:
                     reasoning_content = m.get("reasoning_content")
+                if reasoning_details is None:
+                    reasoning_details = self._normalize_reasoning_details(
+                        m.get("reasoning_details")
+                    )
+                    if reasoning_content is None:
+                        reasoning_content = self._extract_reasoning_details_text(
+                            reasoning_details
+                        )
 
             parsed_tool_calls = []
             for tc in raw_tool_calls:
@@ -1152,6 +1196,7 @@ class OpenAICompatProvider(LLMProvider):
                 finish_reason=finish_reason,
                 usage=self._extract_usage(response_map),
                 reasoning_content=reasoning_content if isinstance(reasoning_content, str) else None,
+                reasoning_details=reasoning_details,
             )
 
         if not response.choices:
@@ -1194,6 +1239,12 @@ class OpenAICompatProvider(LLMProvider):
         reasoning_content = getattr(msg, "reasoning_content", None)
         if reasoning_content is None and getattr(msg, "reasoning", None):
             reasoning_content = msg.reasoning
+        msg_map = self._maybe_mapping(msg) or {}
+        reasoning_details = self._normalize_reasoning_details(
+            msg_map.get("reasoning_details")
+        )
+        if reasoning_content is None:
+            reasoning_content = self._extract_reasoning_details_text(reasoning_details)
 
         return LLMResponse(
             content=content,
@@ -1201,15 +1252,31 @@ class OpenAICompatProvider(LLMProvider):
             finish_reason=finish_reason or "stop",
             usage=self._extract_usage(response),
             reasoning_content=reasoning_content,
+            reasoning_details=reasoning_details,
         )
 
     @classmethod
     def _parse_chunks(cls, chunks: list[Any]) -> LLMResponse:
         content_parts: list[str] = []
         reasoning_parts: list[str] = []
+        reasoning_detail_bufs: dict[int, dict[str, Any]] = {}
         tc_bufs: dict[int, dict[str, Any]] = {}
         finish_reason = "stop"
         usage: dict[str, int] = {}
+
+        def _accum_reasoning_details(value: Any, *, append_text: bool) -> None:
+            """Merge OpenRouter streaming reasoning detail deltas by index."""
+            for idx_hint, detail in enumerate(cls._normalize_reasoning_details(value) or []):
+                raw_index = detail.get("index")
+                index = raw_index if isinstance(raw_index, int) else idx_hint
+                buf = reasoning_detail_bufs.setdefault(index, {})
+                for key, item in detail.items():
+                    if key == "text" and isinstance(item, str):
+                        buf[key] = str(buf.get(key) or "") + item
+                        if append_text:
+                            reasoning_parts.append(item)
+                    elif item is not None:
+                        buf[key] = item
 
         def _accum_tc(tc: Any, idx_hint: int) -> None:
             """Accumulate one streaming tool-call delta into *tc_bufs*."""
@@ -1285,6 +1352,10 @@ class OpenAICompatProvider(LLMProvider):
                     text = cls._extract_thinking_content(raw_delta_content)
                 if text:
                     reasoning_parts.append(text)
+                _accum_reasoning_details(
+                    delta.get("reasoning_details"),
+                    append_text=not bool(text),
+                )
                 for idx, tc in enumerate(delta.get("tool_calls") or []):
                     _accum_tc(tc, idx)
                 _accum_legacy_function_call(delta.get("function_call"))
@@ -1309,10 +1380,16 @@ class OpenAICompatProvider(LLMProvider):
                 reasoning = getattr(delta, "reasoning_content", None)
                 if not reasoning:
                     reasoning = getattr(delta, "reasoning", None)
+                reasoning_text = None
                 if reasoning:
-                    text = cls._extract_text_content(reasoning)
-                    if text:
-                        reasoning_parts.append(text)
+                    reasoning_text = cls._extract_text_content(reasoning)
+                    if reasoning_text:
+                        reasoning_parts.append(reasoning_text)
+                delta_map = cls._maybe_mapping(delta) or {}
+                _accum_reasoning_details(
+                    delta_map.get("reasoning_details"),
+                    append_text=not bool(reasoning_text),
+                )
             for tc in (getattr(delta, "tool_calls", None) or []) if delta else []:
                 _accum_tc(tc, getattr(tc, "index", 0))
             if delta:
@@ -1343,6 +1420,7 @@ class OpenAICompatProvider(LLMProvider):
             finish_reason=finish_reason,
             usage=usage,
             reasoning_content="".join(reasoning_parts) or None,
+            reasoning_details=list(reasoning_detail_bufs.values()) or None,
         )
 
     @classmethod
@@ -1583,6 +1661,11 @@ class OpenAICompatProvider(LLMProvider):
                             # Mistral keeps the thinking trace inside the
                             # content array rather than a separate field.
                             r_text = self._extract_thinking_content(raw_delta_content)
+                        if not r_text:
+                            delta_map = self._maybe_mapping(delta_obj) or {}
+                            r_text = self._extract_reasoning_details_text(
+                                delta_map.get("reasoning_details")
+                            )
                         if r_text:
                             await on_thinking_delta(r_text)
                     if on_tool_call_delta:

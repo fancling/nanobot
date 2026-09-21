@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
+from nanobot.providers.registry import find_by_name
 from nanobot.utils.helpers import build_assistant_message
 
 # ── _parse: non-streaming ─────────────────────────────────────────────────
@@ -50,6 +51,52 @@ def test_parse_dict_reasoning_content_none_when_absent() -> None:
     result = provider._parse(response)
 
     assert result.reasoning_content is None
+
+
+def test_parse_dict_extracts_openrouter_reasoning_details() -> None:
+    """OpenRouter detail text is surfaced while its signed blocks are preserved."""
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider()
+
+    details = [{
+        "type": "reasoning.text",
+        "text": "Let me verify that. ",
+        "signature": "signed-token",
+        "format": "google-gemini-v1",
+        "index": 0,
+    }]
+    result = provider._parse({
+        "choices": [{
+            "message": {"content": "answer", "reasoning_details": details},
+            "finish_reason": "stop",
+        }],
+    })
+
+    assert result.content == "answer"
+    assert result.reasoning_content == "Let me verify that. "
+    assert result.reasoning_details == details
+
+
+def test_parse_dict_preserves_signature_only_openrouter_reasoning_details() -> None:
+    """Final OpenRouter chunks may carry only a Gemini reasoning signature."""
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider()
+
+    details = [{
+        "type": "reasoning.text",
+        "signature": "signed-token",
+        "format": "google-gemini-v1",
+        "index": 0,
+    }]
+    result = provider._parse({
+        "choices": [{
+            "message": {"content": "answer", "reasoning_details": details},
+            "finish_reason": "stop",
+        }],
+    })
+
+    assert result.reasoning_content is None
+    assert result.reasoning_details == details
 
 
 def test_parse_dict_reasoning_content_empty_string_preserved() -> None:
@@ -170,6 +217,54 @@ def test_parse_chunks_dict_reasoning_content_none_when_absent() -> None:
 
     assert result.content == "hi"
     assert result.reasoning_content is None
+
+
+def test_parse_chunks_accumulates_openrouter_reasoning_details() -> None:
+    chunks = [
+        {"choices": [{"finish_reason": None, "delta": {"reasoning_details": [{
+            "type": "reasoning.text", "text": "Step 1. ", "index": 0,
+        }]}}]},
+        {"choices": [{"finish_reason": None, "delta": {"reasoning_details": [{
+            "type": "reasoning.text", "text": "Step 2.", "index": 0,
+        }]}}]},
+        {"choices": [{"finish_reason": "stop", "delta": {
+            "content": "answer",
+            "reasoning_details": [{
+                "type": "reasoning.text",
+                "signature": "signed-token",
+                "format": "google-gemini-v1",
+                "index": 0,
+            }],
+        }}]},
+    ]
+
+    result = OpenAICompatProvider._parse_chunks(chunks)
+
+    assert result.content == "answer"
+    assert result.reasoning_content == "Step 1. Step 2."
+    assert result.reasoning_details == [{
+        "type": "reasoning.text",
+        "text": "Step 1. Step 2.",
+        "signature": "signed-token",
+        "format": "google-gemini-v1",
+        "index": 0,
+    }]
+
+
+def test_reasoning_details_replayed_only_to_openrouter() -> None:
+    details = [{"type": "reasoning.text", "signature": "signed-token", "index": 0}]
+    messages = [
+        {"role": "user", "content": "question"},
+        {"role": "assistant", "content": "answer", "reasoning_details": details},
+        {"role": "user", "content": "follow-up"},
+    ]
+
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        openrouter = OpenAICompatProvider(spec=find_by_name("openrouter"))
+        deepseek = OpenAICompatProvider(spec=find_by_name("deepseek"))
+
+    assert openrouter._sanitize_messages(messages)[1]["reasoning_details"] == details
+    assert "reasoning_details" not in deepseek._sanitize_messages(messages)[1]
 
 
 # ── _parse_chunks: streaming SDK-object branch ────────────────────────────

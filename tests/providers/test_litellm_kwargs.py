@@ -297,6 +297,54 @@ def _fake_chat_stream_legacy_function_call_chunks():
     return _stream()
 
 
+def _fake_chat_stream_openrouter_reasoning_details():
+    """Mimic OpenRouter's Gemini reasoning_details streaming extension."""
+
+    def _delta(reasoning_details=None, content=None):
+        delta = MagicMock()
+        delta.content = content
+        delta.reasoning_content = None
+        delta.reasoning = None
+        delta.tool_calls = None
+        delta.function_call = None
+        delta.model_dump.return_value = {"reasoning_details": reasoning_details}
+        return delta
+
+    async def _stream():
+        yield SimpleNamespace(
+            choices=[SimpleNamespace(
+                finish_reason=None,
+                delta=_delta([{
+                    "type": "reasoning.text", "text": "checking ", "index": 0,
+                }]),
+            )],
+            usage=None,
+        )
+        yield SimpleNamespace(
+            choices=[SimpleNamespace(
+                finish_reason=None,
+                delta=_delta([{
+                    "type": "reasoning.text", "text": "done", "index": 0,
+                }]),
+            )],
+            usage=None,
+        )
+        yield SimpleNamespace(
+            choices=[SimpleNamespace(
+                finish_reason="stop",
+                delta=_delta([{
+                    "type": "reasoning.text",
+                    "signature": "signed-token",
+                    "format": "google-gemini-v1",
+                    "index": 0,
+                }], content="answer"),
+            )],
+            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+        )
+
+    return _stream()
+
+
 @pytest.mark.asyncio
 async def test_openai_compat_stream_forwards_reasoning_deltas_deepseek_style() -> None:
     """Regression: DeepSeek-V4 / reasoner expose ``delta.reasoning_content`` during streaming."""
@@ -333,6 +381,38 @@ async def test_openai_compat_stream_forwards_reasoning_deltas_deepseek_style() -
     assert result.reasoning_content == "step1step2"
     assert result.content == "answer"
     mock_chat.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_openai_compat_stream_forwards_openrouter_reasoning_details() -> None:
+    mock_chat = AsyncMock(return_value=_fake_chat_stream_openrouter_reasoning_details())
+    thinking: list[str] = []
+
+    async def on_thinking(delta: str) -> None:
+        thinking.append(delta)
+
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_openai:
+        mock_openai.return_value.chat.completions.create = mock_chat
+        provider = OpenAICompatProvider(
+            api_key="sk-test",
+            default_model="google/gemini-3.8-flash",
+            spec=find_by_name("openrouter"),
+        )
+        result = await provider.chat_stream(
+            messages=[{"role": "user", "content": "hi"}],
+            model="google/gemini-3.8-flash",
+            on_thinking_delta=on_thinking,
+        )
+
+    assert thinking == ["checking ", "done"]
+    assert result.reasoning_content == "checking done"
+    assert result.reasoning_details == [{
+        "type": "reasoning.text",
+        "text": "checking done",
+        "signature": "signed-token",
+        "format": "google-gemini-v1",
+        "index": 0,
+    }]
 
 
 @pytest.mark.asyncio

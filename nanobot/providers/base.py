@@ -143,6 +143,7 @@ class LLMResponse:
     usage: dict[str, int] = field(default_factory=dict)
     retry_after: float | None = None  # Provider supplied retry wait in seconds.
     reasoning_content: str | None = None  # Kimi, DeepSeek-R1, MiMo etc.
+    reasoning_details: list[dict[str, Any]] | None = None  # OpenRouter structured reasoning
     thinking_blocks: list[dict] | None = None  # Anthropic extended thinking
     # Structured error metadata used by retry policy when finish_reason == "error".
     error_status_code: int | None = None

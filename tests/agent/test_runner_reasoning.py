@@ -51,6 +51,11 @@ async def test_runner_preserves_reasoning_fields_in_assistant_history():
                 content="thinking",
                 tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
                 reasoning_content="hidden reasoning",
+                reasoning_details=[{
+                    "type": "reasoning.text",
+                    "signature": "signed-token",
+                    "index": 0,
+                }],
                 thinking_blocks=[{"type": "thinking", "thinking": "step"}],
                 usage={"prompt_tokens": 5, "completion_tokens": 3},
             )
@@ -81,6 +86,11 @@ async def test_runner_preserves_reasoning_fields_in_assistant_history():
     ]
     assert len(assistant_messages) == 1
     assert assistant_messages[0]["reasoning_content"] == "hidden reasoning"
+    assert assistant_messages[0]["reasoning_details"] == [{
+        "type": "reasoning.text",
+        "signature": "signed-token",
+        "index": 0,
+    }]
     assert assistant_messages[0]["thinking_blocks"] == [{"type": "thinking", "thinking": "step"}]
 
 
