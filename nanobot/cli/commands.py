@@ -1003,6 +1003,8 @@ def _run_gateway(
         workframe_session_manager=agent.workframe.sessions,
         cron_service=cron,
         webui_runtime_model_name=_webui_runtime_model_name,
+        webui_compact_session=agent.compact_session,
+        webui_compaction_status=agent.session_compaction_status,
         webui_cron_pending_job_ids=getattr(agent, "pending_cron_job_ids_for_session", None),
         webui_static_dist=webui_static_dist,
         webui_runtime_surface=webui_runtime_surface,

@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shutil
+import uuid
 from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -305,8 +306,7 @@ class Session:
         Returns ``(dropped, already_consolidated_count)`` where *dropped* is
         the list of removed messages (in original order) and
         *already_consolidated_count* is how many of those were inside the
-        pre-existing ``last_consolidated`` prefix and therefore do not need
-        raw archiving.
+        pre-existing ``last_consolidated`` prefix.
         """
         if max_messages <= 0:
             dropped = list(self.messages)
@@ -387,22 +387,23 @@ class Session:
         on_archive: Any = None,
         limit: int = FILE_MAX_MESSAGES,
     ) -> None:
-        """Bound session message growth by archiving and trimming old prefixes."""
+        """Bound session growth, backing up the full trimmed set when a callback is given."""
         if limit <= 0 or len(self.messages) <= limit:
             return
 
-        dropped, already_consolidated = self.retain_recent_legal_suffix(limit)
+        dropped, _ = self.retain_recent_legal_suffix(limit)
         if not dropped:
             return
 
-        archive_chunk = dropped[already_consolidated:]
-        if archive_chunk and on_archive:
-            on_archive(archive_chunk)
+        backed_up = 0
+        if on_archive:
+            on_archive(dropped)
+            backed_up = len(dropped)
         logger.info(
-            "Session file cap hit for {}: dropped {}, raw-archived {}, kept {}",
+            "Session file cap hit for {}: dropped {}, raw-backed-up {}, kept {}",
             self.key,
             len(dropped),
-            len(archive_chunk),
+            backed_up,
             len(self.messages),
         )
 
@@ -432,6 +433,54 @@ class SessionManager:
     def _get_legacy_session_path(self, key: str) -> Path:
         """Legacy global session path (~/.nanobot/sessions/)."""
         return self.legacy_sessions_dir / f"{self.safe_key(key)}.jsonl"
+
+    def backup_raw_messages(
+        self,
+        session_key: str,
+        messages: list[dict[str, Any]],
+    ) -> Path | None:
+        """Atomically preserve hard-cap evictions outside model memory history."""
+        if not messages:
+            return None
+
+        archive_dir = ensure_dir(self.sessions_dir / "archive" / "raw")
+        timestamp = datetime.now().strftime("%Y%m%dT%H%M%S%f")
+        archive_id = uuid.uuid4().hex[:8]
+        path = archive_dir / f"{self.safe_key(session_key)}-{timestamp}-{archive_id}.jsonl"
+        tmp_path = path.with_suffix(".jsonl.tmp")
+        metadata = {
+            "_type": "raw_session_archive",
+            "session_key": session_key,
+            "archived_at": datetime.now().isoformat(),
+            "message_count": len(messages),
+        }
+
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.write(json.dumps(metadata, ensure_ascii=False) + "\n")
+                for message in messages:
+                    f.write(json.dumps(message, ensure_ascii=False) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+
+            os.replace(tmp_path, path)
+            with suppress(PermissionError):
+                fd = os.open(str(archive_dir), os.O_RDONLY)
+                try:
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+        except BaseException:
+            tmp_path.unlink(missing_ok=True)
+            raise
+
+        logger.info(
+            "Backed up {} raw session messages for {} to {}",
+            len(messages),
+            session_key,
+            path,
+        )
+        return path
 
     def get_or_create(self, key: str) -> Session:
         """
@@ -729,6 +778,7 @@ class SessionManager:
             created_at: str | None = None
             updated_at: str | None = None
             stored_key: str | None = None
+            last_consolidated = 0
             with open(path, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
@@ -740,6 +790,7 @@ class SessionManager:
                         created_at = data.get("created_at")
                         updated_at = data.get("updated_at")
                         stored_key = data.get("key")
+                        last_consolidated = data.get("last_consolidated", 0)
                     else:
                         messages.append(data)
             return {
@@ -748,6 +799,7 @@ class SessionManager:
                 "updated_at": updated_at,
                 "metadata": metadata,
                 "messages": messages,
+                "last_consolidated": last_consolidated,
             }
         except Exception as e:
             logger.warning("Failed to read session {}: {}", key, e)

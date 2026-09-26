@@ -14,7 +14,7 @@ import json
 import mimetypes
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import unquote
@@ -23,6 +23,7 @@ from loguru import logger
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
+from nanobot.bus.events import OutboundMessage
 from nanobot.command.builtin import builtin_command_palette
 from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob, CronSchedule
@@ -161,6 +162,8 @@ class GatewayHTTPHandler:
         session_manager: SessionManager | None,
         static_dist_path: Path | None,
         runtime_model_name: Callable[[], str | None] | None,
+        compact_session: Callable[[str], Awaitable[dict[str, Any]]] | None = None,
+        compaction_status: Callable[[str], dict[str, Any]] | None = None,
         runtime_surface: str,
         runtime_capabilities_overrides: dict[str, Any] | None,
         bus: MessageBus,
@@ -181,6 +184,8 @@ class GatewayHTTPHandler:
         self.session_manager = session_manager
         self.static_dist_path = static_dist_path
         self.runtime_model_name = runtime_model_name
+        self.compact_session = compact_session
+        self.compaction_status = compaction_status
         self.bus = bus
         self.tokens = tokens
         self.media = media
@@ -403,6 +408,14 @@ class GatewayHTTPHandler:
         if m:
             return self._handle_reader_state(request, m.group(1))
 
+        m = re.match(r"^/api/sessions/([^/]+)/compaction-status$", got)
+        if m:
+            return await self._handle_session_compaction_status(request, m.group(1))
+
+        m = re.match(r"^/api/sessions/([^/]+)/compact$", got)
+        if m:
+            return await self._handle_session_compact(request, m.group(1))
+
         m = re.match(r"^/api/sessions/([^/]+)/file-preview$", got)
         if m:
             return self._handle_file_preview(request, m.group(1))
@@ -616,6 +629,66 @@ class GatewayHTTPHandler:
                 delete_webui_thread(f"websocket:{workframe_id.strip()}")
             delete_reader_state(chat_id)
         return _http_json_response({"deleted": bool(deleted)})
+
+    async def _handle_session_compaction_status(
+        self,
+        request: WsRequest,
+        key: str,
+    ) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if self.session_manager is None or self.compaction_status is None:
+            return _http_error(503, "session compaction status unavailable")
+        decoded_key = _decode_api_key(key)
+        if decoded_key is None:
+            return _http_error(400, "invalid session key")
+        if not _is_websocket_channel_session_key(decoded_key):
+            return _http_error(404, "session not found")
+        if self.session_manager.read_session_file(decoded_key) is None:
+            return _http_error(404, "session not found")
+        try:
+            status = await asyncio.to_thread(self.compaction_status, decoded_key)
+        except Exception:
+            self._log.exception("Manual compaction status failed for {}", decoded_key)
+            return _http_error(500, "session compaction status failed")
+        return _http_json_response(status)
+
+    async def _handle_session_compact(self, request: WsRequest, key: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if str(getattr(request, "method", "GET")).upper() != "GET":
+            return _http_error(405, "method not allowed")
+        if self.session_manager is None or self.compact_session is None:
+            return _http_error(503, "session compaction unavailable")
+        decoded_key = _decode_api_key(key)
+        if decoded_key is None:
+            return _http_error(400, "invalid session key")
+        if not _is_websocket_channel_session_key(decoded_key):
+            return _http_error(404, "session not found")
+        if self.session_manager.read_session_file(decoded_key) is None:
+            return _http_error(404, "session not found")
+
+        try:
+            result = await self.compact_session(decoded_key)
+        except Exception:
+            self._log.exception("Manual session compact failed for {}", decoded_key)
+            return _http_error(500, "session compaction failed")
+        if result.get("busy"):
+            return _http_error(409, "session is busy")
+
+        chat_id = decoded_key.split(":", 1)[1]
+        await self.bus.publish_outbound(
+            OutboundMessage(
+                channel="websocket",
+                chat_id=chat_id,
+                content="",
+                metadata={
+                    "_session_updated": True,
+                    "_session_update_scope": "metadata",
+                },
+            )
+        )
+        return _http_json_response(result)
 
     # -- Automation routes --------------------------------------------------
 

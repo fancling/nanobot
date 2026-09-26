@@ -1295,6 +1295,8 @@ class WebSocketChannel(BaseChannel):
         lat = msg.metadata.get("latency_ms")
         if isinstance(lat, (int, float)):
             payload["latency_ms"] = int(lat)
+        if msg.metadata.get("_retryable") is True:
+            payload["retryable"] = True
         if msg.metadata.get("_tool_events"):
             payload["tool_events"] = msg.metadata["_tool_events"]
         agent_ui = msg.metadata.get(OUTBOUND_META_AGENT_UI)

@@ -97,6 +97,55 @@ async function flushStreamFrame() {
 }
 
 describe("useNanobotStream", () => {
+  it("replays the last complete input after automatic model retries fail", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-retry", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+    const images = [{
+      media: { data_url: "data:image/png;base64,AA==", name: "diagram.png" },
+      preview: { url: "blob:diagram", name: "diagram.png" },
+    }];
+    const options = {
+      cliApps: [{ name: "github" }],
+      workspaceScope: {
+        project_path: "/tmp/project",
+        access_mode: "restricted" as const,
+      },
+    };
+
+    act(() => result.current.send("inspect this", images, options));
+    const firstOptions = fake.client.sendMessage.mock.calls[0][3];
+
+    act(() => {
+      fake.emit("chat-retry", {
+        event: "message",
+        chat_id: "chat-retry",
+        text: "Sorry, I encountered an error calling the AI model.",
+        retryable: true,
+      });
+      fake.emit("chat-retry", { event: "turn_end", chat_id: "chat-retry" });
+    });
+
+    expect(result.current.streamError).toEqual({
+      kind: "model_failure",
+      chatId: "chat-retry",
+    });
+    expect(result.current.canRetryLast).toBe(true);
+
+    act(() => result.current.retryLast());
+
+    expect(fake.client.sendMessage).toHaveBeenCalledTimes(2);
+    const retryCall = fake.client.sendMessage.mock.calls[1];
+    expect(retryCall[0]).toBe("chat-retry");
+    expect(retryCall[1]).toBe("inspect this");
+    expect(retryCall[2]).toEqual([images[0].media]);
+    expect(retryCall[3]).toMatchObject(options);
+    expect(retryCall[3].turnId).not.toBe(firstOptions.turnId);
+    expect(result.current.streamError).toBeNull();
+    expect(result.current.canRetryLast).toBe(false);
+  });
+
   it("batches answer deltas into one animation-frame update", async () => {
     const fake = fakeClient();
     const requestFrame = vi.spyOn(window, "requestAnimationFrame");

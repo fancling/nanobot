@@ -1223,6 +1223,73 @@ describe("ThreadShell", () => {
     });
   });
 
+  it("shows a threshold compact reminder and compacts only after the user clicks", async () => {
+    window.localStorage.clear();
+    const client = makeClient();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/sessions/websocket%3Achat-a/compaction-status")) {
+        return httpJson({
+          needed: true,
+          reason: "messages",
+          message_count: 121,
+          max_messages: 120,
+          estimated_tokens: 32000,
+          token_budget: 60416,
+          available: true,
+        });
+      }
+      if (url.endsWith("/api/sessions/websocket%3Achat-a/compact")) {
+        return httpJson({
+          compacted: true,
+          busy: false,
+          consolidated_messages: 121,
+          history_written: true,
+          summary_created: true,
+          original_messages_preserved: true,
+        });
+      }
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({}),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const dueSession = session("chat-a");
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={dueSession}
+          title="Chat chat-a"
+          onToggleSidebar={() => {}}
+          settingsSnapshot={modelSettings("deepseek-v4-pro", "deepseek")}
+        />,
+      ),
+    );
+
+    const reminder = await screen.findByRole("status");
+    expect(reminder).toHaveTextContent("Conversation ready to compact");
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/sessions/websocket%3Achat-a/compact",
+      expect.anything(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Compact now" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/sessions/websocket%3Achat-a/compact",
+        expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+      );
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "Compacted 121 messages and wrote a history.jsonl entry",
+      );
+    });
+  });
+
   it("clears the stream error banner when the user switches to another chat", async () => {
     const client = makeClient();
     const onNewChat = vi.fn().mockResolvedValue("chat-a");

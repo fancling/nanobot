@@ -8,6 +8,7 @@ import os
 import time
 from contextlib import AsyncExitStack, nullcontext, suppress
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum, auto
 from functools import partial
 from pathlib import Path
@@ -225,6 +226,7 @@ class AgentLoop:
         session_ttl_minutes: int = 0,
         consolidation_ratio: float = 0.5,
         max_messages: int = 120,
+        auto_consolidation_enabled: bool = True,
         hooks: list[AgentHook] | None = None,
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
@@ -332,6 +334,7 @@ class AgentLoop:
         )
         self._unified_session = unified_session
         self._max_messages = max_messages if max_messages > 0 else 120
+        self._auto_consolidation_enabled = auto_consolidation_enabled
         self._running = False
         self._mcp_servers = mcp_servers or {}
         self._mcp_stacks: dict[str, AsyncExitStack] = {}
@@ -492,6 +495,7 @@ class AgentLoop:
             session_ttl_minutes=defaults.session_ttl_minutes,
             consolidation_ratio=defaults.consolidation_ratio,
             max_messages=defaults.max_messages,
+            auto_consolidation_enabled=defaults.auto_consolidation_enabled,
             tools_config=config.tools,
             model_presets=preset_helpers.configured_model_presets(config),
             model_preset=defaults.model_preset,
@@ -1485,10 +1489,11 @@ class AgentLoop:
         if pending:
             logger.info("Memory compact triggered for session {}", key)
 
-        await runtime.consolidator.maybe_consolidate_by_tokens(
-            session,
-            replay_max_messages=self._max_messages,
-        )
+        if getattr(self, "_auto_consolidation_enabled", True):
+            await runtime.consolidator.maybe_consolidate_by_tokens(
+                session,
+                replay_max_messages=self._max_messages,
+            )
         is_subagent = msg.sender_id == "subagent"
         if is_subagent and self._persist_subagent_followup(session, msg):
             logger.debug("Subagent result persisted for session {}", key)
@@ -1550,17 +1555,19 @@ class AgentLoop:
         latency_ms = max(0, int((wall_done - t_wall) * 1000))
         self._save_turn(session, all_msgs, len(messages), turn_latency_ms=latency_ms)
         self._runtime_events().record_turn_latency(key, latency_ms)
+        raw_backup = getattr(runtime.sessions, "backup_raw_messages", None)
         session.enforce_file_cap(
-            on_archive=partial(runtime.context.memory.raw_archive, session_key=key)
+            on_archive=partial(raw_backup, key) if raw_backup is not None else None
         )
         self._clear_runtime_checkpoint(session)
         runtime.sessions.save(session)
-        self._schedule_background(
-            runtime.consolidator.maybe_consolidate_by_tokens(
-                session,
-                replay_max_messages=self._max_messages,
+        if getattr(self, "_auto_consolidation_enabled", True):
+            self._schedule_background(
+                runtime.consolidator.maybe_consolidate_by_tokens(
+                    session,
+                    replay_max_messages=self._max_messages,
+                )
             )
-        )
         content = final_content or "Background task completed."
         outbound_metadata: dict[str, Any] = {}
         if channel == "slack" and key.startswith("slack:") and key.count(":") >= 2:
@@ -1712,6 +1719,12 @@ class AgentLoop:
         meta = dict(msg.metadata or {})
         if on_stream is not None and stop_reason not in {"error", "tool_error"}:
             meta["_streamed"] = True
+        if stop_reason == "error":
+            # Rich clients may offer an explicit replay of the triggering input
+            # after provider-level retries have been exhausted.  Tool failures
+            # are intentionally excluded because replaying them could repeat
+            # side effects that already happened earlier in the turn.
+            meta["_retryable"] = True
         if turn_latency_ms is not None:
             meta["latency_ms"] = int(turn_latency_ms)
 
@@ -1801,7 +1814,7 @@ class AgentLoop:
 
     async def _state_build(self, ctx: TurnContext) -> str:
         runtime = self._runtime_for_context(ctx)
-        if not ctx.ephemeral:
+        if not ctx.ephemeral and getattr(self, "_auto_consolidation_enabled", True):
             await runtime.consolidator.maybe_consolidate_by_tokens(
                 ctx.session,
                 replay_max_messages=self._max_messages,
@@ -2030,18 +2043,21 @@ class AgentLoop:
             ctx.turn_latency_ms,
         )
         if not ctx.ephemeral:
+            raw_backup = getattr(runtime.sessions, "backup_raw_messages", None)
             ctx.session.enforce_file_cap(
-                on_archive=partial(
-                    runtime.context.memory.raw_archive,
-                    session_key=ctx.session_key,
+                on_archive=(
+                    partial(raw_backup, ctx.session_key)
+                    if raw_backup is not None
+                    else None
                 )
             )
-            self._schedule_background(
-                runtime.consolidator.maybe_consolidate_by_tokens(
-                    ctx.session,
-                    replay_max_messages=self._max_messages,
+            if getattr(self, "_auto_consolidation_enabled", True):
+                self._schedule_background(
+                    runtime.consolidator.maybe_consolidate_by_tokens(
+                        ctx.session,
+                        replay_max_messages=self._max_messages,
+                    )
                 )
-            )
         self._clear_pending_user_turn(ctx.session)
         self._clear_runtime_checkpoint(ctx.session)
         runtime.sessions.save(ctx.session)
@@ -2349,3 +2365,66 @@ class AgentLoop:
         finally:
             await self._runtime_events().run_status_changed(msg, session_key, "idle")
             self._runtime_events().clear_turn(session_key)
+
+    async def compact_session(self, session_key: str) -> dict[str, Any]:
+        """Run user-triggered soft consolidation without truncating the session file."""
+        lock = self._session_locks.setdefault(session_key, asyncio.Lock())
+        if lock.locked():
+            return {
+                "compacted": False,
+                "busy": True,
+                "consolidated_messages": 0,
+                "history_written": False,
+                "summary_created": False,
+                "original_messages_preserved": True,
+            }
+
+        async with lock:
+            session = self.sessions.get_or_create(session_key)
+            original_message_count = len(session.messages)
+            result = await self.consolidator.maybe_consolidate_by_tokens(
+                session,
+                replay_max_messages=self._max_messages,
+            )
+        return {
+            "compacted": result["consolidated_messages"] > 0,
+            "busy": False,
+            **result,
+            "original_messages_preserved": len(session.messages) == original_message_count,
+        }
+
+    def session_compaction_status(self, session_key: str) -> dict[str, Any]:
+        """Expose manual-compaction readiness without mutating session state."""
+        unavailable = {
+            "needed": False,
+            "reason": None,
+            "message_count": 0,
+            "max_messages": self._max_messages,
+            "estimated_tokens": None,
+            "token_budget": None,
+            "available": False,
+        }
+        if self._auto_consolidation_enabled:
+            return unavailable
+        data = self.sessions.read_session_file(session_key)
+        if data is None:
+            return unavailable
+        try:
+            created_at = datetime.fromisoformat(data["created_at"])
+            updated_at = datetime.fromisoformat(data["updated_at"])
+        except (TypeError, ValueError):
+            created_at = updated_at = datetime.now()
+        session = Session(
+            key=session_key,
+            messages=data["messages"],
+            created_at=created_at,
+            updated_at=updated_at,
+            metadata=data["metadata"],
+            last_consolidated=data.get("last_consolidated", 0),
+        )
+        status = self.consolidator.compaction_status(
+            session,
+            replay_max_messages=self._max_messages,
+        )
+        status["available"] = True
+        return status

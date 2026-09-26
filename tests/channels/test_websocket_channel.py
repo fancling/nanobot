@@ -1108,6 +1108,7 @@ async def test_send_delivers_json_message_with_media_and_reply() -> None:
         content="hello",
         reply_to="m1",
         media=["/tmp/a.png"],
+        metadata={"_retryable": True},
         buttons=[["Yes", "No"]],
     )
     await channel.send(msg)
@@ -1119,6 +1120,7 @@ async def test_send_delivers_json_message_with_media_and_reply() -> None:
     assert payload["text"] == "hello"
     assert payload["reply_to"] == "m1"
     assert payload["media"] == ["/tmp/a.png"]
+    assert payload["retryable"] is True
 
 
 @pytest.mark.asyncio

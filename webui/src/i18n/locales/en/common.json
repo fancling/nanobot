@@ -800,6 +800,19 @@
         "none": "No next run"
       }
     },
+    "compactReminder": {
+      "title": "Conversation ready to compact",
+      "body": "The conversation reached its message or token limit. Compacting writes older context to history.jsonl while preserving the original session JSONL.",
+      "compactNow": "Compact now",
+      "compacting": "Compacting…",
+      "snooze": "Remind me later",
+      "success": "Compacted {{count}} messages and wrote a history.jsonl entry. The original session JSONL was preserved.",
+      "rawSuccess": "The summary model failed, so {{count}} messages were written to history.jsonl as a [RAW] entry. The original session JSONL was preserved.",
+      "noChanges": "No complete older turns were available to compact. history.jsonl was not changed.",
+      "dismissResult": "Dismiss compact result",
+      "busy": "This conversation is active. Try again after the current response finishes.",
+      "failed": "Could not compact this conversation. Please try again."
+    },
     "composer": {
       "placeholderThread": "Type your message…",
       "placeholderHero": "Ask anything...",
@@ -1040,6 +1053,11 @@
     "workspaceScopeRejected": {
       "title": "Workspace was not changed",
       "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+    },
+    "modelFailure": {
+      "title": "Model request failed",
+      "body": "The model still failed after automatic retries. You can retry your previous input directly.",
+      "retry": "Retry previous input"
     }
   },
   "workspace": {

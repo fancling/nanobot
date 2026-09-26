@@ -800,6 +800,19 @@
         "none": "Không có lần chạy tiếp theo"
       }
     },
+    "compactReminder": {
+      "title": "Cuộc trò chuyện đã sẵn sàng để thu gọn",
+      "body": "Số tin nhắn hoặc token đã đạt ngưỡng. Thu gọn sẽ ghi ngữ cảnh cũ vào history.jsonl và giữ nguyên session JSONL gốc.",
+      "compactNow": "Thu gọn ngay",
+      "compacting": "Đang thu gọn…",
+      "snooze": "Nhắc tôi sau",
+      "success": "Đã thu gọn {{count}} tin nhắn và ghi một mục vào history.jsonl. Session JSONL gốc vẫn được giữ nguyên.",
+      "rawSuccess": "Mô hình tóm tắt thất bại nên {{count}} tin nhắn đã được ghi vào history.jsonl dưới dạng mục [RAW]. Session JSONL gốc vẫn được giữ nguyên.",
+      "noChanges": "Không có lượt cũ hoàn chỉnh nào có thể thu gọn an toàn. history.jsonl không thay đổi.",
+      "dismissResult": "Đóng kết quả thu gọn",
+      "busy": "Cuộc trò chuyện đang hoạt động. Hãy thử lại sau khi phản hồi hiện tại kết thúc.",
+      "failed": "Không thể thu gọn cuộc trò chuyện. Vui lòng thử lại."
+    },
     "composer": {
       "placeholderThread": "Nhập tin nhắn…",
       "placeholderHero": "Bạn đang nghĩ gì?",
@@ -1040,6 +1053,11 @@
     "workspaceScopeRejected": {
       "title": "Workspace was not changed",
       "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+    },
+    "modelFailure": {
+      "title": "Yêu cầu mô hình thất bại",
+      "body": "Mô hình vẫn thất bại sau các lần thử lại tự động. Bạn có thể thử lại trực tiếp nội dung nhập trước đó.",
+      "retry": "Thử lại nội dung trước"
     }
   },
   "workspace": {

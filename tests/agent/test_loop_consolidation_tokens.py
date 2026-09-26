@@ -1,14 +1,24 @@
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 import nanobot.agent.memory as memory_module
 from nanobot.agent.loop import AgentLoop
+from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.config.schema import AgentDefaults, Config
 from nanobot.providers.base import LLMResponse
 
 
-def _make_loop(tmp_path, *, estimated_tokens: int, context_window_tokens: int) -> AgentLoop:
+def _make_loop(
+    tmp_path,
+    *,
+    estimated_tokens: int,
+    context_window_tokens: int,
+    auto_consolidation_enabled: bool = True,
+    max_messages: int = 120,
+) -> AgentLoop:
     from nanobot.providers.base import GenerationSettings
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
@@ -24,10 +34,187 @@ def _make_loop(tmp_path, *, estimated_tokens: int, context_window_tokens: int) -
         workspace=tmp_path,
         model="test-model",
         context_window_tokens=context_window_tokens,
+        auto_consolidation_enabled=auto_consolidation_enabled,
+        max_messages=max_messages,
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
     loop.consolidator._SAFETY_BUFFER = 0
     return loop
+
+
+def test_auto_consolidation_config_defaults_and_alias() -> None:
+    defaults = AgentDefaults()
+    assert defaults.auto_consolidation_enabled is True
+
+    defaults = AgentDefaults.model_validate(
+        {
+            "autoConsolidationEnabled": False,
+        }
+    )
+    assert defaults.auto_consolidation_enabled is False
+    assert defaults.model_dump(by_alias=True)["autoConsolidationEnabled"] is False
+
+
+def test_auto_consolidation_config_flows_into_loop(tmp_path) -> None:
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "workspace": str(tmp_path),
+                    "autoConsolidationEnabled": False,
+                }
+            }
+        }
+    )
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+
+    loop = AgentLoop.from_config(config, provider=provider)
+
+    assert loop._auto_consolidation_enabled is False
+
+
+@pytest.mark.asyncio
+async def test_disabled_auto_consolidation_keeps_hidden_messages_in_session(tmp_path) -> None:
+    loop = _make_loop(
+        tmp_path,
+        estimated_tokens=1000,
+        context_window_tokens=200,
+        auto_consolidation_enabled=False,
+        max_messages=2,
+    )
+    session = loop.sessions.get_or_create("cli:test")
+    for i in range(3):
+        session.add_message("user", f"u{i}")
+        session.add_message("assistant", f"a{i}")
+    loop.sessions.save(session)
+    original_messages = list(session.messages)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=True)  # type: ignore[method-assign]
+
+    await loop.process_direct("hello", session_key="cli:test")
+
+    loop.consolidator.maybe_consolidate_by_tokens.assert_not_awaited()
+    assert session.last_consolidated == 0
+    assert session.messages[: len(original_messages)] == original_messages
+    assert len(session.get_history(max_messages=2)) <= 2
+    assert not (tmp_path / "memory" / "history.jsonl").exists()
+
+
+@pytest.mark.asyncio
+async def test_disabled_auto_consolidation_skips_system_message_hooks(tmp_path) -> None:
+    loop = _make_loop(
+        tmp_path,
+        estimated_tokens=1000,
+        context_window_tokens=200,
+        auto_consolidation_enabled=False,
+    )
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=True)  # type: ignore[method-assign]
+    loop._run_agent_loop = AsyncMock(return_value=("done", [], [], "stop", False))
+
+    await loop._process_system_message(
+        InboundMessage(
+            channel="system",
+            sender_id="system",
+            chat_id="cli:test",
+            content="background result",
+        )
+    )
+
+    loop.consolidator.maybe_consolidate_by_tokens.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_manual_compact_uses_session_lock_and_reports_result(tmp_path) -> None:
+    loop = _make_loop(tmp_path, estimated_tokens=100, context_window_tokens=200)
+    session = loop.sessions.get_or_create("websocket:test")
+    session.add_message("user", "old question")
+    session.add_message("assistant", "old answer")
+    loop.sessions.save(session)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            "consolidated_messages": 2,
+            "history_written": True,
+            "summary_created": True,
+        }
+    )
+
+    result = await loop.compact_session("websocket:test")
+
+    assert result == {
+        "compacted": True,
+        "busy": False,
+        "consolidated_messages": 2,
+        "history_written": True,
+        "summary_created": True,
+        "original_messages_preserved": True,
+    }
+    loop.consolidator.maybe_consolidate_by_tokens.assert_awaited_once_with(  # type: ignore[attr-defined]
+        session,
+        replay_max_messages=loop._max_messages,
+    )
+    assert len(session.messages) == 2
+
+
+@pytest.mark.asyncio
+async def test_manual_compact_refuses_active_session(tmp_path) -> None:
+    loop = _make_loop(tmp_path, estimated_tokens=100, context_window_tokens=200)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock()  # type: ignore[method-assign]
+    lock = loop._session_locks.setdefault("websocket:test", asyncio.Lock())
+
+    async with lock:
+        result = await loop.compact_session("websocket:test")
+
+    assert result == {
+        "compacted": False,
+        "busy": True,
+        "consolidated_messages": 0,
+        "history_written": False,
+        "summary_created": False,
+        "original_messages_preserved": True,
+    }
+    loop.consolidator.maybe_consolidate_by_tokens.assert_not_awaited()  # type: ignore[attr-defined]
+
+
+def test_manual_compact_status_uses_message_and_token_thresholds(tmp_path) -> None:
+    loop = _make_loop(
+        tmp_path,
+        estimated_tokens=1000,
+        context_window_tokens=200,
+        auto_consolidation_enabled=False,
+        max_messages=2,
+    )
+    session = loop.sessions.get_or_create("websocket:test")
+    for i in range(3):
+        session.add_message("user", f"u{i}")
+        session.add_message("assistant", f"a{i}")
+    loop.sessions.save(session)
+
+    status = loop.session_compaction_status("websocket:test")
+
+    assert status["needed"] is True
+    assert status["reason"] == "both"
+    assert status["message_count"] == 6
+    assert status["max_messages"] == 2
+    assert status["estimated_tokens"] == 1000
+    assert status["token_budget"] == 200
+    assert status["available"] is True
+
+
+def test_compact_status_is_hidden_when_auto_consolidation_is_enabled(tmp_path) -> None:
+    loop = _make_loop(
+        tmp_path,
+        estimated_tokens=1000,
+        context_window_tokens=200,
+        auto_consolidation_enabled=True,
+    )
+    session = loop.sessions.get_or_create("websocket:test")
+    session.add_message("user", "hello")
+    loop.sessions.save(session)
+
+    status = loop.session_compaction_status("websocket:test")
+
+    assert status["needed"] is False
+    assert status["available"] is False
 
 
 @pytest.mark.asyncio
@@ -76,11 +263,18 @@ async def test_prompt_above_threshold_archives_until_next_user_boundary(tmp_path
     token_map = {"u1": 120, "a1": 120, "u2": 120, "a2": 120, "u3": 120}
     monkeypatch.setattr(memory_module, "estimate_message_tokens", lambda message: token_map[message["content"]])
 
-    await loop.consolidator.maybe_consolidate_by_tokens(session)
+    original_messages = list(session.messages)
+    result = await loop.consolidator.maybe_consolidate_by_tokens(session)
 
     archived_chunk = loop.consolidator.archive.await_args.args[0]
     assert [message["content"] for message in archived_chunk] == ["u1", "a1", "u2", "a2"]
     assert session.last_consolidated == 4
+    assert session.messages == original_messages
+    assert result == {
+        "consolidated_messages": 4,
+        "history_written": True,
+        "summary_created": True,
+    }
 
 
 @pytest.mark.asyncio

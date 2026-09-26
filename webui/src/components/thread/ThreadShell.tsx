@@ -3,6 +3,8 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
+import { CompactReminderNotice } from "@/components/thread/CompactReminderNotice";
+import { CompactResultNotice } from "@/components/thread/CompactResultNotice";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
@@ -12,6 +14,9 @@ import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/T
 import { useNanobotStream, type SendImage, type SendOptions } from "@/hooks/useNanobotStream";
 import { useSessionHistory } from "@/hooks/useSessions";
 import {
+  ApiError,
+  compactSession as apiCompactSession,
+  fetchSessionCompactionStatus,
   fetchInstalledCliApps,
   fetchMcpPresets,
   fetchSettings,
@@ -30,6 +35,8 @@ import {
 import { inferProviderFromModelName, providerDisplayLabel } from "@/lib/provider-brand";
 import type {
   ChatSummary,
+  SessionCompactResult,
+  SessionCompactionStatus,
   SettingsPayload,
   SlashCommand,
   UIMessage,
@@ -63,6 +70,25 @@ const FILE_PREVIEW_MIN_WIDTH = 360;
 const FILE_PREVIEW_MAX_WIDTH = 860;
 const FILE_PREVIEW_MIN_MAIN_WIDTH = 420;
 const FILE_PREVIEW_CLOSE_ANIMATION_MS = 320;
+const COMPACT_DISMISS_STORAGE_PREFIX = "nanobot:compact-dismiss:";
+
+function readCompactDismissedVersion(key: string): string | null {
+  try {
+    return window.localStorage.getItem(`${COMPACT_DISMISS_STORAGE_PREFIX}${key}`);
+  } catch {
+    return null;
+  }
+}
+
+function writeCompactDismissedVersion(key: string, version: string | null): void {
+  try {
+    const storageKey = `${COMPACT_DISMISS_STORAGE_PREFIX}${key}`;
+    if (version === null) window.localStorage.removeItem(storageKey);
+    else window.localStorage.setItem(storageKey, version);
+  } catch {
+    // Storage can be unavailable in hardened/private browser contexts.
+  }
+}
 
 function clampFilePreviewWidth(width: number, maxWidth: number): number {
   return Math.min(Math.max(width, FILE_PREVIEW_MIN_WIDTH), maxWidth);
@@ -287,6 +313,11 @@ export function ThreadShell({
   const [filePreviewPath, setFilePreviewPath] = useState<string | null>(null);
   const [filePreviewClosing, setFilePreviewClosing] = useState(false);
   const [filePreviewWidth, setFilePreviewWidth] = useState(FILE_PREVIEW_DEFAULT_WIDTH);
+  const [compactDismissedVersion, setCompactDismissedVersion] = useState<string | null>(null);
+  const [compactionStatus, setCompactionStatus] = useState<SessionCompactionStatus | null>(null);
+  const [compactResult, setCompactResult] = useState<SessionCompactResult | null>(null);
+  const [compacting, setCompacting] = useState(false);
+  const [compactError, setCompactError] = useState<string | null>(null);
   const shellRef = useRef<HTMLElement | null>(null);
   const filePreviewWidthRef = useRef(FILE_PREVIEW_DEFAULT_WIDTH);
   const filePreviewCloseTimerRef = useRef<number | null>(null);
@@ -314,6 +345,8 @@ export function ThreadShell({
     runStartedAt,
     goalState,
     send,
+    retryLast,
+    canRetryLast,
     transcribeAudio,
     stop,
     setMessages,
@@ -324,6 +357,45 @@ export function ThreadShell({
   useEffect(() => {
     if (chatId && historyKey) sessionKeyByChatIdRef.current.set(chatId, historyKey);
   }, [chatId, historyKey]);
+
+  useEffect(() => {
+    setCompactDismissedVersion(historyKey ? readCompactDismissedVersion(historyKey) : null);
+    setCompactionStatus(null);
+    setCompactResult(null);
+    setCompacting(false);
+    setCompactError(null);
+  }, [historyKey]);
+
+  useEffect(() => {
+    if (!session) {
+      setCompactionStatus(null);
+      return;
+    }
+    let cancelled = false;
+    void fetchSessionCompactionStatus(token, session.key)
+      .then((status) => {
+        if (!cancelled) setCompactionStatus(status);
+      })
+      .catch(() => {
+        if (!cancelled) setCompactionStatus(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.key, session?.updatedAt, token]);
+
+  const compactReminderVersion = session?.updatedAt ?? (
+    compactionStatus
+      ? `${compactionStatus.message_count}:${compactionStatus.estimated_tokens ?? "unknown"}`
+      : null
+  );
+  const compactReminderVisible = Boolean(
+    historyKey
+    && compactReminderVersion
+    && compactionStatus?.available
+    && compactionStatus.needed
+    && compactDismissedVersion !== compactReminderVersion,
+  );
 
   useEffect(() => {
     filePreviewWidthRef.current = filePreviewWidth;
@@ -647,12 +719,59 @@ export function ThreadShell({
     [chatId, onForkChat],
   );
 
+  const handleCompactNow = useCallback(async () => {
+    if (!session || compacting || isStreaming) return;
+    setCompacting(true);
+    setCompactError(null);
+    setCompactResult(null);
+    try {
+      const result = await apiCompactSession(token, session.key);
+      setCompactResult(result);
+      writeCompactDismissedVersion(session.key, compactReminderVersion);
+      setCompactDismissedVersion(compactReminderVersion);
+      handleTurnEnd();
+    } catch (error) {
+      setCompactError(
+        error instanceof ApiError && error.status === 409
+          ? t("thread.compactReminder.busy")
+          : t("thread.compactReminder.failed"),
+      );
+    } finally {
+      setCompacting(false);
+    }
+  }, [compactReminderVersion, compacting, handleTurnEnd, isStreaming, session, t, token]);
+
+  const handleCompactSnooze = useCallback(() => {
+    if (!session || !compactReminderVersion) return;
+    writeCompactDismissedVersion(session.key, compactReminderVersion);
+    setCompactDismissedVersion(compactReminderVersion);
+    setCompactError(null);
+  }, [compactReminderVersion, session]);
+
   const composer = (
     <>
       {streamError ? (
         <StreamErrorNotice
           error={streamError}
           onDismiss={dismissStreamError}
+          onRetry={canRetryLast ? retryLast : undefined}
+        />
+      ) : null}
+      {compactResult ? (
+        <CompactResultNotice
+          consolidatedMessages={compactResult.consolidated_messages}
+          historyWritten={compactResult.history_written}
+          summaryCreated={compactResult.summary_created}
+          onDismiss={() => setCompactResult(null)}
+        />
+      ) : null}
+      {compactReminderVisible ? (
+        <CompactReminderNotice
+          compacting={compacting}
+          disabled={isStreaming}
+          error={compactError}
+          onCompact={() => { void handleCompactNow(); }}
+          onSnooze={handleCompactSnooze}
         />
       ) : null}
       {session ? (

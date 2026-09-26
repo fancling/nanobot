@@ -53,6 +53,8 @@ def _make_handler(
     cron_service: CronService | None = None,
     cron_pending_job_ids: Any | None = None,
     affective_state: Any | None = None,
+    compact_session: Any | None = None,
+    compaction_status: Any | None = None,
 ) -> GatewayServices:
     config = WebSocketConfig.model_validate(cfg) if isinstance(cfg, dict) else cfg
     workspace = workspace_path or Path.cwd()
@@ -70,6 +72,8 @@ def _make_handler(
         cron_service=cron_service,
         cron_pending_job_ids=cron_pending_job_ids,
         affective_state=affective_state,
+        compact_session=compact_session,
+        compaction_status=compaction_status,
     )
 
 
@@ -85,6 +89,8 @@ def _ch(
     cron_service: CronService | None = None,
     cron_pending_job_ids: Any | None = None,
     affective_state: Any | None = None,
+    compact_session: Any | None = None,
+    compaction_status: Any | None = None,
     **extra: Any,
 ) -> WebSocketChannel:
     cfg: dict[str, Any] = {
@@ -106,6 +112,8 @@ def _ch(
         cron_service=cron_service,
         cron_pending_job_ids=cron_pending_job_ids,
         affective_state=affective_state,
+        compact_session=compact_session,
+        compaction_status=compaction_status,
     )
     return WebSocketChannel(cfg, bus, gateway=gateway)
 
@@ -914,6 +922,82 @@ async def test_sessions_list_only_returns_websocket_sessions_by_default(
         # Only websocket-channel sessions are part of the webui surface; CLI /
         # Slack / Lark rows would be non-resumable from the browser.
         assert keys == {"websocket:alpha", "websocket:beta"}
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_compact_threshold_status_and_manual_compact_route(
+    bus: MagicMock,
+    tmp_path: Path,
+) -> None:
+    sm = _seed_session(tmp_path, "websocket:compact-me")
+    compact_session = AsyncMock(
+        return_value={
+            "compacted": True,
+            "busy": False,
+            "consolidated_messages": 121,
+            "history_written": True,
+            "summary_created": True,
+            "original_messages_preserved": True,
+        }
+    )
+    compaction_status = MagicMock(
+        return_value={
+            "needed": True,
+            "reason": "messages",
+            "message_count": 121,
+            "max_messages": 120,
+            "estimated_tokens": 32000,
+            "token_budget": 60416,
+            "available": True,
+        }
+    )
+    bus.publish_outbound = AsyncMock()
+    channel = _ch(
+        bus,
+        session_manager=sm,
+        compact_session=compact_session,
+        compaction_status=compaction_status,
+        port=_free_port(),
+    )
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    base = f"http://127.0.0.1:{channel.config.port}"
+    try:
+        token = (await _http_get(f"{base}/webui/bootstrap")).json()["token"]
+        auth = {"Authorization": f"Bearer {token}"}
+
+        status_response = await _http_get(
+            f"{base}/api/sessions/websocket:compact-me/compaction-status",
+            headers=auth,
+        )
+        assert status_response.status_code == 200
+        status = status_response.json()
+        assert status["needed"] is True
+        assert status["reason"] == "messages"
+        assert status["message_count"] == 121
+        assert status["available"] is True
+        compaction_status.assert_called_with("websocket:compact-me")
+
+        response = await _http_get(
+            f"{base}/api/sessions/websocket:compact-me/compact",
+            headers=auth,
+        )
+        assert response.status_code == 200
+        assert response.json() == {
+            "compacted": True,
+            "busy": False,
+            "consolidated_messages": 121,
+            "history_written": True,
+            "summary_created": True,
+            "original_messages_preserved": True,
+        }
+        compact_session.assert_awaited_once_with("websocket:compact-me")
+        outbound = bus.publish_outbound.await_args.args[0]
+        assert outbound.chat_id == "compact-me"
+        assert outbound.metadata["_session_updated"] is True
     finally:
         await channel.stop()
         await server_task

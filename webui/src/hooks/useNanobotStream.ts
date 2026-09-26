@@ -35,6 +35,12 @@ interface ActiveAssistantCursor {
   index: number;
 }
 
+interface LastSend {
+  content: string;
+  images?: SendImage[];
+  options?: SendOptions;
+}
+
 type PendingStreamEvent =
   | { kind: "delta"; text: string; turn: UIMessageTurnFields }
   | { kind: "reasoning"; text: string; turn: UIMessageTurnFields };
@@ -439,10 +445,13 @@ export function useNanobotStream(
   /** Latest sustained goal for this ``chatId`` (``goal_state`` WS events). */
   goalState: GoalStateWsPayload | undefined;
   send: (content: string, images?: SendImage[], options?: SendOptions) => void;
+  /** Replay the last complete request payload with a fresh turn id. */
+  retryLast: () => void;
+  canRetryLast: boolean;
   transcribeAudio: (dataUrl: string, options?: { durationMs?: number }) => Promise<string>;
   stop: () => void;
   setMessages: React.Dispatch<React.SetStateAction<UIMessage[]>>;
-  /** Latest transport-level fault raised since the last ``dismissStreamError``.
+  /** Latest user-facing request fault raised since the last ``dismissStreamError``.
    * ``null`` when there is nothing to show. */
   streamError: StreamError | null;
   /** Clear the current ``streamError`` (e.g. after the user dismisses the
@@ -458,6 +467,7 @@ export function useNanobotStream(
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
   const [goalState, setGoalState] = useState<GoalStateWsPayload | undefined>(undefined);
   const [streamError, setStreamError] = useState<StreamError | null>(null);
+  const lastSendByChatRef = useRef<Map<string, LastSend>>(new Map());
   const buffer = useRef<StreamBuffer | null>(null);
   const activeAssistantRef = useRef<ActiveAssistantCursor | null>(null);
   const closedAssistantStreamIdsRef = useRef<Set<string>>(new Set());
@@ -830,6 +840,9 @@ export function useNanobotStream(
       }
 
       if (ev.event === "message") {
+        if (ev.retryable === true) {
+          setStreamError({ kind: "model_failure", chatId });
+        }
         if (
           suppressStreamUntilTurnEndRef.current &&
           (ev.kind === "tool_hint" || ev.kind === "progress" || ev.kind === "reasoning")
@@ -1038,6 +1051,8 @@ export function useNanobotStream(
       if (!hasImages && !content.trim()) return;
 
       flushPendingStreamEvents();
+      setStreamError(null);
+      lastSendByChatRef.current.set(chatId, { content, images, options });
       const turnId = crypto.randomUUID();
       const previews = hasImages ? images!.map((i) => i.preview) : undefined;
       setMessages((prev) => {
@@ -1070,6 +1085,19 @@ export function useNanobotStream(
     [chatId, clearActivitySegment, client, flushPendingStreamEvents],
   );
 
+  const retryLast = useCallback(() => {
+    const last = chatId ? lastSendByChatRef.current.get(chatId) : undefined;
+    if (!chatId || isStreaming || !last) return;
+    send(last.content, last.images, last.options);
+  }, [chatId, isStreaming, send]);
+
+  const canRetryLast = Boolean(
+    !isStreaming
+    && streamError?.kind === "model_failure"
+    && !!chatId
+    && lastSendByChatRef.current.has(chatId),
+  );
+
   const stop = useCallback(() => {
     if (!chatId) return;
     flushPendingStreamEvents();
@@ -1097,6 +1125,8 @@ export function useNanobotStream(
     runStartedAt,
     goalState,
     send,
+    retryLast,
+    canRetryLast,
     transcribeAudio,
     stop,
     setMessages,

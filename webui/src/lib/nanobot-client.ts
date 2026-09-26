@@ -89,7 +89,9 @@ export type StreamError =
    * Typically means the user attached images whose base64 size exceeded
    * ``maxMessageBytes`` on the server. */
   | { kind: "message_too_big" }
-  | { kind: "workspace_scope_rejected"; reason?: string; chatId?: string };
+  | { kind: "workspace_scope_rejected"; reason?: string; chatId?: string }
+  /** The provider still failed after nanobot exhausted its automatic retries. */
+  | { kind: "model_failure"; chatId: string };
 
 type ErrorHandler = (error: StreamError) => void;
 

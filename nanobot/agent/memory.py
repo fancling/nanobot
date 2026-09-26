@@ -813,6 +813,43 @@ class Consolidator:
             self._get_tool_definitions(),
         )
 
+    def compaction_status(
+        self,
+        session: Session,
+        *,
+        replay_max_messages: int | None = None,
+    ) -> dict[str, Any]:
+        """Return whether the same thresholds used by consolidation have been reached."""
+        unconsolidated_messages = max(0, len(session.messages) - session.last_consolidated)
+        message_limit_reached = (
+            self._replay_overflow_boundary(session, replay_max_messages) is not None
+        )
+        token_budget = self._input_token_budget if self.context_window_tokens > 0 else 0
+        estimated_tokens: int | None = None
+        token_limit_reached = False
+        if session.messages and token_budget > 0:
+            try:
+                estimated_tokens, _source = self.estimate_session_prompt_tokens(session)
+            except Exception:
+                logger.exception("Token estimation failed for compact status of {}", session.key)
+            token_limit_reached = bool(
+                estimated_tokens is not None
+                and estimated_tokens > 0
+                and estimated_tokens >= token_budget
+            )
+
+        reason = "both" if message_limit_reached and token_limit_reached else (
+            "messages" if message_limit_reached else "tokens" if token_limit_reached else None
+        )
+        return {
+            "needed": message_limit_reached or token_limit_reached,
+            "reason": reason,
+            "message_count": unconsolidated_messages,
+            "max_messages": replay_max_messages,
+            "estimated_tokens": estimated_tokens,
+            "token_budget": token_budget or None,
+        }
+
     @property
     def _input_token_budget(self) -> int:
         """Available input token budget for consolidation LLM."""
@@ -881,14 +918,18 @@ class Consolidator:
         session: Session,
         *,
         replay_max_messages: int | None = None,
-    ) -> None:
+    ) -> dict[str, Any]:
         """Loop: archive old messages until prompt fits within safe budget.
 
         The budget reserves space for completion tokens and a safety buffer
         so the LLM request never exceeds the context window.
         """
         if self.context_window_tokens <= 0:
-            return
+            return {
+                "consolidated_messages": 0,
+                "history_written": False,
+                "summary_created": False,
+            }
 
         lock = self.get_lock(session.key)
         async with lock:
@@ -897,14 +938,28 @@ class Consolidator:
             if fresh is not session:
                 session = fresh
             if not session.messages:
-                return
+                return {
+                    "consolidated_messages": 0,
+                    "history_written": False,
+                    "summary_created": False,
+                }
 
+            initial_cursor = session.last_consolidated
             budget = self._input_token_budget
             target = int(budget * self.consolidation_ratio)
             last_summary = await self._consolidate_replay_overflow(
                 session,
                 replay_max_messages,
             )
+
+            def result() -> dict[str, Any]:
+                consolidated = max(0, session.last_consolidated - initial_cursor)
+                return {
+                    "consolidated_messages": consolidated,
+                    "history_written": consolidated > 0,
+                    "summary_created": bool(last_summary and last_summary != "(nothing)"),
+                }
+
             try:
                 estimated, source = self.estimate_session_prompt_tokens(
                     session,
@@ -914,7 +969,7 @@ class Consolidator:
                 estimated, source = 0, "error"
             if estimated <= 0:
                 self._persist_last_summary(session, last_summary)
-                return
+                return result()
             if estimated < budget:
                 unconsolidated_count = len(session.messages) - session.last_consolidated
                 logger.debug(
@@ -926,7 +981,7 @@ class Consolidator:
                     unconsolidated_count,
                 )
                 self._persist_last_summary(session, last_summary)
-                return
+                return result()
 
             for round_num in range(self._MAX_CONSOLIDATION_ROUNDS):
                 if estimated <= target:
@@ -984,6 +1039,7 @@ class Consolidator:
             # into the runtime context on the next prepare_session() call, aligning
             # the summary injection strategy with AutoCompact._archive().
             self._persist_last_summary(session, last_summary)
+            return result()
 
     async def compact_idle_session(
         self,

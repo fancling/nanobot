@@ -800,6 +800,19 @@
         "none": "Tidak ada jadwal berikutnya"
       }
     },
+    "compactReminder": {
+      "title": "Percakapan siap diringkas",
+      "body": "Jumlah pesan atau token telah mencapai batas. Perangkuman menulis konteks lama ke history.jsonl dan tetap menyimpan session JSONL asli.",
+      "compactNow": "Ringkas sekarang",
+      "compacting": "Merangkum…",
+      "snooze": "Ingatkan nanti",
+      "success": "{{count}} pesan diringkas dan satu entri ditulis ke history.jsonl. Session JSONL asli tetap disimpan.",
+      "rawSuccess": "Model ringkasan gagal, jadi {{count}} pesan ditulis ke history.jsonl sebagai entri [RAW]. Session JSONL asli tetap disimpan.",
+      "noChanges": "Tidak ada giliran lama lengkap yang dapat diringkas dengan aman. history.jsonl tidak berubah.",
+      "dismissResult": "Tutup hasil perangkuman",
+      "busy": "Percakapan ini masih aktif. Coba lagi setelah respons selesai.",
+      "failed": "Percakapan tidak dapat diringkas. Silakan coba lagi."
+    },
     "composer": {
       "placeholderThread": "Ketik pesan Anda…",
       "placeholderHero": "Apa yang sedang Anda pikirkan?",
@@ -1040,6 +1053,11 @@
     "workspaceScopeRejected": {
       "title": "Workspace was not changed",
       "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+    },
+    "modelFailure": {
+      "title": "Permintaan model gagal",
+      "body": "Model masih gagal setelah percobaan ulang otomatis. Anda dapat langsung mencoba ulang masukan sebelumnya.",
+      "retry": "Coba lagi masukan sebelumnya"
     }
   },
   "workspace": {

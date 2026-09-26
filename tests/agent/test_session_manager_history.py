@@ -1,3 +1,5 @@
+import json
+
 from nanobot.session.manager import Session, SessionManager
 
 
@@ -781,10 +783,8 @@ def test_enforce_file_cap_no_message_loss_in_else_branch():
     )
 
 
-def test_enforce_file_cap_correct_archive_with_last_consolidated_in_else_branch():
-    """When last_consolidated > 0 and the else branch fires, only the
-    unconsolidated dropped messages should be raw-archived.  Messages in the
-    consolidated prefix that are dropped do NOT need raw archiving."""
+def test_enforce_file_cap_backs_up_consolidated_messages_in_else_branch():
+    """Hard-cap recovery includes dropped messages even when already consolidated."""
     from unittest.mock import MagicMock
 
     session = Session(key="test:else-lc-archive")
@@ -799,15 +799,33 @@ def test_enforce_file_cap_correct_archive_with_last_consolidated_in_else_branch(
     archive_fn = MagicMock()
     session.enforce_file_cap(on_archive=archive_fn, limit=4)
 
-    if archive_fn.called:
-        archived = archive_fn.call_args.args[0]
-        # Archived messages should NOT include any from the consolidated prefix
-        # (u0..u7). They should only be unconsolidated dropped messages.
-        archived_contents = [m["content"] for m in archived]
-        for c in archived_contents:
-            assert c not in [f"u{i}" for i in range(8)], (
-                f"Consolidated message {c!r} should not be raw-archived"
-            )
+    archive_fn.assert_called_once()
+    archived = archive_fn.call_args.args[0]
+    archived_contents = [m["content"] for m in archived]
+    assert archived_contents[:8] == [f"u{i}" for i in range(8)]
+
+
+def test_session_manager_raw_backup_is_complete_and_separate_from_memory(tmp_path):
+    manager = SessionManager(tmp_path)
+    messages = [
+        {"role": "user", "content": "hello", "timestamp": "2026-01-01T00:00:00"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": "call-1", "function": {"name": "x", "arguments": "{}"}}],
+        },
+    ]
+
+    path = manager.backup_raw_messages("websocket:chat/one", messages)
+
+    assert path is not None
+    assert path.parent == tmp_path / "sessions" / "archive" / "raw"
+    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    assert records[0]["_type"] == "raw_session_archive"
+    assert records[0]["session_key"] == "websocket:chat/one"
+    assert records[0]["message_count"] == 2
+    assert records[1:] == messages
+    assert not (tmp_path / "memory" / "history.jsonl").exists()
 
 
 def test_retain_recent_legal_suffix_last_consolidated_correct_in_else_branch():

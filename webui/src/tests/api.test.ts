@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  compactSession,
   createModelConfiguration,
   deleteSession,
   fetchFilePreview,
@@ -10,6 +11,7 @@ import {
   fetchMcpPresets,
   fetchProviderModels,
   fetchSessionAutomations,
+  fetchSessionCompactionStatus,
   fetchSettingsUsage,
   fetchSidebarState,
   fetchSkillDetail,
@@ -173,6 +175,28 @@ describe("webui API helpers", () => {
 
     expect(fetch).toHaveBeenCalledWith(
       "/api/sessions/websocket%3Achat-1/delete",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("percent-encodes websocket keys when compacting a session", async () => {
+    await compactSession("tok", "websocket:chat-1");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sessions/websocket%3Achat-1/compact",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("percent-encodes websocket keys when checking compact status", async () => {
+    await fetchSessionCompactionStatus("tok", "websocket:chat-1");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sessions/websocket%3Achat-1/compaction-status",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),

@@ -800,6 +800,19 @@
         "none": "沒有下次執行"
       }
     },
+    "compactReminder": {
+      "title": "該整理這段對話了",
+      "body": "此對話的訊息數或 Token 已達到內容閾值。整理會將較早內容寫入 history.jsonl，並完整保留原始 session JSONL。",
+      "compactNow": "立即整理",
+      "compacting": "正在整理…",
+      "snooze": "稍後提醒",
+      "success": "已整理 {{count}} 則訊息並寫入 history.jsonl；原始 session JSONL 已完整保留。",
+      "rawSuccess": "摘要模型失敗，已將 {{count}} 則訊息以 [RAW] 項目寫入 history.jsonl；原始 session JSONL 已完整保留。",
+      "noChanges": "沒有可安全整理的完整舊對話輪次，history.jsonl 未變更。",
+      "dismissResult": "關閉整理結果",
+      "busy": "此對話仍在執行，請等目前回覆結束後再試。",
+      "failed": "無法整理此對話，請再試一次。"
+    },
     "composer": {
       "placeholderThread": "輸入訊息…",
       "placeholderHero": "你在想什麼？",
@@ -1040,6 +1053,11 @@
     "workspaceScopeRejected": {
       "title": "工作區未變更",
       "body": "閘道拒絕了要求的專案或存取權限，Nanobot 已繼續使用先前的工作區。"
+    },
+    "modelFailure": {
+      "title": "模型請求失敗",
+      "body": "自動重試後仍未成功。你可以直接重試上一則輸入。",
+      "retry": "重試上一則輸入"
     }
   },
   "workspace": {

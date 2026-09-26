@@ -202,6 +202,25 @@ export interface SessionDeleteResult {
   automations?: SessionAutomationJob[];
 }
 
+export interface SessionCompactResult {
+  compacted: boolean;
+  busy: boolean;
+  consolidated_messages: number;
+  history_written: boolean;
+  summary_created: boolean;
+  original_messages_preserved: boolean;
+}
+
+export interface SessionCompactionStatus {
+  needed: boolean;
+  reason: "messages" | "tokens" | "both" | null;
+  message_count: number;
+  max_messages: number | null;
+  estimated_tokens: number | null;
+  token_budget: number | null;
+  available: boolean;
+}
+
 export interface SkillSummary {
   name: string;
   description: string;
@@ -927,6 +946,8 @@ export type InboundEvent =
       latency_ms?: number;
       /** Lightweight provenance for proactive assistant messages. */
       source?: UIMessageSource;
+      /** The model failed after automatic retries; the originating input may be replayed. */
+      retryable?: boolean;
       /** Optional structured payload on progress frames (channel-specific). */
       agent_ui?: AgentUIBlob;
     } & InboundTurnMetadata)

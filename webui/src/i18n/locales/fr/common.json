@@ -800,6 +800,19 @@
         "none": "Aucune prochaine exécution"
       }
     },
+    "compactReminder": {
+      "title": "Conversation prête à être compactée",
+      "body": "La limite de messages ou de jetons est atteinte. Le compactage écrit l’ancien contexte dans history.jsonl tout en conservant le session JSONL d’origine.",
+      "compactNow": "Compacter maintenant",
+      "compacting": "Compactage…",
+      "snooze": "Me le rappeler plus tard",
+      "success": "{{count}} messages compactés et une entrée écrite dans history.jsonl. Le session JSONL d’origine a été conservé.",
+      "rawSuccess": "Le modèle de résumé a échoué : {{count}} messages ont été écrits dans history.jsonl sous forme d’entrée [RAW]. Le session JSONL d’origine a été conservé.",
+      "noChanges": "Aucun ancien tour complet ne pouvait être compacté. history.jsonl n’a pas été modifié.",
+      "dismissResult": "Fermer le résultat du compactage",
+      "busy": "Cette conversation est active. Réessayez après la réponse en cours.",
+      "failed": "Impossible de compacter cette conversation. Réessayez."
+    },
     "composer": {
       "placeholderThread": "Saisissez votre message…",
       "placeholderHero": "Qu’avez-vous en tête ?",
@@ -1040,6 +1053,11 @@
     "workspaceScopeRejected": {
       "title": "Workspace was not changed",
       "body": "Nanobot kept the previous workspace because the requested project or access mode was rejected by the gateway."
+    },
+    "modelFailure": {
+      "title": "Échec de la requête au modèle",
+      "body": "Le modèle a encore échoué après les tentatives automatiques. Vous pouvez relancer directement votre saisie précédente.",
+      "retry": "Relancer la saisie précédente"
     }
   },
   "workspace": {

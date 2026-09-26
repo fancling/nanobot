@@ -229,21 +229,27 @@ class TestAgentLoopTTLParam:
     async def test_session_file_cap_archives_and_trims_old_messages(self, tmp_path):
         loop = _make_loop(tmp_path)
         loop.context.memory.raw_archive = MagicMock()
+        session = loop.sessions.get_or_create("cli:direct")
+        session.enforce_file_cap = MagicMock()
+        loop.sessions.backup_raw_messages = MagicMock()
 
-        for i in range(4):
-            msg = InboundMessage(
+        await loop._process_message(
+            InboundMessage(
                 channel="cli",
                 sender_id="u1",
                 chat_id="direct",
-                content=f"hello {i}",
+                content="hello",
             )
-            await loop._process_message(msg)
+        )
 
-        session = loop.sessions.get_or_create("cli:direct")
-        from nanobot.session.manager import FILE_MAX_MESSAGES
-        assert len(session.messages) <= FILE_MAX_MESSAGES
+        session.enforce_file_cap.assert_called_once()
+        backup = session.enforce_file_cap.call_args.kwargs["on_archive"]
+        evicted = [{"role": "user", "content": "old"}]
+        backup(evicted)
+        loop.sessions.backup_raw_messages.assert_called_once_with("cli:direct", evicted)
+        loop.context.memory.raw_archive.assert_not_called()
 
-    def test_session_enforce_file_cap_skips_archive_when_dropped_prefix_already_consolidated(self, tmp_path):
+    def test_session_enforce_file_cap_backs_up_consolidated_dropped_prefix(self, tmp_path):
         from nanobot.session.manager import Session
         archive_fn = MagicMock()
         session = Session(key="cli:direct")
@@ -254,9 +260,11 @@ class TestAgentLoopTTLParam:
         session.enforce_file_cap(on_archive=archive_fn, limit=4)
 
         assert len(session.messages) <= 4
-        archive_fn.assert_not_called()
+        archive_fn.assert_called_once()
+        archived = archive_fn.call_args.args[0]
+        assert [m["content"] for m in archived] == ["u0", "u1", "u2", "u3"]
 
-    def test_session_enforce_file_cap_archives_only_unconsolidated_dropped_prefix(self, tmp_path):
+    def test_session_enforce_file_cap_backs_up_entire_dropped_prefix(self, tmp_path):
         from nanobot.session.manager import Session
         archive_fn = MagicMock()
         session = Session(key="cli:direct")
@@ -269,7 +277,7 @@ class TestAgentLoopTTLParam:
         assert len(session.messages) <= 4
         archive_fn.assert_called_once()
         archived = archive_fn.call_args.args[0]
-        assert [m["content"] for m in archived] == ["u2", "u3"]
+        assert [m["content"] for m in archived] == ["u0", "u1", "u2", "u3"]
 
 
 class TestAutoCompact:

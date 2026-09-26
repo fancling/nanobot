@@ -1,4 +1,4 @@
-import { AlertTriangle, X } from "lucide-react";
+import { AlertTriangle, RotateCcw, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
@@ -8,15 +8,16 @@ import type { StreamError } from "@/lib/nanobot-client";
 interface StreamErrorNoticeProps {
   error: StreamError;
   onDismiss: () => void;
+  onRetry?: () => void;
 }
 
 /**
- * Dismissible banner that surfaces transport-level faults the user needs to
+ * Dismissible banner that surfaces request failures the user needs to
  * know about. Rendered above the composer so the message the fault referred
  * to remains in view just above. ``role="alert"`` + ``aria-live="assertive"``
  * ensures screen readers announce the failure.
  */
-export function StreamErrorNotice({ error, onDismiss }: StreamErrorNoticeProps) {
+export function StreamErrorNotice({ error, onDismiss, onRetry }: StreamErrorNoticeProps) {
   const { t } = useTranslation();
 
   const { title, body } = resolveCopy(error, t);
@@ -38,6 +39,17 @@ export function StreamErrorNotice({ error, onDismiss }: StreamErrorNoticeProps) 
       <div className="flex-1">
         <p className="font-medium">{title}</p>
         <p className="mt-0.5 text-destructive/80">{body}</p>
+        {onRetry ? (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onRetry}
+            className="mt-2 h-7 gap-1.5 border-destructive/30 bg-background px-2.5 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
+          >
+            <RotateCcw className="h-3.5 w-3.5" aria-hidden />
+            {t("errors.modelFailure.retry")}
+          </Button>
+        ) : null}
       </div>
       <Button
         variant="ghost"
@@ -66,6 +78,11 @@ function resolveCopy(
       return {
         title: t("errors.workspaceScopeRejected.title"),
         body: t("errors.workspaceScopeRejected.body"),
+      };
+    case "model_failure":
+      return {
+        title: t("errors.modelFailure.title"),
+        body: t("errors.modelFailure.body"),
       };
     default: {
       // Exhaustiveness guard: if a new StreamError kind is added, TS will

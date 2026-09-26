@@ -251,6 +251,11 @@ class AgentDefaults(Base):
         default=120,
         ge=0,
     )  # Max messages to replay from session history (0 = use default 120, respects token budget)
+    auto_consolidation_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("autoConsolidationEnabled", "auto_consolidation_enabled"),
+        serialization_alias="autoConsolidationEnabled",
+    )  # Automatically consolidate session history when the prompt exceeds the token budget
     consolidation_ratio: float = Field(
         default=0.5,
         ge=0.1,

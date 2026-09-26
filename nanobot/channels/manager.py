@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -59,6 +59,8 @@ class ChannelManager:
         workframe_session_manager: "SessionManager | None" = None,
         cron_service: Any | None = None,
         webui_runtime_model_name: Callable[[], str | None] | None = None,
+        webui_compact_session: Callable[[str], Awaitable[dict[str, Any]]] | None = None,
+        webui_compaction_status: Callable[[str], dict[str, Any]] | None = None,
         webui_cron_pending_job_ids: Callable[[str], set[str]] | None = None,
         webui_static_dist: bool = True,
         webui_runtime_surface: str = "browser",
@@ -71,6 +73,8 @@ class ChannelManager:
         self._workframe_session_manager = workframe_session_manager
         self._cron_service = cron_service
         self._webui_runtime_model_name = webui_runtime_model_name
+        self._webui_compact_session = webui_compact_session
+        self._webui_compaction_status = webui_compaction_status
         self._webui_cron_pending_job_ids = webui_cron_pending_job_ids
         self._webui_static_dist = webui_static_dist
         self._webui_runtime_surface = webui_runtime_surface
@@ -130,6 +134,8 @@ class ChannelManager:
                         default_restrict_to_workspace=self.config.tools.restrict_to_workspace,
                         disabled_skills=set(self.config.agents.defaults.disabled_skills),
                         runtime_model_name=self._webui_runtime_model_name,
+                        compact_session=self._webui_compact_session,
+                        compaction_status=self._webui_compaction_status,
                         runtime_surface=self._webui_runtime_surface,
                         runtime_capabilities_overrides=self._webui_runtime_capabilities,
                         cron_service=self._cron_service,

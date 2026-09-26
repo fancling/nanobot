@@ -193,8 +193,27 @@ async def test_streamed_flag_not_set_on_llm_error(tmp_path):
 
     assert result is not None
     assert "503" in result.content
+    assert result.metadata.get("_retryable") is True
     assert not result.metadata.get("_streamed"), \
         "_streamed must not be set when stop_reason is error"
+
+
+def test_tool_error_is_not_marked_retryable(tmp_path):
+    """Replaying a tool-failed turn could repeat side effects already performed."""
+    from nanobot.bus.events import InboundMessage
+
+    loop = _make_loop(tmp_path)
+    result = loop._assemble_outbound(
+        InboundMessage(channel="websocket", sender_id="u1", chat_id="c1", content="hi"),
+        "tool failed",
+        [],
+        "tool_error",
+        False,
+        AsyncMock(),
+    )
+
+    assert result is not None
+    assert "_retryable" not in result.metadata
 
 
 @pytest.mark.asyncio

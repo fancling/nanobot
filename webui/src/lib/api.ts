@@ -13,6 +13,8 @@ import type {
   NetworkSafetySettingsUpdate,
   ProviderModelsPayload,
   ProviderSettingsUpdate,
+  SessionCompactResult,
+  SessionCompactionStatus,
   SessionDeleteResult,
   SessionAutomationsPayload,
   SettingsPayload,
@@ -313,6 +315,28 @@ export async function deleteSession(
   const suffix = query.toString() ? `?${query}` : "";
   return request<SessionDeleteResult>(
     `${resolvedBase}/api/sessions/${encodeURIComponent(key)}/delete${suffix}`,
+    token,
+  );
+}
+
+export async function compactSession(
+  token: string,
+  key: string,
+  base: string = "",
+): Promise<SessionCompactResult> {
+  return request<SessionCompactResult>(
+    `${base}/api/sessions/${encodeURIComponent(key)}/compact`,
+    token,
+  );
+}
+
+export async function fetchSessionCompactionStatus(
+  token: string,
+  key: string,
+  base: string = "",
+): Promise<SessionCompactionStatus> {
+  return request<SessionCompactionStatus>(
+    `${base}/api/sessions/${encodeURIComponent(key)}/compaction-status`,
     token,
   );
 }

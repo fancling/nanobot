@@ -1875,7 +1875,8 @@ When a user is idle for longer than a configured threshold, nanobot **proactivel
 {
   "agents": {
     "defaults": {
-      "idleCompactAfterMinutes": 15
+      "idleCompactAfterMinutes": 15,
+      "autoConsolidationEnabled": true
     }
   }
 }
@@ -1884,6 +1885,7 @@ When a user is idle for longer than a configured threshold, nanobot **proactivel
 | Option | Default | Description |
 |--------|---------|-------------|
 | `agents.defaults.idleCompactAfterMinutes` | `15` | Minutes of idle time before auto-compaction starts. Set to `0` to disable. The default is close to a typical LLM KV cache expiry window, so stale sessions get compacted before the user returns. |
+| `agents.defaults.autoConsolidationEnabled` | `true` | Automatically consolidate older turns into `memory/history.jsonl` when a prompt exceeds the token budget. Set to `false` to leave consolidation to explicit/manual compaction. |
 
 `sessionTtlMinutes` remains accepted as a legacy alias for backward compatibility, but `idleCompactAfterMinutes` is the preferred config key going forward.
 
@@ -1898,7 +1900,25 @@ How it works:
 >
 > Concretely, auto compact rewrites `sessions/<key>.jsonl` in place: older messages (including their structured `tool_calls` / `tool_call_id` / `reasoning_content`) are replaced by just the retained recent suffix (currently 8 messages), while the archived prefix is preserved only as a plain-text summary appended to `memory/history.jsonl` (or a `[RAW] ...` flattened dump if LLM summarization fails). The original structured JSON of those turns is no longer recoverable from the session file.
 >
-> This differs from the **token-driven soft consolidation** that fires when a prompt exceeds the context budget: that path only advances an internal `last_consolidated` cursor and leaves the session file untouched, so the raw tool-call trail stays on disk and can still be replayed or audited. If you rely on that trail for debugging or auditing, set `idleCompactAfterMinutes` to `0` and let only the token-driven path run.
+> This differs from the **token-driven soft consolidation** that fires when a prompt exceeds the context budget: that path only advances an internal `last_consolidated` cursor and leaves the session file untouched, so the raw tool-call trail stays on disk and can still be replayed or audited. Set `autoConsolidationEnabled` to `false` to disable this per-turn path. `maxMessages` remains only the recent-message replay window and does not remove older messages from the session JSONL.
+>
+> To make `history.jsonl` updates fully user-triggered, set both `idleCompactAfterMinutes` to `0` and `autoConsolidationEnabled` to `false`. Manual calls to `compact_idle_session()` remain available. The independent 2,000-message session-file safety cap still trims oversized session files, but first writes the complete removed messages to `sessions/archive/raw/`; it does not write those messages to `memory/history.jsonl`.
+>
+> When `autoConsolidationEnabled` is `false`, the WebUI shows **Compact now** and **Remind me later** once the unconsolidated session exceeds `maxMessages` or the model input-token budget. Idle time alone never shows this reminder or triggers compaction. **Compact now** runs the same soft consolidation used by the token-driven path: it writes a summary (or degraded `[RAW]` entry) to `history.jsonl` and advances `last_consolidated`, while preserving every original structured message in the session JSONL. The WebUI reports how many messages were consolidated and confirms the history write. Dismissing the reminder writes nothing, and it can appear again after the next completed turn if the session remains over a threshold.
+
+For fully user-triggered history writes:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "idleCompactAfterMinutes": 0,
+      "autoConsolidationEnabled": false,
+      "maxMessages": 120
+    }
+  }
+}
+```
 
 ## Timezone
 

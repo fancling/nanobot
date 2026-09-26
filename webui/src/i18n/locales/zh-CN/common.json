@@ -800,6 +800,19 @@
         "none": "没有下次运行"
       }
     },
+    "compactReminder": {
+      "title": "该整理这段对话了",
+      "body": "该会话的消息数或 Token 已达到上下文阈值。整理会把较早的上下文写入 history.jsonl，并完整保留原始 session JSONL。",
+      "compactNow": "立即整理",
+      "compacting": "正在整理…",
+      "snooze": "稍后提醒",
+      "success": "已整理 {{count}} 条消息并写入 history.jsonl；原始 session JSONL 已完整保留。",
+      "rawSuccess": "摘要模型失败，已将 {{count}} 条消息以 [RAW] 条目写入 history.jsonl；原始 session JSONL 已完整保留。",
+      "noChanges": "没有可安全整理的完整旧对话轮次，history.jsonl 未发生变化。",
+      "dismissResult": "关闭整理结果",
+      "busy": "该会话仍在运行，请等当前回复结束后再试。",
+      "failed": "无法整理该会话，请重试。"
+    },
     "composer": {
       "placeholderThread": "输入消息…",
       "placeholderHero": "问任何问题...",
@@ -1040,6 +1053,11 @@
     "workspaceScopeRejected": {
       "title": "工作区未更改",
       "body": "网关拒绝了请求的项目或访问权限，Nanobot 已继续使用之前的工作区。"
+    },
+    "modelFailure": {
+      "title": "模型请求失败",
+      "body": "自动重试后仍未成功。你可以直接重试上一条输入。",
+      "retry": "重试上一条输入"
     }
   },
   "workspace": {
