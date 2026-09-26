@@ -42,6 +42,21 @@ const payload: AffectiveStatePayload = {
       provider: "open-meteo",
     },
   },
+  history: [{
+    period: "2026-09-04T06:00:00+09:00",
+    valid_until: "2026-09-04T12:00:00+09:00",
+    state: {
+      valence: "neutral",
+      arousal: "steady",
+      dominance: "balanced",
+      affiliation: "receptive",
+      curiosity: "interested",
+      expressiveness: "measured",
+    },
+    environment: { season: "autumn", day_period: "morning" },
+    changed_dimensions: ["arousal"],
+    initial: false,
+  }],
 };
 
 function page() {
@@ -70,6 +85,8 @@ describe("AffectiveStatePage", () => {
     expect(screen.getByRole("link", { name: "Weather data by Open-Meteo" })).toHaveAttribute(
       "href", "https://open-meteo.com/",
     );
+    expect(screen.getByText("State history")).toBeInTheDocument();
+    expect(screen.getByTestId("affective-history")).toHaveTextContent("Energy: Steady");
   });
 
   it("can retry a failed read", async () => {

@@ -1998,7 +1998,10 @@ them as facts to mention or explicit roleplaying instructions.
 | Expressiveness | `closed` — AgentName's expression feels closed-off and emotionally minimal. | `measured` — AgentName's expression feels measured and moderately open. | `vivid` — AgentName's expression feels vivid, animated, and emotionally transparent. |
 
 The WebUI's **Agent State** page shows the active six values, their descriptions, the environmental
-inputs, the current time window, and the exact context projected into ordinary conversations.
+inputs, the current time window, and the exact context projected into ordinary conversations. It also
+shows the recent generation history, including which dimensions changed in each period. History is
+stored with the current state in `memory/affective_state.json`, excludes the internal seed, and keeps
+the most recent 168 periods.
 
 ## Unified Session
 

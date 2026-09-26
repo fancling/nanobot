@@ -210,6 +210,9 @@ async def test_affective_state_route_is_authenticated_and_hides_internal_seed(bu
             "valence", "arousal", "dominance", "affiliation", "curiosity", "expressiveness",
         }
         assert "seed" not in payload
+        assert len(payload["history"]) == 1
+        assert payload["history"][0]["initial"] is True
+        assert "seed" not in payload["history"][0]
         assert payload["context_text"].startswith("[AFFECTIVE STATE]\n\n")
         assert all(
             dimension["description"] in payload["context_text"]

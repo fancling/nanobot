@@ -1130,6 +1130,10 @@
     "staleWeather": "最新天氣請求失敗，已使用快取的天氣狀況。",
     "context": "Affective State 上下文",
     "contextDescription": "提供給一般對話的確切自然語言描述。",
+    "history": "狀態歷史",
+    "historyDescription": "最近產生的週期，以及每次實際發生變化的維度。",
+    "initialState": "初始記錄狀態",
+    "noChanges": "本週期沒有維度變化",
     "dimension": {
       "valence": "心情",
       "arousal": "精力",

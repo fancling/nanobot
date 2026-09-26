@@ -31,6 +31,21 @@ export interface AffectiveWeatherPayload {
   provider: string;
 }
 
+export interface AffectiveEnvironmentPayload {
+  season?: string;
+  day_period?: string;
+  weather?: AffectiveWeatherPayload;
+}
+
+export interface AffectiveStateHistoryEntry {
+  period: string;
+  valid_until: string;
+  state: Record<AffectiveDimensionName, string>;
+  environment: AffectiveEnvironmentPayload;
+  changed_dimensions: AffectiveDimensionName[];
+  initial: boolean;
+}
+
 export interface AffectiveStatePayload {
   available: boolean;
   enabled: boolean;
@@ -38,11 +53,8 @@ export interface AffectiveStatePayload {
   valid_until?: string;
   dimensions?: Record<AffectiveDimensionName, AffectiveDimensionPayload>;
   context_text?: string;
-  environment?: {
-    season?: string;
-    day_period?: string;
-    weather?: AffectiveWeatherPayload;
-  };
+  environment?: AffectiveEnvironmentPayload;
+  history?: AffectiveStateHistoryEntry[];
 }
 
 /** "trace" rows are intermediate agent breadcrumbs (tool-call hints,

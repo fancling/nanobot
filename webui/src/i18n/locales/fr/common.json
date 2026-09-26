@@ -1130,6 +1130,10 @@
     "staleWeather": "La dernière requête météo a échoué ; les conditions en cache ont été utilisées.",
     "context": "Contexte Affective State",
     "contextDescription": "La description exacte en langage naturel fournie aux conversations ordinaires.",
+    "history": "Historique des états",
+    "historyDescription": "Périodes récemment générées et dimensions réellement modifiées.",
+    "initialState": "État initial enregistré",
+    "noChanges": "Aucune dimension n’a changé pendant cette période",
     "dimension": {
       "valence": "Humeur",
       "arousal": "Énergie",

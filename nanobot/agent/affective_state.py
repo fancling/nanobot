@@ -78,6 +78,7 @@ AFFECTIVE_DESCRIPTIONS: dict[str, dict[str, str]] = {
 _LEVELS = {dimension: tuple(values) for dimension, values in AFFECTIVE_DESCRIPTIONS.items()}
 _BASE_WEIGHTS = (1.0, 2.0, 1.0)
 _OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
+_HISTORY_LIMIT = 168
 
 
 def describe_affective_state(
@@ -215,6 +216,68 @@ class AffectiveStateSnapshot:
         )
 
 
+def _history_entry(
+    snapshot: AffectiveStateSnapshot,
+    *,
+    previous: AffectiveStateSnapshot | None,
+) -> dict[str, Any]:
+    changed = (
+        []
+        if previous is None
+        else [
+            dimension
+            for dimension in DIMENSION_ORDER
+            if snapshot.state[dimension] != previous.state.get(dimension)
+        ]
+    )
+    return {
+        "period": snapshot.period,
+        "valid_until": snapshot.valid_until,
+        "state": dict(snapshot.state),
+        "environment": dict(snapshot.environment),
+        "changed_dimensions": changed,
+        "initial": previous is None,
+    }
+
+
+def _parse_history(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    entries: list[dict[str, Any]] = []
+    for item in value[-_HISTORY_LIMIT:]:
+        if not isinstance(item, Mapping):
+            continue
+        raw_state = item.get("state")
+        if not isinstance(raw_state, Mapping):
+            continue
+        state = {dimension: str(raw_state.get(dimension, "")) for dimension in DIMENSION_ORDER}
+        if any(state[dimension] not in _LEVELS[dimension] for dimension in DIMENSION_ORDER):
+            continue
+        try:
+            datetime.fromisoformat(str(item["period"]))
+            datetime.fromisoformat(str(item["valid_until"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        raw_changed = item.get("changed_dimensions")
+        changed = (
+            [dimension for dimension in DIMENSION_ORDER if dimension in raw_changed]
+            if isinstance(raw_changed, list)
+            else []
+        )
+        environment = item.get("environment")
+        entries.append(
+            {
+                "period": str(item["period"]),
+                "valid_until": str(item["valid_until"]),
+                "state": state,
+                "environment": dict(environment) if isinstance(environment, Mapping) else {},
+                "changed_dimensions": changed,
+                "initial": item.get("initial") is True,
+            }
+        )
+    return entries
+
+
 class AffectiveStateStore:
     """Atomic local storage for the current workspace-wide affective state."""
 
@@ -238,6 +301,15 @@ class AffectiveStateStore:
         return self._path()
 
     def read(self) -> AffectiveStateSnapshot | None:
+        payload = self._read_payload()
+        if payload is None:
+            return None
+        snapshot = AffectiveStateSnapshot.from_payload(payload, agent_name=self.agent_name)
+        if snapshot is None:
+            logger.warning("Ignoring invalid affective state file {}", self._path())
+        return snapshot
+
+    def _read_payload(self) -> Mapping[str, Any] | None:
         try:
             payload = json.loads(self._path().read_text(encoding="utf-8"))
         except FileNotFoundError:
@@ -245,18 +317,40 @@ class AffectiveStateStore:
         except (OSError, UnicodeError, json.JSONDecodeError) as exc:
             logger.warning("Failed to read affective state: {}", exc)
             return None
-        snapshot = AffectiveStateSnapshot.from_payload(payload, agent_name=self.agent_name)
-        if snapshot is None:
-            logger.warning("Ignoring invalid affective state file {}", self._path())
-        return snapshot
+        return payload if isinstance(payload, Mapping) else None
 
-    def write(self, snapshot: AffectiveStateSnapshot) -> None:
-        raw = json.dumps(
-            snapshot.to_storage_payload(), ensure_ascii=False, indent=2,
-        ).encode("utf-8") + b"\n"
+    def read_history(self) -> list[dict[str, Any]]:
+        """Return recent generated periods without exposing the internal seed."""
+        payload = self._read_payload()
+        if payload is None:
+            return []
+        history = _parse_history(payload.get("history"))
+        if history:
+            return history
+        snapshot = AffectiveStateSnapshot.from_payload(payload, agent_name=self.agent_name)
+        return [_history_entry(snapshot, previous=None)] if snapshot is not None else []
+
+    def write(
+        self,
+        snapshot: AffectiveStateSnapshot,
+        *,
+        previous: AffectiveStateSnapshot | None = None,
+    ) -> None:
         with self._lock:
             path = self._path()
             path.parent.mkdir(parents=True, exist_ok=True)
+            stored = self._read_payload()
+            history = _parse_history(stored.get("history")) if stored is not None else []
+            if not history and previous is not None:
+                history.append(_history_entry(previous, previous=None))
+            entry = _history_entry(snapshot, previous=previous)
+            if history and history[-1]["period"] == entry["period"]:
+                history[-1] = entry
+            else:
+                history.append(entry)
+            payload = snapshot.to_storage_payload()
+            payload["history"] = history[-_HISTORY_LIMIT:]
+            raw = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8") + b"\n"
             temporary: Path | None = None
             try:
                 with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as handle:
@@ -319,7 +413,7 @@ class AffectiveStateService:
                     previous_weather = (existing.environment or {}).get("weather") if existing else None
                     resolved_weather = WeatherSnapshot.from_dict(previous_weather, stale=True)
             snapshot = self._generate(current_time, existing, resolved_weather)
-            self.store.write(snapshot)
+            self.store.write(snapshot, previous=existing)
             return snapshot
 
     def public_payload(self) -> dict[str, Any]:
@@ -328,7 +422,11 @@ class AffectiveStateService:
         snapshot = self.store.read()
         if snapshot is None:
             return {"available": False, "enabled": True}
-        return {**snapshot.to_public_payload(), "enabled": True}
+        return {
+            **snapshot.to_public_payload(),
+            "enabled": True,
+            "history": self.store.read_history(),
+        }
 
     def _zone(self) -> ZoneInfo:
         try:

@@ -1130,6 +1130,10 @@
     "staleWeather": "最新天气请求失败，当前使用缓存天气。",
     "context": "Affective State 上下文",
     "contextDescription": "普通对话实际收到的自然语言描述。",
+    "history": "状态历史",
+    "historyDescription": "最近生成的周期，以及每次实际发生变化的维度。",
+    "initialState": "初始记录状态",
+    "noChanges": "本周期没有维度变化",
     "dimension": {
       "valence": "心境",
       "arousal": "能量",

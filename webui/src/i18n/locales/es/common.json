@@ -1130,6 +1130,10 @@
     "staleWeather": "Falló la última consulta meteorológica; se usaron datos en caché.",
     "context": "Contexto de Affective State",
     "contextDescription": "La descripción exacta en lenguaje natural suministrada a las conversaciones normales.",
+    "history": "Historial de estados",
+    "historyDescription": "Periodos generados recientemente y dimensiones que cambiaron realmente.",
+    "initialState": "Estado inicial registrado",
+    "noChanges": "Ninguna dimensión cambió en este periodo",
     "dimension": {
       "valence": "Ánimo",
       "arousal": "Energía",

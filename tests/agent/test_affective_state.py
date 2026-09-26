@@ -1,9 +1,11 @@
 """Tests for time-scoped affective state generation and persistence."""
 
+import json
 from datetime import datetime, timezone
 
 import pytest
 
+from nanobot.agent import affective_state
 from nanobot.agent.affective_state import (
     AFFECTIVE_CONTEXT_PREAMBLE,
     AFFECTIVE_DESCRIPTIONS,
@@ -64,6 +66,16 @@ async def test_state_is_stable_within_bucket_and_advances_after_expiry(tmp_path)
     assert advanced.period != first.period
     assert advanced.seed == first.seed
     assert service.store.path == tmp_path / "memory" / "affective_state.json"
+    history = service.store.read_history()
+    assert [entry["period"] for entry in history] == [first.period, advanced.period]
+    assert history[0]["initial"] is True
+    assert history[0]["changed_dimensions"] == []
+    assert history[1]["initial"] is False
+    assert history[1]["changed_dimensions"] == [
+        dimension
+        for dimension in DIMENSION_ORDER
+        if first.state[dimension] != advanced.state[dimension]
+    ]
 
     reloaded = AffectiveStateService(
         tmp_path,
@@ -94,6 +106,9 @@ async def test_public_payload_exposes_categories_but_not_seed(tmp_path) -> None:
     assert "They do not need to appear equally" in payload["context_text"]
     assert "let them override" in payload["context_text"]
     assert all("Mochi" in line for line in snapshot.descriptions)
+    assert len(payload["history"]) == 1
+    assert payload["history"][0]["state"] == snapshot.state
+    assert "seed" not in json.dumps(payload["history"])
 
 
 @pytest.mark.asyncio
@@ -119,6 +134,27 @@ async def test_current_agent_name_is_rendered_without_regenerating_values(tmp_pa
     assert renamed.seed == original.seed
     assert all("Kumo" in line for line in renamed.descriptions)
     assert all("Mochi" not in line for line in renamed.descriptions)
+
+
+@pytest.mark.asyncio
+async def test_history_migrates_existing_state_and_is_bounded(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(affective_state, "_HISTORY_LIMIT", 3)
+    config = AffectiveStateConfig(refresh_interval_minutes=360, weather_enabled=False)
+    service = AffectiveStateService(tmp_path, config, timezone_name="UTC")
+    first = await service.ensure_current(now=datetime(2026, 1, 5, 1, tzinfo=timezone.utc))
+    assert first is not None
+
+    legacy_payload = first.to_storage_payload()
+    service.store.path.write_text(json.dumps(legacy_payload), encoding="utf-8")
+    assert service.store.read_history()[0]["period"] == first.period
+
+    for hour in (7, 13, 19):
+        await service.ensure_current(now=datetime(2026, 1, 5, hour, tzinfo=timezone.utc))
+
+    history = service.public_payload()["history"]
+    assert len(history) == 3
+    assert history[-1]["period"] == "2026-01-05T18:00:00+00:00"
+    assert all("seed" not in entry for entry in history)
 
 
 def test_season_uses_configured_hemisphere() -> None:

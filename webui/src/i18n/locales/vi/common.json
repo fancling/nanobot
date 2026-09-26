@@ -1130,6 +1130,10 @@
     "staleWeather": "Yêu cầu thời tiết mới nhất thất bại; đã dùng điều kiện được lưu đệm.",
     "context": "Ngữ cảnh Affective State",
     "contextDescription": "Mô tả ngôn ngữ tự nhiên chính xác được cung cấp cho các cuộc trò chuyện thông thường.",
+    "history": "Lịch sử trạng thái",
+    "historyDescription": "Các chu kỳ được tạo gần đây và những chiều thực sự thay đổi.",
+    "initialState": "Trạng thái ghi nhận ban đầu",
+    "noChanges": "Không có chiều nào thay đổi trong chu kỳ này",
     "dimension": {
       "valence": "Tâm trạng",
       "arousal": "Năng lượng",

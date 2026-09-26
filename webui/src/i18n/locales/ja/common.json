@@ -1130,6 +1130,10 @@
     "staleWeather": "最新の天気取得に失敗したため、キャッシュした状況を使用しました。",
     "context": "Affective State コンテキスト",
     "contextDescription": "通常の会話に渡される正確な自然言語の記述です。",
+    "history": "状態履歴",
+    "historyDescription": "最近生成された期間と、実際に変化した次元です。",
+    "initialState": "初回記録の状態",
+    "noChanges": "この期間では次元の変化はありません",
     "dimension": {
       "valence": "気分",
       "arousal": "活力",

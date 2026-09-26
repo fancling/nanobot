@@ -1130,6 +1130,10 @@
     "staleWeather": "최신 날씨 요청에 실패하여 캐시된 상태를 사용했습니다.",
     "context": "Affective State 컨텍스트",
     "contextDescription": "일반 대화에 제공되는 정확한 자연어 설명입니다.",
+    "history": "상태 기록",
+    "historyDescription": "최근 생성된 기간과 실제로 변경된 차원입니다.",
+    "initialState": "최초 기록 상태",
+    "noChanges": "이 기간에는 변경된 차원이 없습니다",
     "dimension": {
       "valence": "기분",
       "arousal": "에너지",

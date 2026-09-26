@@ -5,6 +5,7 @@ import {
   CloudSun,
   Compass,
   HeartHandshake,
+  History,
   Loader2,
   MessageCircleMore,
   RefreshCw,
@@ -76,6 +77,7 @@ export function AffectiveStatePage({ active, hostChromeInset, onBackToChat }: {
   }, [active, load]);
 
   const weather = payload?.environment?.weather;
+  const history = [...(payload?.history ?? [])].reverse();
   const locale = i18n.resolvedLanguage ?? "en";
 
   return (
@@ -161,6 +163,50 @@ export function AffectiveStatePage({ active, hostChromeInset, onBackToChat }: {
             {weather?.provider === "open-meteo" && <p className="mt-4 text-[11px] text-muted-foreground">
               <a href="https://open-meteo.com/" target="_blank" rel="noreferrer" className="hover:underline">Weather data by Open-Meteo</a>
             </p>}
+          </section>
+
+          <section className="mt-8">
+            <div className="flex items-center gap-2">
+              <History className="h-4 w-4 text-muted-foreground" />
+              <h2 className="text-sm font-medium">{t("affectiveState.history")}</h2>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {t("affectiveState.historyDescription")}
+            </p>
+            <div data-testid="affective-history" className="mt-3 divide-y divide-border/55 rounded-2xl border border-border/55">
+              {history.map((entry) => {
+                const shownDimensions = entry.initial
+                  ? DIMENSIONS.map(({ key }) => key)
+                  : entry.changed_dimensions;
+                return <article key={entry.period} className="p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <time className="text-xs font-medium tabular-nums text-foreground">
+                      {formatTime(entry.period, locale)}
+                    </time>
+                    <span className="text-[11px] text-muted-foreground">
+                      {t(`affectiveState.value.${entry.environment?.day_period}`, {
+                        defaultValue: entry.environment?.day_period ?? "—",
+                      })}
+                    </span>
+                  </div>
+                  {entry.initial && <p className="mt-2 text-xs text-muted-foreground">
+                    {t("affectiveState.initialState")}
+                  </p>}
+                  {!entry.initial && shownDimensions.length === 0 && <p className="mt-2 text-xs text-muted-foreground">
+                    {t("affectiveState.noChanges")}
+                  </p>}
+                  {shownDimensions.length > 0 && <div className="mt-3 flex flex-wrap gap-2">
+                    {shownDimensions.map((key) => <span key={key}
+                      className="rounded-full border border-border/60 bg-muted/35 px-2.5 py-1 text-[11px] text-foreground/80">
+                      {t(`affectiveState.dimension.${key}`)}: {t(
+                        `affectiveState.value.${entry.state[key]}`,
+                        { defaultValue: entry.state[key] },
+                      )}
+                    </span>)}
+                  </div>}
+                </article>;
+              })}
+            </div>
           </section>
 
           <section className="mt-8">

@@ -1130,6 +1130,10 @@
     "staleWeather": "Permintaan cuaca terbaru gagal; kondisi dalam cache digunakan.",
     "context": "Konteks Affective State",
     "contextDescription": "Deskripsi bahasa alami persis yang diberikan ke percakapan biasa.",
+    "history": "Riwayat keadaan",
+    "historyDescription": "Periode terbaru yang dihasilkan dan dimensi yang benar-benar berubah.",
+    "initialState": "Keadaan awal yang tercatat",
+    "noChanges": "Tidak ada dimensi yang berubah pada periode ini",
     "dimension": {
       "valence": "Suasana hati",
       "arousal": "Energi",

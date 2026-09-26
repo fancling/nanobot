@@ -1130,6 +1130,10 @@
     "staleWeather": "The latest weather request failed; cached conditions were used.",
     "context": "Affective State context",
     "contextDescription": "The exact natural-language description supplied to ordinary conversations.",
+    "history": "State history",
+    "historyDescription": "Recent generated periods and the dimensions that actually changed.",
+    "initialState": "Initial recorded state",
+    "noChanges": "No dimensions changed in this period",
     "dimension": {
       "valence": "Mood",
       "arousal": "Energy",
