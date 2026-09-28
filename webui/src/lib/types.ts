@@ -223,14 +223,43 @@ export interface SessionCompactResult {
   original_messages_preserved: boolean;
 }
 
+export interface SessionMemoryExtractionResult {
+  success: boolean;
+  busy: boolean;
+  memory_count: number;
+  event_count: number;
+  result_path?: string;
+}
+
+export interface SessionOperationStart {
+  operation_id: string;
+  kind: "compact" | "extract-memory";
+  status: "running";
+}
+
+export interface SessionOperationStatus<T> {
+  operation_id: string;
+  kind: "compact" | "extract-memory";
+  status: "running" | "completed" | "failed";
+  result?: T;
+  error?: string;
+  http_status?: number;
+}
+
 export interface SessionCompactionStatus {
   needed: boolean;
   reason: "messages" | "tokens" | "both" | null;
   message_count: number;
+  session_message_count?: number;
   max_messages: number | null;
   estimated_tokens: number | null;
+  replay_message_count?: number;
+  replay_estimated_tokens?: number | null;
   token_budget: number | null;
   available: boolean;
+  keep_recent_messages?: number;
+  auto_consolidation_enabled?: boolean;
+  memory_extraction_available?: boolean;
 }
 
 export interface SkillSummary {

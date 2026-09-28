@@ -800,15 +800,26 @@
         "none": "No next run"
       }
     },
+    "contextUsage": {
+      "label": "Context usage",
+      "messages": "{{used}} / {{limit}} messages",
+      "tokens": "{{used}} / {{limit}} tokens",
+      "archive": "Archive conversation",
+      "archiving": "Archiving…",
+      "extractMemory": "Extract to Mem0",
+      "extractingMemory": "Extracting…",
+      "extractSuccess": "Saved {{count}} Mem0 records, including {{events}} event memories.",
+      "extractFailed": "Could not extract this conversation to Mem0. Please try again.",
+      "actionBusy": "This conversation is active. Try again after the current response finishes."
+    },
     "compactReminder": {
       "title": "Conversation ready to compact",
       "body": "The conversation reached its message or token limit. Compacting writes older context to history.jsonl while preserving the original session JSONL.",
       "compactNow": "Compact now",
       "compacting": "Compacting…",
       "snooze": "Remind me later",
-      "success": "Compacted {{count}} messages and wrote a history.jsonl entry. The original session JSONL was preserved.",
-      "rawSuccess": "The summary model failed, so {{count}} messages were written to history.jsonl as a [RAW] entry. The original session JSONL was preserved.",
-      "noChanges": "No complete older turns were available to compact. history.jsonl was not changed.",
+      "success": "Archived {{count}} messages to history.jsonl. The original session JSONL was preserved.",
+      "noChanges": "There are no unarchived messages. history.jsonl was not changed.",
       "dismissResult": "Dismiss compact result",
       "busy": "This conversation is active. Try again after the current response finishes.",
       "failed": "Could not compact this conversation. Please try again."

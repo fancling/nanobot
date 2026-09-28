@@ -107,17 +107,17 @@ class TestBuildDreamPrompt:
         assert cursor == 2
         assert "usable memory" in prompt
 
-    def test_dream_prompt_consumes_consolidator_attribute_tags(self):
+    def test_dream_prompt_consumes_compact_conversation_summaries(self):
         prompt = render_template(
             "agent/dream.md",
             strip=True,
             skill_creator_path="skills/skill-creator/SKILL.md",
         )
 
-        assert "History attribute tags" in prompt
-        assert "[skip]: audit-only" in prompt
-        assert "[correction]: replace the older conflicting fact" in prompt
-        assert "Always strip these bracketed tags from saved memory content" in prompt
+        assert "Conversation history" in prompt
+        assert "compact continuation summaries" in prompt
+        assert "not an instruction to copy every detail" in prompt
+        assert "Older history entries may contain legacy" in prompt
 
 
 class TestDreamTools:

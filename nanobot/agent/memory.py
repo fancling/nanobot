@@ -568,16 +568,21 @@ class MemoryStore:
         max_chars: int | None = None,
         session_key: str | None = None,
     ) -> None:
-        """Fallback: dump raw messages to history.jsonl without LLM summarization."""
+        """Write an uncompressed transcript entry without classification labels.
+
+        Consolidation no longer calls this fallback: if summary generation
+        fails, the session cursor remains unchanged so the operation can be
+        retried. The helper remains for explicit callers and legacy tooling.
+        """
         limit = max_chars if max_chars is not None else _RAW_ARCHIVE_MAX_CHARS
         formatted = truncate_text(self._format_messages(messages), limit)
         self.append_history(
-            f"[RAW] {len(messages)} messages\n"
+            f"Uncompressed conversation transcript ({len(messages)} messages)\n"
             f"{formatted}",
             session_key=session_key,
         )
         logger.warning(
-            "Memory consolidation degraded: raw-archived {} messages", len(messages)
+            "Wrote an explicit uncompressed history transcript for {} messages", len(messages)
         )
 
     # ------------------------------------------------------------------
@@ -629,6 +634,53 @@ class MemoryStore:
 _RAW_ARCHIVE_MAX_CHARS = 16_000       # fallback dump (LLM failed)
 _ARCHIVE_SUMMARY_MAX_CHARS = 8_000    # LLM-produced consolidation summary
 _HISTORY_ENTRY_HARD_CAP = 64_000      # emergency cap in append_history
+
+
+_LEGACY_HISTORY_TAG_RE = re.compile(
+    r"^(?P<prefix>\s*(?:[-*]\s*)?)"
+    r"\[(?P<tag>permanent|durable|ephemeral|correction|skip|raw)\]"
+    r"\s*:?[ \t]*",
+    flags=re.IGNORECASE,
+)
+
+
+def _clean_archive_summary(summary: str) -> str:
+    """Keep compact summaries free of legacy history classification labels."""
+    kept: list[str] = []
+    for line in summary.splitlines():
+        match = _LEGACY_HISTORY_TAG_RE.match(line)
+        if match and match.group("tag").lower() == "skip":
+            continue
+        if match:
+            line = f"{match.group('prefix')}{line[match.end():]}"
+        kept.append(line.rstrip())
+    cleaned = "\n".join(kept).strip()
+    if not cleaned or cleaned == "(nothing)":
+        return ""
+    return cleaned
+
+
+def _manual_archive_dialogue(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Project a raw session tail to the user-visible dialogue for manual archives.
+
+    Session JSONL intentionally retains tool calls and tool results so a live
+    conversation can be resumed exactly.  Those records are implementation
+    context, however, and feeding them to the user-triggered history archive
+    causes startup memory reads and other scaffolding to be summarized as if
+    they were new events.  Keep the raw records in place while giving the
+    archive model only user messages and final assistant replies.
+    """
+    dialogue: list[dict[str, Any]] = []
+    for message in messages:
+        role = message.get("role")
+        if role not in {"user", "assistant"} or message.get("_command"):
+            continue
+        if role == "assistant" and message.get("tool_calls"):
+            continue
+        if not message.get("content"):
+            continue
+        dialogue.append(message)
+    return dialogue
 
 
 class Consolidator:
@@ -773,6 +825,8 @@ class Consolidator:
             replay_max_messages,
         )
         summary = await self.archive(chunk, session_key=session.key)
+        if not summary:
+            return summary
         session.last_consolidated = end_idx
         self.sessions.save(session)
         return summary
@@ -788,9 +842,18 @@ class Consolidator:
     def estimate_session_prompt_tokens(
         self,
         session: Session,
+        *,
+        replay_max_messages: int | None = None,
     ) -> tuple[int, str]:
-        """Estimate prompt size from the full unconsolidated session tail."""
-        history = self._full_unconsolidated_history(session, include_timestamps=True)
+        """Estimate prompt size from the full tail or the actual replay window."""
+        history = (
+            session.get_history(
+                max_messages=replay_max_messages,
+                include_timestamps=True,
+            )
+            if replay_max_messages is not None
+            else self._full_unconsolidated_history(session, include_timestamps=True)
+        )
         channel, chat_id = (session.key.split(":", 1) if ":" in session.key else (None, None))
         # Include archived summary in estimation so the budget accounts for it.
         meta = session.metadata.get("_last_summary")
@@ -826,10 +889,23 @@ class Consolidator:
         )
         token_budget = self._input_token_budget if self.context_window_tokens > 0 else 0
         estimated_tokens: int | None = None
+        replay_estimated_tokens: int | None = None
+        replay_message_count = len(
+            session.get_history(max_messages=replay_max_messages)
+            if replay_max_messages is not None
+            else self._full_unconsolidated_history(session)
+        )
         token_limit_reached = False
         if session.messages and token_budget > 0:
             try:
                 estimated_tokens, _source = self.estimate_session_prompt_tokens(session)
+                if replay_message_count == unconsolidated_messages:
+                    replay_estimated_tokens = estimated_tokens
+                else:
+                    replay_estimated_tokens, _source = self.estimate_session_prompt_tokens(
+                        session,
+                        replay_max_messages=replay_max_messages,
+                    )
             except Exception:
                 logger.exception("Token estimation failed for compact status of {}", session.key)
             token_limit_reached = bool(
@@ -847,6 +923,8 @@ class Consolidator:
             "message_count": unconsolidated_messages,
             "max_messages": replay_max_messages,
             "estimated_tokens": estimated_tokens,
+            "replay_message_count": replay_message_count,
+            "replay_estimated_tokens": replay_estimated_tokens,
             "token_budget": token_budget or None,
         }
 
@@ -872,7 +950,7 @@ class Consolidator:
         """Summarize messages via LLM and append to history.jsonl.
 
         ``messages`` are the messages being archived (removed from the live
-        session); they are what gets raw-dumped if the LLM call fails.
+        context by the caller after a successful summary).
         ``summary_messages``, when given, lets callers include retained
         messages in the summary without archiving them.
 
@@ -901,7 +979,13 @@ class Consolidator:
             )
             if response.finish_reason == "error":
                 raise RuntimeError(f"LLM returned error: {response.content}")
-            summary = response.content or "[no summary]"
+            summary = _clean_archive_summary(response.content or "")
+            if not summary:
+                logger.info(
+                    "Memory consolidation produced no continuation summary for {}",
+                    session_key or "unknown session",
+                )
+                return ""
             self.store.append_history(
                 summary,
                 max_chars=_ARCHIVE_SUMMARY_MAX_CHARS,
@@ -909,9 +993,74 @@ class Consolidator:
             )
             return summary
         except Exception:
-            logger.warning("Consolidation LLM call failed, raw-dumping to history")
-            self.store.raw_archive(messages, session_key=session_key)
+            logger.exception(
+                "Consolidation LLM call failed; preserving the session cursor for retry"
+            )
             return None
+
+    async def archive_session_tail(
+        self,
+        session: Session,
+        *,
+        keep_recent: int = 0,
+    ) -> dict[str, Any]:
+        """Archive a completed session tail without deleting its raw messages.
+
+        This is the user-triggered counterpart of the historical hard idle
+        compactor.  It summarizes the unconsolidated prefix that falls outside
+        a legal recent suffix, advances ``last_consolidated``, and leaves the
+        session JSONL message array untouched.
+        """
+        lock = self.get_lock(session.key)
+        async with lock:
+            fresh = self.sessions.get_or_create(session.key)
+            if fresh is not session:
+                session = fresh
+
+            initial_cursor = session.last_consolidated
+            end_idx = (
+                len(session.messages)
+                if keep_recent <= 0
+                else self._replay_overflow_boundary(session, keep_recent)
+            )
+            if end_idx is None or end_idx <= initial_cursor:
+                return {
+                    "consolidated_messages": 0,
+                    "history_written": False,
+                    "summary_created": False,
+                }
+
+            messages_to_remove = session.messages[initial_cursor:end_idx]
+            messages_to_summarize = _manual_archive_dialogue(
+                session.messages[initial_cursor:]
+            )
+            if not messages_to_summarize:
+                return {
+                    "consolidated_messages": 0,
+                    "history_written": False,
+                    "summary_created": False,
+                }
+            summary = await self.archive(
+                messages_to_remove,
+                session_key=session.key,
+                summary_messages=messages_to_summarize,
+            )
+            if not summary:
+                if summary is None:
+                    raise RuntimeError("Conversation archive summary generation failed")
+                return {
+                    "consolidated_messages": 0,
+                    "history_written": False,
+                    "summary_created": False,
+                }
+            session.last_consolidated = end_idx
+            self._persist_last_summary(session, summary)
+            self.sessions.save(session)
+            return {
+                "consolidated_messages": end_idx - initial_cursor,
+                "history_written": True,
+                "summary_created": True,
+            }
 
     async def maybe_consolidate_by_tokens(
         self,
@@ -1012,18 +1161,13 @@ class Consolidator:
                     len(chunk),
                 )
                 summary = await self.archive(chunk, session_key=session.key)
-                # Advance the cursor either way: on success the chunk was
-                # summarized; on failure archive() already raw-archived it as
-                # a breadcrumb. Re-archiving the same chunk on the next call
-                # would just emit duplicate [RAW] entries.
-                if summary:
-                    last_summary = summary
+                if not summary:
+                    break
+                # Advance only after a continuation summary was persisted.
+                # Failed attempts leave the cursor unchanged for a later retry.
+                last_summary = summary
                 session.last_consolidated = end_idx
                 self.sessions.save(session)
-                if not summary:
-                    # LLM is degraded — stop hammering it this call;
-                    # the next invocation can retry a fresh chunk.
-                    break
 
                 try:
                     estimated, source = self.estimate_session_prompt_tokens(
@@ -1049,9 +1193,9 @@ class Consolidator:
         """Hard-truncate an idle session under the consolidation lock.
 
         Used by AutoCompact so all session mutation goes through a single
-        lock-protected path.  Returns the summary text on success, ``None``
-        if the LLM failed (raw_archive fallback), or ``""`` if there was
-        nothing to archive.
+        lock-protected path. Returns the summary text on success, ``None`` if
+        the LLM failed, or ``""`` if there was nothing to archive. Failed
+        attempts leave the source session intact for retry.
         """
         lock = self.get_lock(session_key)
         async with lock:
@@ -1084,13 +1228,17 @@ class Consolidator:
             last_active = session.updated_at
             summary: str | None = ""
             if messages_to_remove:
-                # Summarize the retained suffix too, but only remove/raw-dump
-                # the messages that are no longer kept in the live session.
+                # Summarize the retained suffix too, but only remove messages
+                # that fall outside the live suffix after summary succeeds.
                 summary = await self.archive(
                     messages_to_remove,
                     session_key=session_key,
                     summary_messages=messages_to_summarize,
                 )
+                if not summary:
+                    session.updated_at = datetime.now()
+                    self.sessions.save(session)
+                    return summary
 
             if summary and summary != "(nothing)":
                 session.metadata["_last_summary"] = {

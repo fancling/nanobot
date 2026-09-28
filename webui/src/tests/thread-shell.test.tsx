@@ -1233,10 +1233,16 @@ describe("ThreadShell", () => {
           needed: true,
           reason: "messages",
           message_count: 121,
+          session_message_count: 121,
           max_messages: 120,
           estimated_tokens: 32000,
+          replay_message_count: 120,
+          replay_estimated_tokens: 30000,
           token_budget: 60416,
           available: true,
+          keep_recent_messages: 0,
+          auto_consolidation_enabled: false,
+          memory_extraction_available: true,
         });
       }
       if (url.endsWith("/api/sessions/websocket%3Achat-a/compact")) {
@@ -1247,6 +1253,14 @@ describe("ThreadShell", () => {
           history_written: true,
           summary_created: true,
           original_messages_preserved: true,
+        });
+      }
+      if (url.endsWith("/api/sessions/websocket%3Achat-a/extract-memory")) {
+        return httpJson({
+          success: true,
+          busy: false,
+          memory_count: 4,
+          event_count: 3,
         });
       }
       return {
@@ -1285,8 +1299,18 @@ describe("ThreadShell", () => {
         expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
       );
       expect(screen.getByRole("status")).toHaveTextContent(
-        "Compacted 121 messages and wrote a history.jsonl entry",
+        "Archived 121 messages to history.jsonl",
       );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Extract to Mem0" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/sessions/websocket%3Achat-a/extract-memory",
+        expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+      );
+      expect(screen.getByText(/Saved 4 Mem0 records/)).toBeInTheDocument();
     });
   });
 

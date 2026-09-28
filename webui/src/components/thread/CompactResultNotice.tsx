@@ -6,24 +6,17 @@ import { Button } from "@/components/ui/button";
 interface CompactResultNoticeProps {
   consolidatedMessages: number;
   historyWritten: boolean;
-  summaryCreated: boolean;
   onDismiss: () => void;
 }
 
 export function CompactResultNotice({
   consolidatedMessages,
   historyWritten,
-  summaryCreated,
   onDismiss,
 }: CompactResultNoticeProps) {
   const { t } = useTranslation();
   const message = historyWritten
-    ? t(
-      summaryCreated
-        ? "thread.compactReminder.success"
-        : "thread.compactReminder.rawSuccess",
-      { count: consolidatedMessages },
-    )
+    ? t("thread.compactReminder.success", { count: consolidatedMessages })
     : t("thread.compactReminder.noChanges");
 
   return (

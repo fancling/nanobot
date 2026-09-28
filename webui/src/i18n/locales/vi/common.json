@@ -800,6 +800,18 @@
         "none": "Không có lần chạy tiếp theo"
       }
     },
+    "contextUsage": {
+      "label": "Mức dùng ngữ cảnh",
+      "messages": "{{used}} / {{limit}} tin nhắn",
+      "tokens": "{{used}} / {{limit}} token",
+      "archive": "Lưu trữ cuộc trò chuyện",
+      "archiving": "Đang lưu trữ…",
+      "extractMemory": "Trích xuất sang Mem0",
+      "extractingMemory": "Đang trích xuất…",
+      "extractSuccess": "Đã lưu {{count}} bản ghi Mem0, gồm {{events}} ký ức sự kiện.",
+      "extractFailed": "Không thể trích xuất cuộc trò chuyện này sang Mem0. Vui lòng thử lại.",
+      "actionBusy": "Cuộc trò chuyện đang hoạt động. Hãy thử lại sau khi phản hồi hiện tại kết thúc."
+    },
     "compactReminder": {
       "title": "Cuộc trò chuyện đã sẵn sàng để thu gọn",
       "body": "Số tin nhắn hoặc token đã đạt ngưỡng. Thu gọn sẽ ghi ngữ cảnh cũ vào history.jsonl và giữ nguyên session JSONL gốc.",
@@ -807,8 +819,7 @@
       "compacting": "Đang thu gọn…",
       "snooze": "Nhắc tôi sau",
       "success": "Đã thu gọn {{count}} tin nhắn và ghi một mục vào history.jsonl. Session JSONL gốc vẫn được giữ nguyên.",
-      "rawSuccess": "Mô hình tóm tắt thất bại nên {{count}} tin nhắn đã được ghi vào history.jsonl dưới dạng mục [RAW]. Session JSONL gốc vẫn được giữ nguyên.",
-      "noChanges": "Không có lượt cũ hoàn chỉnh nào có thể thu gọn an toàn. history.jsonl không thay đổi.",
+      "noChanges": "Không có tin nhắn nào chưa được lưu trữ. history.jsonl không thay đổi.",
       "dismissResult": "Đóng kết quả thu gọn",
       "busy": "Cuộc trò chuyện đang hoạt động. Hãy thử lại sau khi phản hồi hiện tại kết thúc.",
       "failed": "Không thể thu gọn cuộc trò chuyện. Vui lòng thử lại."

@@ -800,6 +800,18 @@
         "none": "次回実行なし"
       }
     },
+    "contextUsage": {
+      "label": "コンテキスト使用量",
+      "messages": "{{used}} / {{limit}} メッセージ",
+      "tokens": "{{used}} / {{limit}} トークン",
+      "archive": "会話をアーカイブ",
+      "archiving": "アーカイブ中…",
+      "extractMemory": "Mem0 に抽出",
+      "extractingMemory": "抽出中…",
+      "extractSuccess": "イベント記憶 {{events}} 件を含む {{count}} 件の Mem0 レコードを保存しました。",
+      "extractFailed": "この会話を Mem0 に抽出できませんでした。もう一度お試しください。",
+      "actionBusy": "この会話は実行中です。現在の応答が終わってから再試行してください。"
+    },
     "compactReminder": {
       "title": "会話を整理できます",
       "body": "会話のメッセージ数またはトークン数がしきい値に達しました。整理すると古い文脈を history.jsonl に書き込み、元の session JSONL は完全に保持されます。",
@@ -807,8 +819,7 @@
       "compacting": "整理中…",
       "snooze": "後で通知",
       "success": "{{count}} 件のメッセージを整理して history.jsonl に書き込みました。元の session JSONL は保持されています。",
-      "rawSuccess": "要約モデルが失敗したため、{{count}} 件のメッセージを [RAW] エントリとして history.jsonl に書き込みました。元の session JSONL は保持されています。",
-      "noChanges": "安全に整理できる完全な過去ターンがありません。history.jsonl は変更されていません。",
+      "noChanges": "未アーカイブのメッセージはありません。history.jsonl は変更されていません。",
       "dismissResult": "整理結果を閉じる",
       "busy": "この会話は実行中です。現在の応答が終わってから再試行してください。",
       "failed": "会話を整理できませんでした。もう一度お試しください。"

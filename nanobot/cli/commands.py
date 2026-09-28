@@ -763,6 +763,7 @@ def _run_gateway(
     from nanobot.providers.image_generation import image_gen_provider_configs
     from nanobot.session.manager import SessionManager
     from nanobot.session.webui_turns import WebuiTurnCoordinator
+    from nanobot.utils.llm_runtime import LLMRuntime
     from nanobot.webui.token_usage import TokenUsageHook
 
     port = port if port is not None else config.gateway.port
@@ -773,6 +774,14 @@ def _run_gateway(
     runtime_events = RuntimeEventBus()
     try:
         provider_snapshot = build_provider_snapshot(config)
+        title_provider_snapshot = (
+            build_provider_snapshot(
+                config,
+                preset_name=config.agents.defaults.title_model_preset,
+            )
+            if config.agents.defaults.title_model_preset
+            else None
+        )
     except ValueError as exc:
         console.print(f"[red]Error: {exc}[/red]")
         raise typer.Exit(1) from exc
@@ -804,6 +813,15 @@ def _run_gateway(
         bus=bus,
         sessions=session_manager,
         schedule_background=lambda coro: agent._schedule_background(coro),
+        title_runtime=(
+            LLMRuntime(
+                provider=title_provider_snapshot.provider,
+                model=title_provider_snapshot.model,
+            )
+            if title_provider_snapshot is not None
+            else None
+        ),
+        timezone_name=config.agents.defaults.timezone,
     ).subscribe(runtime_events)
 
     from nanobot.bus.events import OutboundMessage

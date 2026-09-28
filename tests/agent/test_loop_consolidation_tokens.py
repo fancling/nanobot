@@ -130,7 +130,7 @@ async def test_manual_compact_uses_session_lock_and_reports_result(tmp_path) -> 
     session.add_message("user", "old question")
     session.add_message("assistant", "old answer")
     loop.sessions.save(session)
-    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(  # type: ignore[method-assign]
+    loop.consolidator.archive_session_tail = AsyncMock(  # type: ignore[method-assign]
         return_value={
             "consolidated_messages": 2,
             "history_written": True,
@@ -148,9 +148,9 @@ async def test_manual_compact_uses_session_lock_and_reports_result(tmp_path) -> 
         "summary_created": True,
         "original_messages_preserved": True,
     }
-    loop.consolidator.maybe_consolidate_by_tokens.assert_awaited_once_with(  # type: ignore[attr-defined]
+    loop.consolidator.archive_session_tail.assert_awaited_once_with(  # type: ignore[attr-defined]
         session,
-        replay_max_messages=loop._max_messages,
+        keep_recent=0,
     )
     assert len(session.messages) == 2
 
@@ -158,7 +158,7 @@ async def test_manual_compact_uses_session_lock_and_reports_result(tmp_path) -> 
 @pytest.mark.asyncio
 async def test_manual_compact_refuses_active_session(tmp_path) -> None:
     loop = _make_loop(tmp_path, estimated_tokens=100, context_window_tokens=200)
-    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock()  # type: ignore[method-assign]
+    loop.consolidator.archive_session_tail = AsyncMock()  # type: ignore[method-assign]
     lock = loop._session_locks.setdefault("websocket:test", asyncio.Lock())
 
     async with lock:
@@ -172,7 +172,7 @@ async def test_manual_compact_refuses_active_session(tmp_path) -> None:
         "summary_created": False,
         "original_messages_preserved": True,
     }
-    loop.consolidator.maybe_consolidate_by_tokens.assert_not_awaited()  # type: ignore[attr-defined]
+    loop.consolidator.archive_session_tail.assert_not_awaited()  # type: ignore[attr-defined]
 
 
 def test_manual_compact_status_uses_message_and_token_thresholds(tmp_path) -> None:
@@ -194,13 +194,18 @@ def test_manual_compact_status_uses_message_and_token_thresholds(tmp_path) -> No
     assert status["needed"] is True
     assert status["reason"] == "both"
     assert status["message_count"] == 6
+    assert status["session_message_count"] == 6
     assert status["max_messages"] == 2
     assert status["estimated_tokens"] == 1000
+    assert status["replay_message_count"] == 2
+    assert status["replay_estimated_tokens"] == 1000
     assert status["token_budget"] == 200
     assert status["available"] is True
+    assert status["keep_recent_messages"] == 0
+    assert status["auto_consolidation_enabled"] is False
 
 
-def test_compact_status_is_hidden_when_auto_consolidation_is_enabled(tmp_path) -> None:
+def test_compact_status_remains_visible_when_auto_consolidation_is_enabled(tmp_path) -> None:
     loop = _make_loop(
         tmp_path,
         estimated_tokens=1000,
@@ -213,8 +218,9 @@ def test_compact_status_is_hidden_when_auto_consolidation_is_enabled(tmp_path) -
 
     status = loop.session_compaction_status("websocket:test")
 
-    assert status["needed"] is False
-    assert status["available"] is False
+    assert status["needed"] is True
+    assert status["available"] is True
+    assert status["auto_consolidation_enabled"] is True
 
 
 @pytest.mark.asyncio

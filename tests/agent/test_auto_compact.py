@@ -611,7 +611,7 @@ class TestAutoCompactEdgeCases:
 
     @pytest.mark.asyncio
     async def test_auto_compact_with_nothing_summary(self, tmp_path):
-        """Auto-new should not inject when archive produces '(nothing)'."""
+        """A legacy empty summary should not mutate the source session."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
         _add_turns(session, 6, prefix="thanks")
@@ -625,15 +625,15 @@ class TestAutoCompactEdgeCases:
         await loop.auto_compact._archive("cli:test")
 
         session_after = loop.sessions.get_or_create("cli:test")
-        assert len(session_after.messages) == loop.auto_compact._RECENT_SUFFIX_MESSAGES
+        assert len(session_after.messages) == 12
         # "(nothing)" summary should not be stored
         assert "cli:test" not in loop.auto_compact._summaries
 
         await loop.close_mcp()
 
     @pytest.mark.asyncio
-    async def test_auto_compact_archive_failure_still_keeps_recent_suffix(self, tmp_path):
-        """Auto-new should keep the recent suffix even if LLM archive falls back to raw dump."""
+    async def test_auto_compact_archive_failure_preserves_source_for_retry(self, tmp_path):
+        """A failed summary leaves the source session intact for retry."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
         _add_turns(session, 6, prefix="important")
@@ -646,7 +646,8 @@ class TestAutoCompactEdgeCases:
         await loop.auto_compact._archive("cli:test")
 
         session_after = loop.sessions.get_or_create("cli:test")
-        assert len(session_after.messages) == loop.auto_compact._RECENT_SUFFIX_MESSAGES
+        assert len(session_after.messages) == 12
+        assert session_after.last_consolidated == 0
 
         await loop.close_mcp()
 

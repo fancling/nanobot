@@ -800,6 +800,18 @@
         "none": "다음 실행 없음"
       }
     },
+    "contextUsage": {
+      "label": "컨텍스트 사용량",
+      "messages": "메시지 {{used}} / {{limit}}",
+      "tokens": "토큰 {{used}} / {{limit}}",
+      "archive": "대화 보관",
+      "archiving": "보관 중…",
+      "extractMemory": "Mem0로 추출",
+      "extractingMemory": "추출 중…",
+      "extractSuccess": "이벤트 기억 {{events}}개를 포함해 Mem0 레코드 {{count}}개를 저장했습니다.",
+      "extractFailed": "이 대화를 Mem0로 추출하지 못했습니다. 다시 시도하세요.",
+      "actionBusy": "대화가 실행 중입니다. 현재 응답이 끝난 후 다시 시도하세요."
+    },
     "compactReminder": {
       "title": "대화를 정리할 시간입니다",
       "body": "대화의 메시지 수 또는 토큰 수가 임계값에 도달했습니다. 정리하면 이전 맥락을 history.jsonl에 기록하고 원본 session JSONL은 그대로 보존합니다.",
@@ -807,8 +819,7 @@
       "compacting": "정리 중…",
       "snooze": "나중에 알림",
       "success": "메시지 {{count}}개를 정리해 history.jsonl에 기록했습니다. 원본 session JSONL은 보존되었습니다.",
-      "rawSuccess": "요약 모델이 실패하여 메시지 {{count}}개를 [RAW] 항목으로 history.jsonl에 기록했습니다. 원본 session JSONL은 보존되었습니다.",
-      "noChanges": "안전하게 정리할 수 있는 완전한 이전 대화가 없습니다. history.jsonl은 변경되지 않았습니다.",
+      "noChanges": "보관하지 않은 메시지가 없습니다. history.jsonl은 변경되지 않았습니다.",
       "dismissResult": "정리 결과 닫기",
       "busy": "대화가 실행 중입니다. 현재 응답이 끝난 후 다시 시도하세요.",
       "failed": "대화를 정리하지 못했습니다. 다시 시도하세요."

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   compactSession,
+  extractSessionMemory,
   createModelConfiguration,
   deleteSession,
   fetchFilePreview,
@@ -186,6 +187,63 @@ describe("webui API helpers", () => {
 
     expect(fetch).toHaveBeenCalledWith(
       "/api/sessions/websocket%3Achat-1/compact",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("polls a background compact operation until it completes", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 202,
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({
+          operation_id: "abc123",
+          kind: "compact",
+          status: "running",
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({
+          operation_id: "abc123",
+          kind: "compact",
+          status: "completed",
+          result: {
+            compacted: true,
+            busy: false,
+            consolidated_messages: 121,
+            history_written: true,
+            summary_created: true,
+            original_messages_preserved: true,
+          },
+        }),
+      } as Response);
+
+    const result = await compactSession("tok", "websocket:chat-1", "/nanobot");
+
+    expect(result.compacted).toBe(true);
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "/nanobot/api/sessions/websocket%3Achat-1/compact",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "/nanobot/api/session-operations/abc123",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+    );
+  });
+
+  it("percent-encodes websocket keys when extracting session memory", async () => {
+    await extractSessionMemory("tok", "websocket:chat-1");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sessions/websocket%3Achat-1/extract-memory",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),

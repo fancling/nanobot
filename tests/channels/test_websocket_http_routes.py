@@ -54,6 +54,7 @@ def _make_handler(
     cron_pending_job_ids: Any | None = None,
     affective_state: Any | None = None,
     compact_session: Any | None = None,
+    extract_session_memory: Any | None = None,
     compaction_status: Any | None = None,
 ) -> GatewayServices:
     config = WebSocketConfig.model_validate(cfg) if isinstance(cfg, dict) else cfg
@@ -73,6 +74,7 @@ def _make_handler(
         cron_pending_job_ids=cron_pending_job_ids,
         affective_state=affective_state,
         compact_session=compact_session,
+        extract_session_memory=extract_session_memory,
         compaction_status=compaction_status,
     )
 
@@ -90,6 +92,7 @@ def _ch(
     cron_pending_job_ids: Any | None = None,
     affective_state: Any | None = None,
     compact_session: Any | None = None,
+    extract_session_memory: Any | None = None,
     compaction_status: Any | None = None,
     **extra: Any,
 ) -> WebSocketChannel:
@@ -113,6 +116,7 @@ def _ch(
         cron_pending_job_ids=cron_pending_job_ids,
         affective_state=affective_state,
         compact_session=compact_session,
+        extract_session_memory=extract_session_memory,
         compaction_status=compaction_status,
     )
     return WebSocketChannel(cfg, bus, gateway=gateway)
@@ -229,6 +233,24 @@ async def _http_get(
     return await asyncio.to_thread(
         functools.partial(httpx.get, url, headers=headers or {}, timeout=5.0)
     )
+
+
+async def _wait_for_session_operation(
+    base: str,
+    operation_id: str,
+    headers: dict[str, str],
+) -> dict[str, Any]:
+    for _ in range(100):
+        response = await _http_get(
+            f"{base}/api/session-operations/{operation_id}",
+            headers=headers,
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        if payload["status"] != "running":
+            return payload
+        await asyncio.sleep(0.01)
+    raise AssertionError("session operation did not finish")
 
 
 def _seed_session(workspace: Path, key: str = "websocket:test") -> SessionManager:
@@ -936,14 +958,30 @@ async def test_compact_threshold_status_and_manual_compact_route(
     tmp_path: Path,
 ) -> None:
     sm = _seed_session(tmp_path, "websocket:compact-me")
-    compact_session = AsyncMock(
-        return_value={
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    (scripts_dir / "extract-session-for-mem0.py").write_text("", encoding="utf-8")
+    compact_release = asyncio.Event()
+
+    async def compact_result(_key: str) -> dict[str, Any]:
+        await compact_release.wait()
+        return {
             "compacted": True,
             "busy": False,
             "consolidated_messages": 121,
             "history_written": True,
             "summary_created": True,
             "original_messages_preserved": True,
+        }
+
+    compact_session = AsyncMock(side_effect=compact_result)
+    extract_session_memory = AsyncMock(
+        return_value={
+            "success": True,
+            "busy": False,
+            "memory_count": 4,
+            "event_count": 3,
+            "result_path": str(tmp_path / "memory" / "extractions" / "result.json"),
         }
     )
     compaction_status = MagicMock(
@@ -961,7 +999,9 @@ async def test_compact_threshold_status_and_manual_compact_route(
     channel = _ch(
         bus,
         session_manager=sm,
+        workspace_path=tmp_path,
         compact_session=compact_session,
+        extract_session_memory=extract_session_memory,
         compaction_status=compaction_status,
         port=_free_port(),
     )
@@ -982,14 +1022,31 @@ async def test_compact_threshold_status_and_manual_compact_route(
         assert status["reason"] == "messages"
         assert status["message_count"] == 121
         assert status["available"] is True
+        assert status["memory_extraction_available"] is True
         compaction_status.assert_called_with("websocket:compact-me")
 
         response = await _http_get(
             f"{base}/api/sessions/websocket:compact-me/compact",
             headers=auth,
         )
-        assert response.status_code == 200
-        assert response.json() == {
+        assert response.status_code == 202
+        started = response.json()
+        assert started["kind"] == "compact"
+        assert started["status"] == "running"
+
+        running_response = await _http_get(
+            f"{base}/api/session-operations/{started['operation_id']}",
+            headers=auth,
+        )
+        assert running_response.status_code == 200
+        assert running_response.json()["status"] == "running"
+
+        compact_release.set()
+        completed = await _wait_for_session_operation(
+            base, started["operation_id"], auth
+        )
+        assert completed["status"] == "completed"
+        assert completed["result"] == {
             "compacted": True,
             "busy": False,
             "consolidated_messages": 121,
@@ -1001,6 +1058,20 @@ async def test_compact_threshold_status_and_manual_compact_route(
         outbound = bus.publish_outbound.await_args.args[0]
         assert outbound.chat_id == "compact-me"
         assert outbound.metadata["_session_updated"] is True
+
+        extraction_response = await _http_get(
+            f"{base}/api/sessions/websocket:compact-me/extract-memory",
+            headers=auth,
+        )
+        assert extraction_response.status_code == 202
+        extraction_started = extraction_response.json()
+        extraction_completed = await _wait_for_session_operation(
+            base, extraction_started["operation_id"], auth
+        )
+        assert extraction_completed["status"] == "completed"
+        assert extraction_completed["result"]["memory_count"] == 4
+        assert extraction_completed["result"]["event_count"] == 3
+        extract_session_memory.assert_awaited_once_with("websocket:compact-me")
     finally:
         await channel.stop()
         await server_task

@@ -15,6 +15,9 @@ import type {
   ProviderSettingsUpdate,
   SessionCompactResult,
   SessionCompactionStatus,
+  SessionMemoryExtractionResult,
+  SessionOperationStart,
+  SessionOperationStatus,
   SessionDeleteResult,
   SessionAutomationsPayload,
   SettingsPayload,
@@ -34,6 +37,7 @@ import type { ReaderState } from "./reading";
 import { fetchWithTimeout } from "./http";
 
 const API_READ_TIMEOUT_MS = 20_000;
+const SESSION_OPERATION_POLL_MS = 500;
 
 export async function fetchBoard(token: string): Promise<BoardPayload> {
   return request<BoardPayload>("/api/board", token, undefined, API_READ_TIMEOUT_MS);
@@ -88,6 +92,44 @@ async function request<T>(
     );
   }
   return (await res.json()) as T;
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => globalThis.setTimeout(resolve, ms));
+}
+
+async function runSessionOperation<T>(
+  url: string,
+  token: string,
+  base: string = "",
+): Promise<T> {
+  const started = await request<SessionOperationStart | T>(url, token);
+  if (
+    typeof started !== "object"
+    || started === null
+    || !("operation_id" in started)
+  ) {
+    // Compatibility with gateways that predate background session operations.
+    return started as T;
+  }
+
+  const operationId = started.operation_id;
+  const statusUrl = `${base}/api/session-operations/${encodeURIComponent(operationId)}`;
+  while (true) {
+    const operation = await request<SessionOperationStatus<T>>(
+      statusUrl,
+      token,
+      undefined,
+      API_READ_TIMEOUT_MS,
+    );
+    if (operation.status === "completed" && operation.result !== undefined) {
+      return operation.result;
+    }
+    if (operation.status === "failed") {
+      throw new ApiError(operation.http_status ?? 500, operation.error ?? "Session operation failed");
+    }
+    await wait(SESSION_OPERATION_POLL_MS);
+  }
 }
 
 function mcpValuesHeader(values: Record<string, unknown>): HeadersInit | undefined {
@@ -324,9 +366,22 @@ export async function compactSession(
   key: string,
   base: string = "",
 ): Promise<SessionCompactResult> {
-  return request<SessionCompactResult>(
+  return runSessionOperation<SessionCompactResult>(
     `${base}/api/sessions/${encodeURIComponent(key)}/compact`,
     token,
+    base,
+  );
+}
+
+export async function extractSessionMemory(
+  token: string,
+  key: string,
+  base: string = "",
+): Promise<SessionMemoryExtractionResult> {
+  return runSessionOperation<SessionMemoryExtractionResult>(
+    `${base}/api/sessions/${encodeURIComponent(key)}/extract-memory`,
+    token,
+    base,
   );
 }
 

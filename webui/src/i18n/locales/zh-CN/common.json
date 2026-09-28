@@ -800,15 +800,26 @@
         "none": "没有下次运行"
       }
     },
+    "contextUsage": {
+      "label": "上下文占用",
+      "messages": "{{used}} / {{limit}} 条消息",
+      "tokens": "{{used}} / {{limit}} Token",
+      "archive": "归档本次对话",
+      "archiving": "正在归档…",
+      "extractMemory": "抽取到 Mem0",
+      "extractingMemory": "正在抽取…",
+      "extractSuccess": "已写入 {{count}} 条 Mem0 记录，其中包含 {{events}} 条事件记忆。",
+      "extractFailed": "无法将本次对话抽取到 Mem0，请重试。",
+      "actionBusy": "该会话仍在运行，请等当前回复结束后再试。"
+    },
     "compactReminder": {
       "title": "该整理这段对话了",
       "body": "该会话的消息数或 Token 已达到上下文阈值。整理会把较早的上下文写入 history.jsonl，并完整保留原始 session JSONL。",
       "compactNow": "立即整理",
       "compacting": "正在整理…",
       "snooze": "稍后提醒",
-      "success": "已整理 {{count}} 条消息并写入 history.jsonl；原始 session JSONL 已完整保留。",
-      "rawSuccess": "摘要模型失败，已将 {{count}} 条消息以 [RAW] 条目写入 history.jsonl；原始 session JSONL 已完整保留。",
-      "noChanges": "没有可安全整理的完整旧对话轮次，history.jsonl 未发生变化。",
+      "success": "已将 {{count}} 条消息归档到 history.jsonl；原始 session JSONL 已完整保留。",
+      "noChanges": "没有尚未归档的消息，history.jsonl 未发生变化。",
       "dismissResult": "关闭整理结果",
       "busy": "该会话仍在运行，请等当前回复结束后再试。",
       "failed": "无法整理该会话，请重试。"

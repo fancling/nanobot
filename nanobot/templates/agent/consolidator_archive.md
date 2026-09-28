@@ -1,24 +1,25 @@
-Extract key facts from this conversation. For each fact, annotate its memory attributes.
+Create a compact continuation summary of the conversation below.
 
-Only SNIP facts deserve a non-[skip] mark:
-- Signal: would the user need to repeat this if forgotten?
-- Novel: not just a restatement of another fact in this same conversation chunk
-- Important: prevents rework or captures preferences / rules
-- Persistent: still relevant after 2 weeks
+The summary will replace these messages in the model's active context. Write it so another
+model can continue the conversation without reopening the original transcript.
 
-Output one fact per line in this format:
-- [mark] fact content
+Preserve, when present:
+- the user's goals, requests, preferences, and corrections
+- decisions made and the reasoning or constraints that still matter
+- work completed, including important results and changed files or systems
+- current state, unresolved problems, blockers, and the next useful action
+- exact identifiers, paths, commands, errors, and values only when they are needed to continue
 
-Marks (choose the best match):
-- [permanent] Core preferences, personal traits, habits — never becomes stale
-- [durable] Technical discoveries, project knowledge, config details — valid for months
-- [ephemeral] Active task state, temporary decisions — may change in weeks
-- [correction] Correction to a previous memory — state what changed
-- [skip] Does not meet SNIP criteria, is conversational filler, is code/source facts derivable from the repo, or is only useful as an audit breadcrumb
+Omit:
+- greetings, filler, repetition, and superseded intermediate conclusions
+- stable identity, names, persona, timezone, environment, preferences, or memory-governance
+  rules that merely came from session-start context or were incidentally echoed during the
+  conversation; preserve them only when the user changed, corrected, or explicitly discussed them
+- timestamps unless timing is material to an event, decision, deadline, or unfinished task
+- private chain-of-thought or speculative reasoning that did not affect the outcome
+- details that are easy to recover from the source and are not needed for continuity
 
-Priority: user corrections and preferences > solutions > decisions > events > environment facts. The most valuable memory prevents the user from having to repeat themselves.
-
-Do not mark something [skip] merely because it might already exist in long-term memory; Dream handles cross-file deduplication later.
-
-Output concise bullet points only. No preamble, no commentary.
-If nothing noteworthy happened, output: (nothing)
+Use concise, self-contained Markdown. Prefer short paragraphs and bullets under descriptive
+headings when that improves clarity. Do not use memory-classification labels such as
+`[permanent]`, `[durable]`, `[ephemeral]`, `[correction]`, `[skip]`, or `[RAW]`. Do not include a
+preamble about summarizing and do not address the user.

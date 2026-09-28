@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
 import { CompactReminderNotice } from "@/components/thread/CompactReminderNotice";
 import { CompactResultNotice } from "@/components/thread/CompactResultNotice";
+import { ContextArchiveStatus } from "@/components/thread/ContextArchiveStatus";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
@@ -16,6 +17,7 @@ import { useSessionHistory } from "@/hooks/useSessions";
 import {
   ApiError,
   compactSession as apiCompactSession,
+  extractSessionMemory,
   fetchSessionCompactionStatus,
   fetchInstalledCliApps,
   fetchMcpPresets,
@@ -318,6 +320,9 @@ export function ThreadShell({
   const [compactResult, setCompactResult] = useState<SessionCompactResult | null>(null);
   const [compacting, setCompacting] = useState(false);
   const [compactError, setCompactError] = useState<string | null>(null);
+  const [extractingMemory, setExtractingMemory] = useState(false);
+  const [memoryExtractionMessage, setMemoryExtractionMessage] = useState<string | null>(null);
+  const [memoryExtractionError, setMemoryExtractionError] = useState<string | null>(null);
   const shellRef = useRef<HTMLElement | null>(null);
   const filePreviewWidthRef = useRef(FILE_PREVIEW_DEFAULT_WIDTH);
   const filePreviewCloseTimerRef = useRef<number | null>(null);
@@ -364,6 +369,9 @@ export function ThreadShell({
     setCompactResult(null);
     setCompacting(false);
     setCompactError(null);
+    setExtractingMemory(false);
+    setMemoryExtractionMessage(null);
+    setMemoryExtractionError(null);
   }, [historyKey]);
 
   useEffect(() => {
@@ -394,6 +402,7 @@ export function ThreadShell({
     && compactReminderVersion
     && compactionStatus?.available
     && compactionStatus.needed
+    && !compactionStatus.auto_consolidation_enabled
     && compactDismissedVersion !== compactReminderVersion,
   );
 
@@ -720,13 +729,16 @@ export function ThreadShell({
   );
 
   const handleCompactNow = useCallback(async () => {
-    if (!session || compacting || isStreaming) return;
+    if (!session || compacting || extractingMemory || isStreaming) return;
     setCompacting(true);
     setCompactError(null);
+    setMemoryExtractionError(null);
     setCompactResult(null);
     try {
       const result = await apiCompactSession(token, session.key);
       setCompactResult(result);
+      const nextStatus = await fetchSessionCompactionStatus(token, session.key).catch(() => null);
+      if (nextStatus) setCompactionStatus(nextStatus);
       writeCompactDismissedVersion(session.key, compactReminderVersion);
       setCompactDismissedVersion(compactReminderVersion);
       handleTurnEnd();
@@ -739,7 +751,16 @@ export function ThreadShell({
     } finally {
       setCompacting(false);
     }
-  }, [compactReminderVersion, compacting, handleTurnEnd, isStreaming, session, t, token]);
+  }, [
+    compactReminderVersion,
+    compacting,
+    extractingMemory,
+    handleTurnEnd,
+    isStreaming,
+    session,
+    t,
+    token,
+  ]);
 
   const handleCompactSnooze = useCallback(() => {
     if (!session || !compactReminderVersion) return;
@@ -748,8 +769,44 @@ export function ThreadShell({
     setCompactError(null);
   }, [compactReminderVersion, session]);
 
+  const handleExtractMemory = useCallback(async () => {
+    if (!session || extractingMemory || compacting || isStreaming) return;
+    setExtractingMemory(true);
+    setCompactError(null);
+    setMemoryExtractionMessage(null);
+    setMemoryExtractionError(null);
+    try {
+      const result = await extractSessionMemory(token, session.key);
+      setMemoryExtractionMessage(t("thread.contextUsage.extractSuccess", {
+        events: result.event_count,
+        count: result.memory_count,
+      }));
+    } catch (error) {
+      setMemoryExtractionError(
+        error instanceof ApiError && error.status === 409
+          ? t("thread.contextUsage.actionBusy")
+          : t("thread.contextUsage.extractFailed"),
+      );
+    } finally {
+      setExtractingMemory(false);
+    }
+  }, [compacting, extractingMemory, isStreaming, session, t, token]);
+
   const composer = (
     <>
+      {compactionStatus?.available ? (
+        <ContextArchiveStatus
+          status={compactionStatus}
+          archiving={compacting}
+          disabled={isStreaming}
+          extractingMemory={extractingMemory}
+          actionError={compactError ?? memoryExtractionError}
+          actionMessage={memoryExtractionMessage}
+          onArchive={() => { void handleCompactNow(); }}
+          onExtractMemory={() => { void handleExtractMemory(); }}
+          variant={showHeroComposer ? "hero" : "thread"}
+        />
+      ) : null}
       {streamError ? (
         <StreamErrorNotice
           error={streamError}
@@ -761,7 +818,6 @@ export function ThreadShell({
         <CompactResultNotice
           consolidatedMessages={compactResult.consolidated_messages}
           historyWritten={compactResult.history_written}
-          summaryCreated={compactResult.summary_created}
           onDismiss={() => setCompactResult(null)}
         />
       ) : null}

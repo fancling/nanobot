@@ -13,13 +13,12 @@ describe("CompactResultNotice", () => {
       <CompactResultNotice
         consolidatedMessages={42}
         historyWritten
-        summaryCreated
         onDismiss={onDismiss}
       />,
     );
 
     expect(screen.getByRole("status")).toHaveTextContent(
-      "Compacted 42 messages and wrote a history.jsonl entry",
+      "Archived 42 messages to history.jsonl",
     );
     expect(screen.getByRole("status")).toHaveTextContent(
       "original session JSONL was preserved",

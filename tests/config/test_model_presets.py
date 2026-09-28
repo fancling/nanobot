@@ -16,6 +16,30 @@ def test_resolve_preset_returns_defaults_when_no_preset() -> None:
     assert resolved.reasoning_effort == config.agents.defaults.reasoning_effort
 
 
+def test_title_model_preset_accepts_named_preset() -> None:
+    config = Config.model_validate({
+        "agents": {"defaults": {"titleModelPreset": "titles"}},
+        "modelPresets": {
+            "titles": {
+                "model": "google/gemma-4-31b-it:free",
+                "provider": "openrouter",
+            }
+        },
+    })
+
+    assert config.agents.defaults.title_model_preset == "titles"
+
+
+def test_title_model_preset_rejects_unknown_preset() -> None:
+    with pytest.raises(
+        ValueError,
+        match="title_model_preset 'missing' not found in model_presets",
+    ):
+        Config.model_validate({
+            "agents": {"defaults": {"titleModelPreset": "missing"}},
+        })
+
+
 def test_provider_api_type_accepts_exact_values_only() -> None:
     config = Config.model_validate({
         "providers": {

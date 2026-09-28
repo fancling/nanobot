@@ -215,6 +215,7 @@ class AgentDefaults(Base):
 
     workspace: str = "~/.nanobot/workspace"
     model_preset: str | None = None  # Active preset name — takes precedence over fields below
+    title_model_preset: str | None = None  # Optional preset used only for WebUI title generation
     model: str = "anthropic/claude-opus-4-5"
     provider: str = (
         "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
@@ -472,6 +473,11 @@ class Config(BaseSettings):
         name = self.agents.defaults.model_preset
         if name and name != "default" and name not in self.model_presets:
             raise ValueError(f"model_preset {name!r} not found in model_presets")
+        title_name = self.agents.defaults.title_model_preset
+        if title_name and title_name != "default" and title_name not in self.model_presets:
+            raise ValueError(
+                f"title_model_preset {title_name!r} not found in model_presets"
+            )
         for fallback in self.agents.defaults.fallback_models:
             if isinstance(fallback, str) and fallback not in self.model_presets:
                 raise ValueError(f"fallback_models entry {fallback!r} not found in model_presets")

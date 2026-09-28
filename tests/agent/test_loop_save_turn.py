@@ -9,6 +9,7 @@ from nanobot.agent.context import ContextBuilder
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.bus.runtime_events import RuntimeEventContext, TurnCompleted
 from nanobot.cron.session_turns import CRON_HISTORY_META, CRON_TRIGGER_META
 from nanobot.providers.base import LLMResponse
 from nanobot.session.goal_state import GOAL_STATE_KEY
@@ -20,6 +21,7 @@ from nanobot.session.turn_continuation import (
 from nanobot.session.webui_turns import (
     TITLE_GENERATION_MAX_TOKENS,
     TITLE_GENERATION_REASONING_EFFORT,
+    TITLE_INPUT_MAX_CHARS,
     WEBUI_SESSION_METADATA_KEY,
     WEBUI_TITLE_METADATA_KEY,
     WebuiTurnCoordinator,
@@ -108,8 +110,15 @@ def test_clean_generated_title_strips_reasoning_tags() -> None:
 
 
 @pytest.mark.asyncio
-async def test_generate_webui_title_only_for_marked_webui_sessions(tmp_path: Path) -> None:
+async def test_generate_webui_title_only_for_marked_webui_sessions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     loop = _make_full_loop(tmp_path)
+    monkeypatch.setattr(
+        "nanobot.session.webui_turns.current_time_str",
+        lambda timezone: f"2026-09-27 15:30 (Sunday) ({timezone}, UTC+09:00)",
+    )
     loop.provider.chat_with_retry = AsyncMock(
         return_value=LLMResponse(content='"优化 WebUI 侧边栏。"', finish_reason="stop")
     )
@@ -124,6 +133,7 @@ async def test_generate_webui_title_only_for_marked_webui_sessions(tmp_path: Pat
         session_key="websocket:chat-title",
         provider=loop.provider,
         model=loop.model,
+        timezone_name="Asia/Tokyo",
     )
 
     assert generated is True
@@ -134,6 +144,76 @@ async def test_generate_webui_title_only_for_marked_webui_sessions(tmp_path: Pat
         loop.provider.chat_with_retry.await_args.kwargs["reasoning_effort"]
         == TITLE_GENERATION_REASONING_EFFORT
     )
+    title_messages = loop.provider.chat_with_retry.await_args.args[0]
+    assert len(title_messages) == 1
+    assert title_messages[0]["role"] == "user"
+    assert "Current date/time: 2026-09-27 15:30 (Sunday) (Asia/Tokyo, UTC+09:00)" in (
+        title_messages[0]["content"]
+    )
+    assert "interpret relative terms such as today or tomorrow" in title_messages[0]["content"]
+    assert "帮我优化一下 webui 的 sidebar" in title_messages[0]["content"]
+    assert "可以，我会先调整布局和视觉层级" not in title_messages[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_generate_webui_title_bounds_input_prompt(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    session = loop.sessions.get_or_create("websocket:long-title")
+    session.metadata[WEBUI_SESSION_METADATA_KEY] = True
+    session.add_message("user", "x" * (TITLE_INPUT_MAX_CHARS * 3))
+    loop.sessions.save(session)
+
+    generated = await maybe_generate_webui_title(
+        sessions=loop.sessions,
+        session_key="websocket:long-title",
+        provider=loop.provider,
+        model=loop.model,
+    )
+
+    assert generated is True
+    title_prompt = loop.provider.chat_with_retry.await_args.args[0][0]["content"]
+    request_text = title_prompt.split("<request>", 1)[1].split("</request>", 1)[0]
+    assert request_text.count("x") == TITLE_INPUT_MAX_CHARS
+    assert request_text.endswith("... (truncated)")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "result",
+    [
+        LLMResponse(content=None, finish_reason="length"),
+        RuntimeError("provider unavailable"),
+    ],
+)
+async def test_generate_webui_title_uses_date_fallback_on_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    result: LLMResponse | Exception,
+) -> None:
+    loop = _make_full_loop(tmp_path)
+    monkeypatch.setattr(
+        "nanobot.session.webui_turns.current_time_str",
+        lambda _timezone: "2026-09-07 08:05 (Monday) (Asia/Tokyo, UTC+09:00)",
+    )
+    if isinstance(result, Exception):
+        loop.provider.chat_with_retry = AsyncMock(side_effect=result)
+    else:
+        loop.provider.chat_with_retry = AsyncMock(return_value=result)
+    session = loop.sessions.get_or_create("websocket:fallback-title")
+    session.metadata[WEBUI_SESSION_METADATA_KEY] = True
+    session.add_message("user", "帮我处理这个问题")
+    loop.sessions.save(session)
+
+    generated = await maybe_generate_webui_title(
+        sessions=loop.sessions,
+        session_key="websocket:fallback-title",
+        provider=loop.provider,
+        model=loop.model,
+        timezone_name="Asia/Tokyo",
+    )
+
+    assert generated is True
+    assert session.metadata[WEBUI_TITLE_METADATA_KEY] == "9月7日的避难所"
 
 
 @pytest.mark.asyncio
@@ -255,6 +335,118 @@ def test_webui_title_update_uses_captured_llm_runtime(
 
     assert captured["provider"] is provider
     assert captured["model"] == "turn-model"
+
+
+def test_webui_title_update_prefers_configured_title_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bus = MessageBus()
+    sessions = SessionManager(tmp_path)
+    scheduled: list[object] = []
+    captured: dict[str, object] = {}
+
+    async def fake_title_after_turn(**kwargs: object) -> bool:
+        captured.update(kwargs)
+        return False
+
+    monkeypatch.setattr(
+        "nanobot.session.webui_turns.maybe_generate_webui_title_after_turn",
+        fake_title_after_turn,
+    )
+    turn_provider = MagicMock()
+    title_provider = MagicMock()
+    coordinator = WebuiTurnCoordinator(
+        bus=bus,
+        sessions=sessions,
+        schedule_background=lambda coro: scheduled.append(coro),
+        title_runtime=LLMRuntime(title_provider, "gemma-title-model"),
+    )
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="u1",
+        chat_id="chat1",
+        content="say hello",
+        metadata={"webui": True},
+    )
+
+    coordinator.capture_title_context(
+        "websocket:chat1",
+        msg,
+        LLMRuntime(turn_provider, "turn-model"),
+    )
+    asyncio.run(coordinator.handle_turn_end(
+        msg,
+        session_key="websocket:chat1",
+        latency_ms=None,
+    ))
+    asyncio.run(scheduled[0])  # type: ignore[arg-type]
+
+    assert captured["provider"] is title_provider
+    assert captured["model"] == "gemma-title-model"
+
+
+def test_webui_title_event_prefers_configured_title_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scheduled: list[object] = []
+    captured: dict[str, object] = {}
+
+    async def fake_title_after_turn(**kwargs: object) -> bool:
+        captured.update(kwargs)
+        return False
+
+    monkeypatch.setattr(
+        "nanobot.session.webui_turns.maybe_generate_webui_title_after_turn",
+        fake_title_after_turn,
+    )
+    turn_provider = MagicMock()
+    title_provider = MagicMock()
+    coordinator = WebuiTurnCoordinator(
+        bus=MessageBus(),
+        sessions=SessionManager(tmp_path),
+        schedule_background=lambda coro: scheduled.append(coro),
+        title_runtime=LLMRuntime(title_provider, "gemma-title-model"),
+    )
+    event = TurnCompleted(
+        context=RuntimeEventContext(
+            channel="websocket",
+            chat_id="chat1",
+            session_key="websocket:chat1",
+            metadata={"webui": True},
+        ),
+        runtime=LLMRuntime(turn_provider, "turn-model"),
+    )
+
+    coordinator._schedule_title_update_from_event(event)
+    asyncio.run(scheduled[0])  # type: ignore[arg-type]
+
+    assert captured["provider"] is title_provider
+    assert captured["model"] == "gemma-title-model"
+
+
+def test_configured_title_runtime_still_requires_a_model_turn(tmp_path: Path) -> None:
+    scheduled: list[object] = []
+    coordinator = WebuiTurnCoordinator(
+        bus=MessageBus(),
+        sessions=SessionManager(tmp_path),
+        schedule_background=lambda coro: scheduled.append(coro),
+        title_runtime=LLMRuntime(MagicMock(), "gemma-title-model"),
+    )
+    event = TurnCompleted(
+        context=RuntimeEventContext(
+            channel="websocket",
+            chat_id="chat1",
+            session_key="websocket:chat1",
+            metadata={"webui": True},
+        ),
+        runtime=None,
+    )
+
+    coordinator._schedule_title_update_from_event(event)
+
+    assert scheduled == []
 
 
 def test_save_turn_skips_multimodal_user_when_only_runtime_context() -> None:
@@ -1219,17 +1411,17 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
         )
     )
 
-    non_system = [m for m in seen["initial_messages"] if m.get("role") != "system"]
-    assert "question" in non_system[0]["content"]
-    assert "working" in non_system[1]["content"]
+    prompt_text = "\n".join(str(m.get("content", "")) for m in seen["initial_messages"])
+    assert "question" in prompt_text
+    assert "working" in prompt_text
     # User turns carry the timestamp prefix so the model can reason about
     # relative time. Assistant turns do NOT, otherwise the model treats those
     # past replies as in-context examples and starts its own outputs with
     # ``[Message Time: ...]`` (which then leaks back to the user).
-    assert "[Message Time:" in non_system[0]["content"]
-    assert "[Message Time:" not in non_system[1]["content"]
-    assert non_system[2]["content"].count("subagent result") == 1
-    assert "Current Time:" in non_system[2]["content"]
+    assert "user: [Message Time:" in prompt_text
+    assert "assistant: [Message Time:" not in prompt_text
+    assert prompt_text.count("subagent result") == 1
+    assert "current_time:" in prompt_text
 
     loop.sessions.invalidate("cli:test")
     persisted = loop.sessions.get_or_create("cli:test")
@@ -1409,7 +1601,8 @@ async def test_system_subagent_followup_uses_thread_session_and_slack_metadata(t
         "slack": {"thread_ts": "1700.42"},
         "origin_message_id": "msg-123",
     }
-    assert "thread question" in seen["initial_messages"][1]["content"]
+    prompt_text = "\n".join(str(m.get("content", "")) for m in seen["initial_messages"])
+    assert "thread question" in prompt_text
 
     loop.sessions.invalidate("slack:C123:1700.42")
     persisted = loop.sessions.get_or_create("slack:C123:1700.42")

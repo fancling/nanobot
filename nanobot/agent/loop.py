@@ -2366,8 +2366,8 @@ class AgentLoop:
             await self._runtime_events().run_status_changed(msg, session_key, "idle")
             self._runtime_events().clear_turn(session_key)
 
-    async def compact_session(self, session_key: str) -> dict[str, Any]:
-        """Run user-triggered soft consolidation without truncating the session file."""
+    async def compact_session(self, session_key: str, *, keep_recent: int = 0) -> dict[str, Any]:
+        """Archive a completed conversation without truncating its session file."""
         lock = self._session_locks.setdefault(session_key, asyncio.Lock())
         if lock.locked():
             return {
@@ -2382,9 +2382,9 @@ class AgentLoop:
         async with lock:
             session = self.sessions.get_or_create(session_key)
             original_message_count = len(session.messages)
-            result = await self.consolidator.maybe_consolidate_by_tokens(
+            result = await self.consolidator.archive_session_tail(
                 session,
-                replay_max_messages=self._max_messages,
+                keep_recent=keep_recent,
             )
         return {
             "compacted": result["consolidated_messages"] > 0,
@@ -2399,13 +2399,16 @@ class AgentLoop:
             "needed": False,
             "reason": None,
             "message_count": 0,
+            "session_message_count": 0,
             "max_messages": self._max_messages,
             "estimated_tokens": None,
+            "replay_message_count": 0,
+            "replay_estimated_tokens": None,
             "token_budget": None,
             "available": False,
+            "keep_recent_messages": 0,
+            "auto_consolidation_enabled": self._auto_consolidation_enabled,
         }
-        if self._auto_consolidation_enabled:
-            return unavailable
         data = self.sessions.read_session_file(session_key)
         if data is None:
             return unavailable
@@ -2426,5 +2429,8 @@ class AgentLoop:
             session,
             replay_max_messages=self._max_messages,
         )
+        status["session_message_count"] = len(session.messages)
         status["available"] = True
+        status["keep_recent_messages"] = 0
+        status["auto_consolidation_enabled"] = self._auto_consolidation_enabled
         return status

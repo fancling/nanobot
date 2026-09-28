@@ -800,6 +800,18 @@
         "none": "Tidak ada jadwal berikutnya"
       }
     },
+    "contextUsage": {
+      "label": "Penggunaan konteks",
+      "messages": "{{used}} / {{limit}} pesan",
+      "tokens": "{{used}} / {{limit}} token",
+      "archive": "Arsipkan percakapan",
+      "archiving": "Mengarsipkan…",
+      "extractMemory": "Ekstrak ke Mem0",
+      "extractingMemory": "Mengekstrak…",
+      "extractSuccess": "{{count}} rekaman Mem0 disimpan, termasuk {{events}} memori peristiwa.",
+      "extractFailed": "Percakapan ini tidak dapat diekstrak ke Mem0. Silakan coba lagi.",
+      "actionBusy": "Percakapan ini masih aktif. Coba lagi setelah respons selesai."
+    },
     "compactReminder": {
       "title": "Percakapan siap diringkas",
       "body": "Jumlah pesan atau token telah mencapai batas. Perangkuman menulis konteks lama ke history.jsonl dan tetap menyimpan session JSONL asli.",
@@ -807,8 +819,7 @@
       "compacting": "Merangkum…",
       "snooze": "Ingatkan nanti",
       "success": "{{count}} pesan diringkas dan satu entri ditulis ke history.jsonl. Session JSONL asli tetap disimpan.",
-      "rawSuccess": "Model ringkasan gagal, jadi {{count}} pesan ditulis ke history.jsonl sebagai entri [RAW]. Session JSONL asli tetap disimpan.",
-      "noChanges": "Tidak ada giliran lama lengkap yang dapat diringkas dengan aman. history.jsonl tidak berubah.",
+      "noChanges": "Tidak ada pesan yang belum diarsipkan. history.jsonl tidak berubah.",
       "dismissResult": "Tutup hasil perangkuman",
       "busy": "Percakapan ini masih aktif. Coba lagi setelah respons selesai.",
       "failed": "Percakapan tidak dapat diringkas. Silakan coba lagi."

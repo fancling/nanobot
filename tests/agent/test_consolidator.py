@@ -1,4 +1,4 @@
-"""Tests for the lightweight Consolidator — append-only to HISTORY.md."""
+"""Tests for the lightweight Consolidator — append-only to history.jsonl."""
 
 from unittest.mock import AsyncMock, MagicMock
 
@@ -63,7 +63,7 @@ def _tool_round(call_id: str) -> list[dict]:
 
 class TestConsolidatorSummarize:
     async def test_summarize_appends_to_history(self, consolidator, mock_provider, store):
-        """Consolidator should call LLM to summarize, then append to HISTORY.md."""
+        """Consolidator should call LLM to summarize, then append to history.jsonl."""
         mock_provider.chat_with_retry.return_value = MagicMock(
             content="User fixed a bug in the auth module."
         )
@@ -93,17 +93,17 @@ class TestConsolidatorSummarize:
         entries = store.read_unprocessed_history(since_cursor=0)
         assert entries[0]["session_key"] == "telegram:chat-1"
 
-    async def test_summarize_raw_dumps_on_llm_failure(self, consolidator, mock_provider, store):
-        """On LLM failure, raw-dump messages to HISTORY.md."""
+    async def test_summarize_leaves_history_unchanged_on_llm_failure(
+        self, consolidator, mock_provider, store
+    ):
+        """On LLM failure, preserve the cursor and leave history unchanged."""
         mock_provider.chat_with_retry.side_effect = Exception("API error")
         messages = [{"role": "user", "content": "hello"}]
         result = await consolidator.archive(messages)
-        assert result is None  # no summary on raw dump fallback
-        entries = store.read_unprocessed_history(since_cursor=0)
-        assert len(entries) == 1
-        assert "[RAW]" in entries[0]["content"]
+        assert result is None
+        assert store.read_unprocessed_history(since_cursor=0) == []
 
-    async def test_raw_dump_fallback_appends_session_key(
+    async def test_failed_summary_does_not_append_session_history(
         self,
         consolidator,
         mock_provider,
@@ -114,33 +114,195 @@ class TestConsolidatorSummarize:
 
         await consolidator.archive(messages, session_key="slack:chat-2")
 
-        entries = store.read_unprocessed_history(since_cursor=0)
-        assert entries[0]["session_key"] == "slack:chat-2"
+        assert store.read_unprocessed_history(since_cursor=0) == []
 
     async def test_summarize_skips_empty_messages(self, consolidator):
         result = await consolidator.archive([])
         assert result is None
 
+    async def test_summarize_strips_legacy_labels_before_history_write(
+        self,
+        consolidator,
+        mock_provider,
+        store,
+    ):
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content=(
+                "- [durable] Keep this fact\n"
+                "- [skip] conversational filler\n"
+                "* [SKIP]: another low-value item"
+            ),
+            finish_reason="stop",
+        )
+
+        result = await consolidator.archive([{"role": "user", "content": "hello"}])
+
+        assert result == "- Keep this fact"
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert entries[0]["content"] == "- Keep this fact"
+
+    async def test_summarize_does_not_write_history_when_every_fact_is_skipped(
+        self,
+        consolidator,
+        mock_provider,
+        store,
+    ):
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="- [skip] greeting\n- [skip] sign-off",
+            finish_reason="stop",
+        )
+
+        result = await consolidator.archive([{"role": "user", "content": "hello"}])
+
+        assert result == ""
+        assert store.read_unprocessed_history(since_cursor=0) == []
+
 
 class TestConsolidatorPromptContract:
-    def test_archive_prompt_outputs_attribute_tags_without_missing_context_claims(self):
+    def test_archive_prompt_requests_an_unlabelled_continuation_summary(self):
         prompt = render_template("agent/consolidator_archive.md", strip=True)
 
-        assert "SNIP" in prompt
+        assert "compact continuation summary" in prompt
+        assert "unresolved problems" in prompt
+        assert "session-start context" in prompt
+        assert "preserve them only when the user changed" in prompt
         for mark in ("[permanent]", "[durable]", "[ephemeral]", "[correction]", "[skip]"):
             assert mark in prompt
-        assert "check context below" not in prompt.lower()
-        assert "Do not mark something [skip] merely because it might already exist" in prompt
+        assert "Do not use memory-classification labels" in prompt
+
+
+class TestManualSessionArchive:
+    async def test_archives_all_unconsolidated_messages_without_truncating_session(
+        self,
+        consolidator,
+    ):
+        session = Session(key="websocket:manual")
+        for i in range(3):
+            session.add_message("user", f"u{i}")
+            session.add_message("assistant", f"a{i}")
+        original = list(session.messages)
+        consolidator.sessions._session_cache[session.key] = session
+        consolidator.archive = AsyncMock(return_value="## Current state\nSummary")
+
+        result = await consolidator.archive_session_tail(session)
+
+        assert result == {
+            "consolidated_messages": 6,
+            "history_written": True,
+            "summary_created": True,
+        }
+        assert session.messages == original
+        assert session.last_consolidated == 6
+        consolidator.archive.assert_awaited_once_with(
+            original,
+            session_key=session.key,
+            summary_messages=original,
+        )
+
+        second = await consolidator.archive_session_tail(session)
+        assert second == {
+            "consolidated_messages": 0,
+            "history_written": False,
+            "summary_created": False,
+        }
+        assert consolidator.archive.await_count == 1
+
+    async def test_archives_only_messages_outside_requested_recent_suffix(
+        self,
+        consolidator,
+    ):
+        session = Session(key="websocket:manual-suffix")
+        for i in range(6):
+            session.add_message("user", f"u{i}")
+            session.add_message("assistant", f"a{i}")
+        original = list(session.messages)
+        consolidator.sessions._session_cache[session.key] = session
+        consolidator.archive = AsyncMock(return_value="## Current state\nSummary")
+
+        result = await consolidator.archive_session_tail(session, keep_recent=4)
+
+        assert result["consolidated_messages"] == 8
+        assert session.messages == original
+        assert session.last_consolidated == 8
+
+    async def test_excludes_tool_scaffolding_from_manual_archive_summary(
+        self,
+        consolidator,
+        mock_provider,
+    ):
+        session = Session(key="websocket:manual-dialogue")
+        session.add_message("user", "下午好")
+        session.messages.extend(_tool_round("startup-memory"))
+        session.messages[-1]["content"] = (
+            "SESSION START CONTEXT: profile, memory, and prior conversation summary"
+        )
+        session.add_message("assistant", "下午好，今天想聊什么？")
+        original = list(session.messages)
+        consolidator.sessions._session_cache[session.key] = session
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="用户下午回来继续聊天。",
+            finish_reason="stop",
+        )
+
+        result = await consolidator.archive_session_tail(session)
+
+        assert result["consolidated_messages"] == 4
+        assert session.messages == original
+        assert session.last_consolidated == 4
+        prompt_messages = mock_provider.chat_with_retry.await_args.kwargs["messages"]
+        transcript = prompt_messages[1]["content"]
+        assert "SESSION START CONTEXT" not in transcript
+        assert "下午好" in transcript
+        assert "今天想聊什么" in transcript
+
+    async def test_does_not_advance_manual_archive_without_visible_dialogue(
+        self,
+        consolidator,
+    ):
+        session = Session(key="websocket:manual-tools-only")
+        session.messages.extend(_tool_round("tool-only"))
+        consolidator.sessions._session_cache[session.key] = session
+        consolidator.archive = AsyncMock(return_value="should not be called")
+
+        result = await consolidator.archive_session_tail(session)
+
+        assert result == {
+            "consolidated_messages": 0,
+            "history_written": False,
+            "summary_created": False,
+        }
+        assert session.last_consolidated == 0
+        consolidator.archive.assert_not_called()
+
+    async def test_failed_summary_leaves_manual_archive_available_for_retry(
+        self,
+        consolidator,
+    ):
+        session = Session(key="websocket:manual-retry")
+        session.add_message("user", "keep this source")
+        session.add_message("assistant", "and this response")
+        original = list(session.messages)
+        consolidator.sessions._session_cache[session.key] = session
+        consolidator.archive = AsyncMock(return_value=None)
+
+        with pytest.raises(RuntimeError, match="summary generation failed"):
+            await consolidator.archive_session_tail(session)
+
+        assert session.messages == original
+        assert session.last_consolidated == 0
+        consolidator.sessions.save.assert_not_called()
 
 
 class TestConsolidatorArchiveErrorHandling:
-    """archive() must fall back to raw_archive when the LLM returns an error
+    """archive() must leave history unchanged when the LLM returns an error
     response (finish_reason == 'error'), e.g. overloaded / quota exceeded.
     See https://github.com/HKUDS/nanobot/issues/3244
     """
 
-    async def test_archive_falls_back_on_error_finish_reason(self, consolidator, mock_provider, store):
-        """LLM returning finish_reason='error' should trigger raw_archive, not write error text."""
+    async def test_archive_preserves_source_on_error_finish_reason(
+        self, consolidator, mock_provider, store
+    ):
+        """An error response must not write its text into conversation history."""
         mock_provider.chat_with_retry.return_value = MagicMock(
             content="Error: {'type': 'error', 'error': {'type': 'overloaded_error', 'message': 'overloaded_error (529)'}}",
             finish_reason="error",
@@ -151,10 +313,7 @@ class TestConsolidatorArchiveErrorHandling:
         ]
         result = await consolidator.archive(messages)
         assert result is None
-        entries = store.read_unprocessed_history(since_cursor=0)
-        assert len(entries) == 1
-        assert "[RAW]" in entries[0]["content"]
-        assert "Error:" not in entries[0]["content"]
+        assert store.read_unprocessed_history(since_cursor=0) == []
 
     async def test_archive_preserves_summary_on_success(self, consolidator, mock_provider, store):
         """Normal LLM response should still produce a proper summary entry."""
@@ -323,11 +482,8 @@ class TestConsolidatorTokenBudget:
         assert archived_chunk[0]["content"] == "m0"
         assert session.last_consolidated > 0
 
-    async def test_raw_archive_fallback_advances_last_consolidated(self, consolidator):
-        """When archive() falls back to raw-archive (LLM failed), the cursor
-        must still advance. Otherwise the same chunk gets raw-archived again
-        on every subsequent maybe_consolidate_by_tokens() call, spamming
-        duplicate [RAW] entries into history.jsonl."""
+    async def test_failed_archive_keeps_last_consolidated_for_retry(self, consolidator):
+        """A failed summary must leave the same source range available to retry."""
         consolidator._SAFETY_BUFFER = 0
         session = MagicMock()
         session.last_consolidated = 0
@@ -341,17 +497,15 @@ class TestConsolidatorTokenBudget:
         consolidator.estimate_session_prompt_tokens = MagicMock(
             side_effect=[(1200, "tiktoken"), (400, "tiktoken")]
         )
-        # LLM consolidation fails — archive() returns None (raw_archive fired).
+        # LLM consolidation fails — archive() returns None without writing.
         consolidator.archive = AsyncMock(return_value=None)
 
         await consolidator.maybe_consolidate_by_tokens(session)
 
         consolidator.archive.assert_awaited_once()
-        # The chunk is considered "materialized" (as a raw-archive breadcrumb),
-        # so last_consolidated must have moved past it.
-        assert session.last_consolidated == 50
+        assert session.last_consolidated == 0
 
-    async def test_raw_archive_fallback_breaks_round_loop(self, consolidator):
+    async def test_failed_archive_breaks_round_loop(self, consolidator):
         """A degraded LLM should not trigger more archive() calls within the
         same maybe_consolidate_by_tokens invocation — bail after one fallback."""
         consolidator._SAFETY_BUFFER = 0
@@ -473,12 +627,10 @@ class TestCompactIdleSession:
         assert "CORRECTED_FINAL_RESULT_alpha" in summarized
 
     @pytest.mark.asyncio
-    async def test_raw_dumps_only_dropped_messages_on_llm_failure(
+    async def test_summary_failure_preserves_session_and_history(
         self, real_consolidator, mock_provider, store
     ):
-        """Summarizing over the full tail must not widen what gets raw-dumped on
-        LLM failure: the breadcrumb should contain only the removed prefix, not
-        the retained suffix that stays live in the session. Regression for #4264."""
+        """Failed compaction keeps every source message available for retry."""
         mock_provider.chat_with_retry.side_effect = RuntimeError("LLM unavailable")
         sessions = real_consolidator.sessions
         session = sessions.get_or_create("cli:rawdrop")
@@ -489,12 +641,13 @@ class TestCompactIdleSession:
         session.add_message("assistant", "RETAINED_SUFFIX_marker")
         sessions.save(session)
 
-        await real_consolidator.compact_idle_session("cli:rawdrop", max_suffix=8)
+        result = await real_consolidator.compact_idle_session("cli:rawdrop", max_suffix=8)
 
-        raw = "\n".join(e["content"] for e in store.read_unprocessed_history(since_cursor=0))
-        assert "[RAW]" in raw
-        assert "user msg 0" in raw  # removed prefix is the breadcrumb
-        assert "RETAINED_SUFFIX_marker" not in raw  # retained suffix not dumped
+        assert result is None
+        assert store.read_unprocessed_history(since_cursor=0) == []
+        reloaded = sessions.get_or_create("cli:rawdrop")
+        assert len(reloaded.messages) == 38
+        assert reloaded.messages[-1]["content"] == "RETAINED_SUFFIX_marker"
 
     @pytest.mark.asyncio
     async def test_idle_compact_writes_session_key_to_history(
@@ -548,14 +701,14 @@ class TestCompactIdleSession:
         sessions.save(session)
 
         result = await real_consolidator.compact_idle_session("cli:nothing", max_suffix=4)
-        assert result == "(nothing)"
+        assert result == ""
 
         reloaded = sessions.get_or_create("cli:nothing")
         assert "_last_summary" not in reloaded.metadata
 
     @pytest.mark.asyncio
-    async def test_llm_failure_still_truncates(self, real_consolidator, mock_provider, store):
-        """LLM raises RuntimeError → raw_archive fires, session still truncated, returns None."""
+    async def test_llm_failure_does_not_truncate(self, real_consolidator, mock_provider, store):
+        """LLM failure leaves history and source session unchanged for retry."""
         mock_provider.chat_with_retry.side_effect = RuntimeError("LLM unavailable")
         sessions = real_consolidator.sessions
         session = sessions.get_or_create("cli:fail")
@@ -567,13 +720,9 @@ class TestCompactIdleSession:
         result = await real_consolidator.compact_idle_session("cli:fail", max_suffix=4)
         assert result is None
 
-        # raw_archive should have been called (history.jsonl gets an entry)
-        entries = store.read_unprocessed_history(since_cursor=0)
-        assert any("[RAW]" in e["content"] for e in entries)
-
-        # Session should still be truncated
+        assert store.read_unprocessed_history(since_cursor=0) == []
         reloaded = sessions.get_or_create("cli:fail")
-        assert len(reloaded.messages) <= 4
+        assert len(reloaded.messages) == 20
 
     @pytest.mark.asyncio
     async def test_respects_last_consolidated(self, real_consolidator, mock_provider):
@@ -785,7 +934,8 @@ class TestRawArchiveTruncation:
         entries = store.read_unprocessed_history(since_cursor=0)
         assert len(entries) == 1
         assert len(entries[0]["content"]) < 50_000
-        assert "[RAW]" in entries[0]["content"]
+        assert "[RAW]" not in entries[0]["content"]
+        assert entries[0]["content"].startswith("Uncompressed conversation transcript")
 
     def test_raw_archive_preserves_small_content(self, store):
         """Small messages should not be truncated."""

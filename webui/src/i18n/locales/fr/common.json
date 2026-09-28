@@ -800,6 +800,18 @@
         "none": "Aucune prochaine exécution"
       }
     },
+    "contextUsage": {
+      "label": "Utilisation du contexte",
+      "messages": "{{used}} / {{limit}} messages",
+      "tokens": "{{used}} / {{limit}} jetons",
+      "archive": "Archiver la conversation",
+      "archiving": "Archivage…",
+      "extractMemory": "Extraire vers Mem0",
+      "extractingMemory": "Extraction…",
+      "extractSuccess": "{{count}} entrées Mem0 enregistrées, dont {{events}} souvenirs d’événements.",
+      "extractFailed": "Impossible d’extraire cette conversation vers Mem0. Réessayez.",
+      "actionBusy": "Cette conversation est active. Réessayez après la réponse en cours."
+    },
     "compactReminder": {
       "title": "Conversation prête à être compactée",
       "body": "La limite de messages ou de jetons est atteinte. Le compactage écrit l’ancien contexte dans history.jsonl tout en conservant le session JSONL d’origine.",
@@ -807,8 +819,7 @@
       "compacting": "Compactage…",
       "snooze": "Me le rappeler plus tard",
       "success": "{{count}} messages compactés et une entrée écrite dans history.jsonl. Le session JSONL d’origine a été conservé.",
-      "rawSuccess": "Le modèle de résumé a échoué : {{count}} messages ont été écrits dans history.jsonl sous forme d’entrée [RAW]. Le session JSONL d’origine a été conservé.",
-      "noChanges": "Aucun ancien tour complet ne pouvait être compacté. history.jsonl n’a pas été modifié.",
+      "noChanges": "Il n’y a aucun message non archivé. history.jsonl n’a pas été modifié.",
       "dismissResult": "Fermer le résultat du compactage",
       "busy": "Cette conversation est active. Réessayez après la réponse en cours.",
       "failed": "Impossible de compacter cette conversation. Réessayez."

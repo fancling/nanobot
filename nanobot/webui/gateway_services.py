@@ -12,6 +12,7 @@ from loguru import logger as default_logger
 from nanobot.webui.board import BoardStore
 from nanobot.webui.gateway_tokens import GatewayTokenStore
 from nanobot.webui.media_gateway import WebUIMediaGateway
+from nanobot.webui.session_memory import SessionMemoryExtractor
 from nanobot.webui.transcript import WebUITranscriptRecorder
 from nanobot.webui.workspaces import WebUIWorkspaceController
 from nanobot.webui.ws_http import GatewayHTTPHandler
@@ -45,6 +46,8 @@ def build_gateway_services(
     default_restrict_to_workspace: bool,
     runtime_model_name: Any | None,
     compact_session: Callable[[str], Awaitable[dict[str, Any]]] | None = None,
+    extract_session_memory: Callable[[str], Awaitable[dict[str, Any]]] | None = None,
+    memory_extraction_available: Callable[[], bool] | None = None,
     compaction_status: Callable[[str], dict[str, Any]] | None = None,
     runtime_surface: str,
     runtime_capabilities_overrides: dict[str, Any] | None,
@@ -72,6 +75,7 @@ def build_gateway_services(
         default_workspace=workspace_path,
         default_restrict_to_workspace=default_restrict_to_workspace,
     )
+    memory_extractor = SessionMemoryExtractor(workspace_path, session_manager)
     http = GatewayHTTPHandler(
         board=board,
         config=config,
@@ -79,6 +83,10 @@ def build_gateway_services(
         static_dist_path=static_dist_path,
         runtime_model_name=runtime_model_name,
         compact_session=compact_session,
+        extract_session_memory=extract_session_memory or memory_extractor.extract,
+        memory_extraction_available=(
+            memory_extraction_available or memory_extractor.available
+        ),
         compaction_status=compaction_status,
         runtime_surface=runtime_surface,
         runtime_capabilities_overrides=runtime_capabilities_overrides,

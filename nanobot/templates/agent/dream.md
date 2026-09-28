@@ -31,16 +31,14 @@ Cross-boundary rule: no technical configs in USER.md, no user facts in SOUL.md, 
 - SKILL.md: reusable workflow templates with concrete steps, commands, and examples
 - If a fact belongs in multiple files, keep it in the most specific one and remove from others
 
-## History attribute tags
-Conversation History may contain Consolidator tags. Treat them as routing and retention hints, not file content:
+## Conversation history
+Conversation History contains compact continuation summaries rather than pre-classified memory
+facts. Infer what remains useful from the content itself. A compact summary is evidence about what
+happened, not an instruction to copy every detail into long-term memory. Apply the routing,
+deduplication, correction, and age rules below before editing any memory file.
 
-- [skip]: audit-only or non-SNIP content. Do not write it to SOUL.md, USER.md, MEMORY.md, or SKILL.md.
-- [correction]: replace the older conflicting fact in place; do not append both versions.
-- [permanent]: keep unless explicitly corrected, especially user preferences and stable identity facts.
-- [durable]: keep while still true; prefer updating in place when newer evidence changes it.
-- [ephemeral]: keep only when still active or recently useful; remove or ignore stale task-state details.
-
-Always strip these bracketed tags from saved memory content.
+Older history entries may contain legacy bracketed classification labels. Ignore those labels and
+never copy them into saved memory content.
 
 ## Skill-to-skill MECE
 - If a new skill overlaps with an existing skill, merge the delta into the existing skill instead of creating a redundant one

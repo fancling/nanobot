@@ -14,6 +14,7 @@ import json
 import mimetypes
 import re
 import time
+import uuid
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -92,6 +93,7 @@ from nanobot.webui.workspaces import WebUIWorkspaceController
 
 _SLOW_WEBUI_HTTP_LOG_MS = 1_000
 _AUTOMATION_VALUES_HEADER = "X-Nanobot-Automation-Values"
+_SESSION_OPERATION_TTL_S = 60 * 60
 
 if TYPE_CHECKING:
     from nanobot.bus.queue import MessageBus
@@ -163,6 +165,8 @@ class GatewayHTTPHandler:
         static_dist_path: Path | None,
         runtime_model_name: Callable[[], str | None] | None,
         compact_session: Callable[[str], Awaitable[dict[str, Any]]] | None = None,
+        extract_session_memory: Callable[[str], Awaitable[dict[str, Any]]] | None = None,
+        memory_extraction_available: Callable[[], bool] | None = None,
         compaction_status: Callable[[str], dict[str, Any]] | None = None,
         runtime_surface: str,
         runtime_capabilities_overrides: dict[str, Any] | None,
@@ -185,6 +189,8 @@ class GatewayHTTPHandler:
         self.static_dist_path = static_dist_path
         self.runtime_model_name = runtime_model_name
         self.compact_session = compact_session
+        self.extract_session_memory = extract_session_memory
+        self.memory_extraction_available = memory_extraction_available
         self.compaction_status = compaction_status
         self.bus = bus
         self.tokens = tokens
@@ -199,6 +205,8 @@ class GatewayHTTPHandler:
         self._log = log
         self._runtime_surface = runtime_surface
         self.affective_state = affective_state
+        self._session_operations: dict[str, dict[str, Any]] = {}
+        self._active_session_operations: dict[tuple[str, str], str] = {}
 
         from nanobot.webui.settings_api import runtime_capabilities as _rc
         from nanobot.webui.settings_routes import WebUISettingsRouter
@@ -222,6 +230,119 @@ class GatewayHTTPHandler:
 
     def check_api_token(self, request: WsRequest) -> bool:
         return self.tokens.check_api_token(request)
+
+    def _prune_session_operations(self) -> None:
+        cutoff = time.monotonic() - _SESSION_OPERATION_TTL_S
+        expired = [
+            operation_id
+            for operation_id, operation in self._session_operations.items()
+            if operation["status"] != "running" and operation["updated_at"] < cutoff
+        ]
+        for operation_id in expired:
+            self._session_operations.pop(operation_id, None)
+
+    @staticmethod
+    def _session_operation_payload(operation: dict[str, Any]) -> dict[str, Any]:
+        payload = {
+            "operation_id": operation["operation_id"],
+            "kind": operation["kind"],
+            "status": operation["status"],
+        }
+        if operation["status"] == "completed":
+            payload["result"] = operation["result"]
+        elif operation["status"] == "failed":
+            payload["error"] = operation["error"]
+            payload["http_status"] = operation["http_status"]
+        return payload
+
+    def _start_session_operation(
+        self,
+        *,
+        kind: str,
+        session_key: str,
+        action: Callable[[str], Awaitable[dict[str, Any]]],
+    ) -> dict[str, Any]:
+        self._prune_session_operations()
+        active_key = (kind, session_key)
+        active_id = self._active_session_operations.get(active_key)
+        if active_id is not None:
+            active = self._session_operations.get(active_id)
+            if active is not None and active["status"] == "running":
+                return self._session_operation_payload(active)
+
+        operation_id = uuid.uuid4().hex
+        operation: dict[str, Any] = {
+            "operation_id": operation_id,
+            "kind": kind,
+            "session_key": session_key,
+            "status": "running",
+            "result": None,
+            "error": None,
+            "http_status": None,
+            "updated_at": time.monotonic(),
+        }
+        self._session_operations[operation_id] = operation
+        self._active_session_operations[active_key] = operation_id
+        task = asyncio.create_task(
+            self._run_session_operation(operation, action),
+            name=f"webui-{kind}-{operation_id[:8]}",
+        )
+        # Keep a strong reference for the full operation lifetime. asyncio only
+        # retains weak references to scheduled tasks, so an unreferenced long
+        # compaction could otherwise be collected before it completes.
+        operation["task"] = task
+        return self._session_operation_payload(operation)
+
+    async def _run_session_operation(
+        self,
+        operation: dict[str, Any],
+        action: Callable[[str], Awaitable[dict[str, Any]]],
+    ) -> None:
+        kind = operation["kind"]
+        session_key = operation["session_key"]
+        try:
+            result = await action(session_key)
+            if result.get("busy"):
+                operation.update({
+                    "status": "failed",
+                    "error": "session is busy",
+                    "http_status": 409,
+                })
+            else:
+                operation.update({"status": "completed", "result": result})
+                if kind == "compact":
+                    chat_id = session_key.split(":", 1)[1]
+                    await self.bus.publish_outbound(
+                        OutboundMessage(
+                            channel="websocket",
+                            chat_id=chat_id,
+                            content="",
+                            metadata={
+                                "_session_updated": True,
+                                "_session_update_scope": "metadata",
+                            },
+                        )
+                    )
+        except asyncio.CancelledError:
+            operation.update({
+                "status": "failed",
+                "error": f"session {kind} was cancelled",
+                "http_status": 500,
+            })
+            raise
+        except Exception:
+            self._log.exception("WebUI session {} failed for {}", kind, session_key)
+            operation.update({
+                "status": "failed",
+                "error": f"session {kind} failed",
+                "http_status": 500,
+            })
+        finally:
+            operation["updated_at"] = time.monotonic()
+            operation.pop("task", None)
+            active_key = (kind, session_key)
+            if self._active_session_operations.get(active_key) == operation["operation_id"]:
+                self._active_session_operations.pop(active_key, None)
 
     # -- Main dispatch ------------------------------------------------------
 
@@ -415,6 +536,14 @@ class GatewayHTTPHandler:
         m = re.match(r"^/api/sessions/([^/]+)/compact$", got)
         if m:
             return await self._handle_session_compact(request, m.group(1))
+
+        m = re.match(r"^/api/sessions/([^/]+)/extract-memory$", got)
+        if m:
+            return await self._handle_session_memory_extract(request, m.group(1))
+
+        m = re.match(r"^/api/session-operations/([0-9a-f]{32})$", got)
+        if m:
+            return self._handle_session_operation(request, m.group(1))
 
         m = re.match(r"^/api/sessions/([^/]+)/file-preview$", got)
         if m:
@@ -651,6 +780,9 @@ class GatewayHTTPHandler:
         except Exception:
             self._log.exception("Manual compaction status failed for {}", decoded_key)
             return _http_error(500, "session compaction status failed")
+        status["memory_extraction_available"] = bool(
+            self.memory_extraction_available and self.memory_extraction_available()
+        )
         return _http_json_response(status)
 
     async def _handle_session_compact(self, request: WsRequest, key: str) -> Response:
@@ -668,27 +800,45 @@ class GatewayHTTPHandler:
         if self.session_manager.read_session_file(decoded_key) is None:
             return _http_error(404, "session not found")
 
-        try:
-            result = await self.compact_session(decoded_key)
-        except Exception:
-            self._log.exception("Manual session compact failed for {}", decoded_key)
-            return _http_error(500, "session compaction failed")
-        if result.get("busy"):
-            return _http_error(409, "session is busy")
-
-        chat_id = decoded_key.split(":", 1)[1]
-        await self.bus.publish_outbound(
-            OutboundMessage(
-                channel="websocket",
-                chat_id=chat_id,
-                content="",
-                metadata={
-                    "_session_updated": True,
-                    "_session_update_scope": "metadata",
-                },
-            )
+        operation = self._start_session_operation(
+            kind="compact",
+            session_key=decoded_key,
+            action=self.compact_session,
         )
-        return _http_json_response(result)
+        return _http_json_response(operation, status=202)
+
+    async def _handle_session_memory_extract(self, request: WsRequest, key: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if str(getattr(request, "method", "GET")).upper() != "GET":
+            return _http_error(405, "method not allowed")
+        if self.session_manager is None or self.extract_session_memory is None:
+            return _http_error(503, "session memory extraction unavailable")
+        decoded_key = _decode_api_key(key)
+        if decoded_key is None:
+            return _http_error(400, "invalid session key")
+        if not _is_websocket_channel_session_key(decoded_key):
+            return _http_error(404, "session not found")
+        if self.session_manager.read_session_file(decoded_key) is None:
+            return _http_error(404, "session not found")
+
+        operation = self._start_session_operation(
+            kind="extract-memory",
+            session_key=decoded_key,
+            action=self.extract_session_memory,
+        )
+        return _http_json_response(operation, status=202)
+
+    def _handle_session_operation(self, request: WsRequest, operation_id: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if str(getattr(request, "method", "GET")).upper() != "GET":
+            return _http_error(405, "method not allowed")
+        self._prune_session_operations()
+        operation = self._session_operations.get(operation_id)
+        if operation is None:
+            return _http_error(404, "session operation not found")
+        return _http_json_response(self._session_operation_payload(operation))
 
     # -- Automation routes --------------------------------------------------
 
