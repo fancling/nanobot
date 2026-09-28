@@ -94,6 +94,7 @@ from nanobot.webui.workspaces import WebUIWorkspaceController
 _SLOW_WEBUI_HTTP_LOG_MS = 1_000
 _AUTOMATION_VALUES_HEADER = "X-Nanobot-Automation-Values"
 _SESSION_OPERATION_TTL_S = 60 * 60
+_SESSION_OPERATION_LOG_INTERVAL_S = 30
 
 if TYPE_CHECKING:
     from nanobot.bus.queue import MessageBus
@@ -268,6 +269,12 @@ class GatewayHTTPHandler:
         if active_id is not None:
             active = self._session_operations.get(active_id)
             if active is not None and active["status"] == "running":
+                self._log.info(
+                    "WebUI session operation already running: kind={} operation_id={} session={}",
+                    kind,
+                    active_id,
+                    session_key,
+                )
                 return self._session_operation_payload(active)
 
         operation_id = uuid.uuid4().hex
@@ -279,6 +286,7 @@ class GatewayHTTPHandler:
             "result": None,
             "error": None,
             "http_status": None,
+            "started_at": time.monotonic(),
             "updated_at": time.monotonic(),
         }
         self._session_operations[operation_id] = operation
@@ -291,7 +299,32 @@ class GatewayHTTPHandler:
         # retains weak references to scheduled tasks, so an unreferenced long
         # compaction could otherwise be collected before it completes.
         operation["task"] = task
+        self._log.info(
+            "WebUI session operation started: kind={} operation_id={} session={}",
+            kind,
+            operation_id,
+            session_key,
+        )
         return self._session_operation_payload(operation)
+
+    @staticmethod
+    def _session_operation_result_fields(
+        kind: str,
+        result: dict[str, Any],
+    ) -> str:
+        if kind == "compact":
+            return (
+                f"consolidated_messages={result.get('consolidated_messages', 0)} "
+                f"history_written={bool(result.get('history_written'))} "
+                f"summary_created={bool(result.get('summary_created'))}"
+            )
+        if kind == "extract-memory":
+            return (
+                f"memory_count={result.get('memory_count', 0)} "
+                f"event_count={result.get('event_count', 0)} "
+                f"result_path={result.get('result_path') or '-'}"
+            )
+        return ""
 
     async def _run_session_operation(
         self,
@@ -300,16 +333,55 @@ class GatewayHTTPHandler:
     ) -> None:
         kind = operation["kind"]
         session_key = operation["session_key"]
+        operation_id = operation["operation_id"]
+        started_at = operation["started_at"]
+        action_task: asyncio.Task[dict[str, Any]] | None = None
         try:
-            result = await action(session_key)
+            action_task = asyncio.create_task(
+                action(session_key),
+                name=f"webui-{kind}-action-{operation_id[:8]}",
+            )
+            while not action_task.done():
+                done, _ = await asyncio.wait(
+                    {action_task},
+                    timeout=_SESSION_OPERATION_LOG_INTERVAL_S,
+                )
+                if not done:
+                    self._log.info(
+                        "WebUI session operation still running: kind={} operation_id={} "
+                        "session={} elapsed_s={:.1f}",
+                        kind,
+                        operation_id,
+                        session_key,
+                        time.monotonic() - started_at,
+                    )
+            result = await action_task
+            elapsed = time.monotonic() - started_at
             if result.get("busy"):
                 operation.update({
                     "status": "failed",
                     "error": "session is busy",
                     "http_status": 409,
                 })
+                self._log.warning(
+                    "WebUI session operation busy: kind={} operation_id={} session={} "
+                    "elapsed_s={:.1f}",
+                    kind,
+                    operation_id,
+                    session_key,
+                    elapsed,
+                )
             else:
                 operation.update({"status": "completed", "result": result})
+                self._log.info(
+                    "WebUI session operation completed: kind={} operation_id={} session={} "
+                    "elapsed_s={:.1f} {}",
+                    kind,
+                    operation_id,
+                    session_key,
+                    elapsed,
+                    self._session_operation_result_fields(kind, result),
+                )
                 if kind == "compact":
                     chat_id = session_key.split(":", 1)[1]
                     await self.bus.publish_outbound(
@@ -324,14 +396,35 @@ class GatewayHTTPHandler:
                         )
                     )
         except asyncio.CancelledError:
+            if action_task is not None and not action_task.done():
+                action_task.cancel()
+                try:
+                    await action_task
+                except asyncio.CancelledError:
+                    pass
             operation.update({
                 "status": "failed",
                 "error": f"session {kind} was cancelled",
                 "http_status": 500,
             })
+            self._log.warning(
+                "WebUI session operation cancelled: kind={} operation_id={} session={} "
+                "elapsed_s={:.1f}",
+                kind,
+                operation_id,
+                session_key,
+                time.monotonic() - started_at,
+            )
             raise
         except Exception:
-            self._log.exception("WebUI session {} failed for {}", kind, session_key)
+            self._log.exception(
+                "WebUI session operation failed: kind={} operation_id={} session={} "
+                "elapsed_s={:.1f}",
+                kind,
+                operation_id,
+                session_key,
+                time.monotonic() - started_at,
+            )
             operation.update({
                 "status": "failed",
                 "error": f"session {kind} failed",

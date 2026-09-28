@@ -1,5 +1,6 @@
 import asyncio
 import json
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -32,7 +33,8 @@ print(f'Mem0 dual result: {result_path}')
 """,
         encoding="utf-8",
     )
-    extractor = SessionMemoryExtractor(tmp_path, sessions)
+    log = MagicMock()
+    extractor = SessionMemoryExtractor(tmp_path, sessions, log=log)
 
     result = await extractor.extract("websocket:test")
 
@@ -47,6 +49,17 @@ print(f'Mem0 dual result: {result_path}')
         "result_path": str(result_path),
     }
     assert json.loads(result_path.read_text(encoding="utf-8"))["status"] == "success"
+    info_messages = [call.args[0] for call in log.info.call_args_list]
+    assert "Mem0 extraction subprocess starting: session={} messages={} script={}" in info_messages
+    assert "Mem0 extraction subprocess started: session={} pid={}" in info_messages
+    assert (
+        "Mem0 extraction subprocess exited: session={} pid={} returncode={} elapsed_s={:.1f}"
+        in info_messages
+    )
+    assert (
+        "Mem0 extraction result validated: session={} memories={} events={} "
+        "elapsed_s={:.1f} result_path={}" in info_messages
+    )
 
 
 @pytest.mark.asyncio

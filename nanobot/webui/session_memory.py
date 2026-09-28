@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -18,10 +19,17 @@ class SessionMemoryExtractor:
 
     _SCRIPT_NAME = "extract-session-for-mem0.py"
 
-    def __init__(self, workspace: Path, sessions: SessionManager | None) -> None:
+    def __init__(
+        self,
+        workspace: Path,
+        sessions: SessionManager | None,
+        *,
+        log: Any = logger,
+    ) -> None:
         self.workspace = workspace
         self.sessions = sessions
         self._locks: dict[str, asyncio.Lock] = {}
+        self._log = log
 
     @property
     def script_path(self) -> Path:
@@ -33,6 +41,7 @@ class SessionMemoryExtractor:
     async def extract(self, session_key: str) -> dict[str, Any]:
         lock = self._locks.setdefault(session_key, asyncio.Lock())
         if lock.locked():
+            self._log.warning("Mem0 extraction already running: session={}", session_key)
             return {
                 "success": False,
                 "busy": True,
@@ -48,6 +57,13 @@ class SessionMemoryExtractor:
                 raise RuntimeError("Session has no messages to extract")
             self.sessions.save(session, fsync=True)
             session_path = self.sessions.session_path(session_key)
+            started_at = time.monotonic()
+            self._log.info(
+                "Mem0 extraction subprocess starting: session={} messages={} script={}",
+                session_key,
+                len(session.messages),
+                self.script_path,
+            )
             process = await asyncio.create_subprocess_exec(
                 sys.executable,
                 str(self.script_path),
@@ -57,6 +73,11 @@ class SessionMemoryExtractor:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
+            self._log.info(
+                "Mem0 extraction subprocess started: session={} pid={}",
+                session_key,
+                process.pid,
+            )
             try:
                 stdout_bytes, stderr_bytes = await asyncio.wait_for(
                     process.communicate(),
@@ -65,11 +86,31 @@ class SessionMemoryExtractor:
             except TimeoutError:
                 process.kill()
                 await process.wait()
+                self._log.error(
+                    "Mem0 extraction subprocess timed out: session={} pid={} elapsed_s={:.1f}",
+                    session_key,
+                    process.pid,
+                    time.monotonic() - started_at,
+                )
                 raise RuntimeError("Mem0 session extraction timed out") from None
             except asyncio.CancelledError:
                 process.kill()
                 await process.wait()
+                self._log.warning(
+                    "Mem0 extraction subprocess cancelled: session={} pid={} elapsed_s={:.1f}",
+                    session_key,
+                    process.pid,
+                    time.monotonic() - started_at,
+                )
                 raise
+
+        self._log.info(
+            "Mem0 extraction subprocess exited: session={} pid={} returncode={} elapsed_s={:.1f}",
+            session_key,
+            process.pid,
+            process.returncode,
+            time.monotonic() - started_at,
+        )
 
         stdout = stdout_bytes.decode("utf-8", errors="replace")
         stderr = stderr_bytes.decode("utf-8", errors="replace")
@@ -78,7 +119,7 @@ class SessionMemoryExtractor:
                 (line.strip() for line in reversed(stderr.splitlines()) if line.strip()),
                 "extractor process failed",
             )
-            logger.error("Mem0 extraction failed for {}: {}", session_key, detail)
+            self._log.error("Mem0 extraction failed for {}: {}", session_key, detail)
             raise RuntimeError(f"Mem0 session extraction failed: {detail}")
 
         result_path: Path | None = None
@@ -99,10 +140,21 @@ class SessionMemoryExtractor:
 
         new_ids = result_data.get("new_ids")
         events = result_data.get("extracted_event_memories")
+        memory_count = len(new_ids) if isinstance(new_ids, list) else 0
+        event_count = len(events) if isinstance(events, list) else 0
+        self._log.info(
+            "Mem0 extraction result validated: session={} memories={} events={} "
+            "elapsed_s={:.1f} result_path={}",
+            session_key,
+            memory_count,
+            event_count,
+            time.monotonic() - started_at,
+            result_path,
+        )
         return {
             "success": True,
             "busy": False,
-            "memory_count": len(new_ids) if isinstance(new_ids, list) else 0,
-            "event_count": len(events) if isinstance(events, list) else 0,
+            "memory_count": memory_count,
+            "event_count": event_count,
             "result_path": str(result_path),
         }

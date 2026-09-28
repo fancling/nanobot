@@ -75,7 +75,11 @@ def build_gateway_services(
         default_workspace=workspace_path,
         default_restrict_to_workspace=default_restrict_to_workspace,
     )
-    memory_extractor = SessionMemoryExtractor(workspace_path, session_manager)
+    memory_extractor = SessionMemoryExtractor(
+        workspace_path,
+        session_manager,
+        log=logger,
+    )
     http = GatewayHTTPHandler(
         board=board,
         config=config,

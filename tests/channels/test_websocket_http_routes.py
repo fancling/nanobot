@@ -956,7 +956,12 @@ async def test_sessions_list_only_returns_websocket_sessions_by_default(
 async def test_compact_threshold_status_and_manual_compact_route(
     bus: MagicMock,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(
+        "nanobot.webui.ws_http._SESSION_OPERATION_LOG_INTERVAL_S",
+        0.01,
+    )
     sm = _seed_session(tmp_path, "websocket:compact-me")
     scripts_dir = tmp_path / "scripts"
     scripts_dir.mkdir()
@@ -1005,6 +1010,8 @@ async def test_compact_threshold_status_and_manual_compact_route(
         compaction_status=compaction_status,
         port=_free_port(),
     )
+    operation_log = MagicMock()
+    channel.gateway.http._log = operation_log
     server_task = asyncio.create_task(channel.start())
     await asyncio.sleep(0.3)
     base = f"http://127.0.0.1:{channel.config.port}"
@@ -1041,6 +1048,7 @@ async def test_compact_threshold_status_and_manual_compact_route(
         assert running_response.status_code == 200
         assert running_response.json()["status"] == "running"
 
+        await asyncio.sleep(0.03)
         compact_release.set()
         completed = await _wait_for_session_operation(
             base, started["operation_id"], auth
@@ -1072,6 +1080,14 @@ async def test_compact_threshold_status_and_manual_compact_route(
         assert extraction_completed["result"]["memory_count"] == 4
         assert extraction_completed["result"]["event_count"] == 3
         extract_session_memory.assert_awaited_once_with("websocket:compact-me")
+
+        info_messages = [call.args[0] for call in operation_log.info.call_args_list]
+        assert (
+            "WebUI session operation started: kind={} operation_id={} session={}"
+            in info_messages
+        )
+        assert any("still running" in message for message in info_messages)
+        assert any("operation completed" in message for message in info_messages)
     finally:
         await channel.stop()
         await server_task
