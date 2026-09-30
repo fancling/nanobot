@@ -810,6 +810,7 @@
       "extractingMemory": "Extraction…",
       "extractSuccess": "{{count}} entrées Mem0 enregistrées, dont {{events}} souvenirs d’événements.",
       "extractFailed": "Impossible d’extraire cette conversation vers Mem0. Réessayez.",
+      "dismissResult": "Fermer le résultat",
       "actionBusy": "Cette conversation est active. Réessayez après la réponse en cours."
     },
     "compactReminder": {

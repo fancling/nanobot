@@ -810,6 +810,7 @@
       "extractingMemory": "추출 중…",
       "extractSuccess": "이벤트 기억 {{events}}개를 포함해 Mem0 레코드 {{count}}개를 저장했습니다.",
       "extractFailed": "이 대화를 Mem0로 추출하지 못했습니다. 다시 시도하세요.",
+      "dismissResult": "작업 결과 닫기",
       "actionBusy": "대화가 실행 중입니다. 현재 응답이 끝난 후 다시 시도하세요."
     },
     "compactReminder": {

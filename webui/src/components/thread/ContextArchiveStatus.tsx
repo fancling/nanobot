@@ -16,8 +16,6 @@ export function ContextArchiveStatus({
   archiving,
   disabled = false,
   extractingMemory = false,
-  actionError,
-  actionMessage,
   onArchive,
   onExtractMemory,
   status,
@@ -26,8 +24,6 @@ export function ContextArchiveStatus({
   archiving: boolean;
   disabled?: boolean;
   extractingMemory?: boolean;
-  actionError?: string | null;
-  actionMessage?: string | null;
   onArchive: () => void;
   onExtractMemory?: () => void;
   status: SessionCompactionStatus;
@@ -120,12 +116,6 @@ export function ContextArchiveStatus({
           style={{ width: `${percent}%` }}
         />
       </div>
-      {actionMessage ? <p role="status" className="mt-1.5 text-emerald-600 dark:text-emerald-400">
-        {actionMessage}
-      </p> : null}
-      {actionError ? <p role="alert" className="mt-1.5 text-destructive">
-        {actionError}
-      </p> : null}
     </section>
   );
 }

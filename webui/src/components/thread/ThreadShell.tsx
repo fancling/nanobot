@@ -4,10 +4,10 @@ import { useTranslation } from "react-i18next";
 
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
 import { CompactReminderNotice } from "@/components/thread/CompactReminderNotice";
-import { CompactResultNotice } from "@/components/thread/CompactResultNotice";
 import { ContextArchiveStatus } from "@/components/thread/ContextArchiveStatus";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
+import { SessionOperationNotice } from "@/components/thread/SessionOperationNotice";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
@@ -732,6 +732,7 @@ export function ThreadShell({
     if (!session || compacting || extractingMemory || isStreaming) return;
     setCompacting(true);
     setCompactError(null);
+    setMemoryExtractionMessage(null);
     setMemoryExtractionError(null);
     setCompactResult(null);
     try {
@@ -773,6 +774,7 @@ export function ThreadShell({
     if (!session || extractingMemory || compacting || isStreaming) return;
     setExtractingMemory(true);
     setCompactError(null);
+    setCompactResult(null);
     setMemoryExtractionMessage(null);
     setMemoryExtractionError(null);
     try {
@@ -792,6 +794,21 @@ export function ThreadShell({
     }
   }, [compacting, extractingMemory, isStreaming, session, t, token]);
 
+  const operationNotice = compactResult
+    ? {
+        message: compactResult.history_written
+          ? t("thread.compactReminder.success", {
+              count: compactResult.consolidated_messages,
+            })
+          : t("thread.compactReminder.noChanges"),
+        tone: "success" as const,
+      }
+    : memoryExtractionMessage
+      ? { message: memoryExtractionMessage, tone: "success" as const }
+      : compactError ?? memoryExtractionError
+        ? { message: compactError ?? memoryExtractionError ?? "", tone: "error" as const }
+        : null;
+
   const composer = (
     <>
       {compactionStatus?.available ? (
@@ -800,10 +817,22 @@ export function ThreadShell({
           archiving={compacting}
           disabled={isStreaming}
           extractingMemory={extractingMemory}
-          actionError={compactError ?? memoryExtractionError}
-          actionMessage={memoryExtractionMessage}
           onArchive={() => { void handleCompactNow(); }}
           onExtractMemory={() => { void handleExtractMemory(); }}
+          variant={showHeroComposer ? "hero" : "thread"}
+        />
+      ) : null}
+      {operationNotice ? (
+        <SessionOperationNotice
+          message={operationNotice.message}
+          tone={operationNotice.tone}
+          dismissLabel={t("thread.contextUsage.dismissResult")}
+          onDismiss={() => {
+            setCompactResult(null);
+            setCompactError(null);
+            setMemoryExtractionMessage(null);
+            setMemoryExtractionError(null);
+          }}
           variant={showHeroComposer ? "hero" : "thread"}
         />
       ) : null}
@@ -814,18 +843,10 @@ export function ThreadShell({
           onRetry={canRetryLast ? retryLast : undefined}
         />
       ) : null}
-      {compactResult ? (
-        <CompactResultNotice
-          consolidatedMessages={compactResult.consolidated_messages}
-          historyWritten={compactResult.history_written}
-          onDismiss={() => setCompactResult(null)}
-        />
-      ) : null}
       {compactReminderVisible ? (
         <CompactReminderNotice
           compacting={compacting}
           disabled={isStreaming}
-          error={compactError}
           onCompact={() => { void handleCompactNow(); }}
           onSnooze={handleCompactSnooze}
         />

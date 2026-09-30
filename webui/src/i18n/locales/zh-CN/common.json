@@ -810,6 +810,7 @@
       "extractingMemory": "正在抽取…",
       "extractSuccess": "已写入 {{count}} 条 Mem0 记录，其中包含 {{events}} 条事件记忆。",
       "extractFailed": "无法将本次对话抽取到 Mem0，请重试。",
+      "dismissResult": "关闭操作结果",
       "actionBusy": "该会话仍在运行，请等当前回复结束后再试。"
     },
     "compactReminder": {

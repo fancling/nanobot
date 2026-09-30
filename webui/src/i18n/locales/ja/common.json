@@ -810,6 +810,7 @@
       "extractingMemory": "抽出中…",
       "extractSuccess": "イベント記憶 {{events}} 件を含む {{count}} 件の Mem0 レコードを保存しました。",
       "extractFailed": "この会話を Mem0 に抽出できませんでした。もう一度お試しください。",
+      "dismissResult": "操作結果を閉じる",
       "actionBusy": "この会話は実行中です。現在の応答が終わってから再試行してください。"
     },
     "compactReminder": {

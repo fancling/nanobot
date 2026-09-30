@@ -810,6 +810,7 @@
       "extractingMemory": "Đang trích xuất…",
       "extractSuccess": "Đã lưu {{count}} bản ghi Mem0, gồm {{events}} ký ức sự kiện.",
       "extractFailed": "Không thể trích xuất cuộc trò chuyện này sang Mem0. Vui lòng thử lại.",
+      "dismissResult": "Đóng kết quả",
       "actionBusy": "Cuộc trò chuyện đang hoạt động. Hãy thử lại sau khi phản hồi hiện tại kết thúc."
     },
     "compactReminder": {

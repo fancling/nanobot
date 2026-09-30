@@ -810,6 +810,7 @@
       "extractingMemory": "正在擷取…",
       "extractSuccess": "已寫入 {{count}} 筆 Mem0 記錄，其中包含 {{events}} 筆事件記憶。",
       "extractFailed": "無法將本次對話擷取到 Mem0，請再試一次。",
+      "dismissResult": "關閉操作結果",
       "actionBusy": "此對話仍在執行，請等目前回覆結束後再試。"
     },
     "compactReminder": {

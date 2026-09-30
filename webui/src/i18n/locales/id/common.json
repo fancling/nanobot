@@ -810,6 +810,7 @@
       "extractingMemory": "Mengekstrak…",
       "extractSuccess": "{{count}} rekaman Mem0 disimpan, termasuk {{events}} memori peristiwa.",
       "extractFailed": "Percakapan ini tidak dapat diekstrak ke Mem0. Silakan coba lagi.",
+      "dismissResult": "Tutup hasil",
       "actionBusy": "Percakapan ini masih aktif. Coba lagi setelah respons selesai."
     },
     "compactReminder": {

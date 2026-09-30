@@ -810,6 +810,7 @@
       "extractingMemory": "Extrayendo…",
       "extractSuccess": "Se guardaron {{count}} registros de Mem0, incluidas {{events}} memorias de eventos.",
       "extractFailed": "No se pudo extraer esta conversación a Mem0. Inténtalo de nuevo.",
+      "dismissResult": "Cerrar resultado",
       "actionBusy": "Esta conversación está activa. Inténtalo cuando termine la respuesta actual."
     },
     "compactReminder": {
