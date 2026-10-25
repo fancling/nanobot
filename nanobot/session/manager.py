@@ -151,7 +151,7 @@ class Session:
 
     def get_history(
         self,
-        max_messages: int = 120,
+        max_messages: int = 0,
         *,
         max_tokens: int = 0,
         include_timestamps: bool = False,
@@ -159,16 +159,16 @@ class Session:
     ) -> list[dict[str, Any]]:
         """Return unconsolidated messages for LLM input.
 
-        History is sliced by message count first (``max_messages``), then by
-        token budget from the tail (``max_tokens``) when provided.
+        History is bounded by the token budget from the tail (``max_tokens``).
+        Callers may explicitly request a message-count slice; by default there
+        is no message-count limit.
         """
         unconsolidated = self.messages[self.last_consolidated:]
-        max_messages = max_messages if max_messages > 0 else 120
         start_idx = recent_message_start_index(
             unconsolidated,
             max_messages,
             extend_to_user=extend_to_user,
-        )
+        ) if max_messages > 0 else 0
         sliced = unconsolidated[start_idx:]
 
         # Avoid starting mid-turn when possible, except for proactive

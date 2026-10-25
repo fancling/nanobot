@@ -802,7 +802,7 @@
     },
     "contextUsage": {
       "label": "컨텍스트 사용량",
-      "messages": "메시지 {{used}} / {{limit}}",
+      "messages": "메시지 {{used}}",
       "tokens": "토큰 {{used}} / {{limit}}",
       "archive": "대화 보관",
       "archiving": "보관 중…",
@@ -815,7 +815,7 @@
     },
     "compactReminder": {
       "title": "대화를 정리할 시간입니다",
-      "body": "대화의 메시지 수 또는 토큰 수가 임계값에 도달했습니다. 정리하면 이전 맥락을 history.jsonl에 기록하고 원본 session JSONL은 그대로 보존합니다.",
+      "body": "대화의 토큰 수가 입력 예산에 도달했습니다. 정리하면 이전 맥락을 history.jsonl에 기록하고 원본 session JSONL은 그대로 보존합니다.",
       "compactNow": "지금 정리",
       "compacting": "정리 중…",
       "snooze": "나중에 알림",

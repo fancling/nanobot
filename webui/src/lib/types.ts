@@ -248,7 +248,7 @@ export interface SessionOperationStatus<T> {
 
 export interface SessionCompactionStatus {
   needed: boolean;
-  reason: "messages" | "tokens" | "both" | null;
+  reason: "tokens" | null;
   message_count: number;
   session_message_count?: number;
   max_messages: number | null;

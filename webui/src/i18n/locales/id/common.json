@@ -802,7 +802,7 @@
     },
     "contextUsage": {
       "label": "Penggunaan konteks",
-      "messages": "{{used}} / {{limit}} pesan",
+      "messages": "{{used}} pesan",
       "tokens": "{{used}} / {{limit}} token",
       "archive": "Arsipkan percakapan",
       "archiving": "Mengarsipkan…",
@@ -815,7 +815,7 @@
     },
     "compactReminder": {
       "title": "Percakapan siap diringkas",
-      "body": "Jumlah pesan atau token telah mencapai batas. Perangkuman menulis konteks lama ke history.jsonl dan tetap menyimpan session JSONL asli.",
+      "body": "Token percakapan telah mencapai anggaran input. Perangkuman menulis konteks lama ke history.jsonl dan tetap menyimpan session JSONL asli.",
       "compactNow": "Ringkas sekarang",
       "compacting": "Merangkum…",
       "snooze": "Ingatkan nanti",

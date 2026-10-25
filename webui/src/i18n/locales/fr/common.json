@@ -802,7 +802,7 @@
     },
     "contextUsage": {
       "label": "Utilisation du contexte",
-      "messages": "{{used}} / {{limit}} messages",
+      "messages": "{{used}} messages",
       "tokens": "{{used}} / {{limit}} jetons",
       "archive": "Archiver la conversation",
       "archiving": "Archivage…",
@@ -815,7 +815,7 @@
     },
     "compactReminder": {
       "title": "Conversation prête à être compactée",
-      "body": "La limite de messages ou de jetons est atteinte. Le compactage écrit l’ancien contexte dans history.jsonl tout en conservant le session JSONL d’origine.",
+      "body": "Le budget de jetons d’entrée est atteint. Le compactage écrit l’ancien contexte dans history.jsonl tout en conservant le session JSONL d’origine.",
       "compactNow": "Compacter maintenant",
       "compacting": "Compactage…",
       "snooze": "Me le rappeler plus tard",

@@ -225,7 +225,6 @@ class AgentLoop:
         timezone: str | None = None,
         session_ttl_minutes: int = 0,
         consolidation_ratio: float = 0.5,
-        max_messages: int = 120,
         auto_consolidation_enabled: bool = True,
         hooks: list[AgentHook] | None = None,
         unified_session: bool = False,
@@ -333,7 +332,6 @@ class AgentLoop:
             llm_wall_timeout_for_session=lambda sk: runner_wall_llm_timeout_s(self.sessions, sk),
         )
         self._unified_session = unified_session
-        self._max_messages = max_messages if max_messages > 0 else 120
         self._auto_consolidation_enabled = auto_consolidation_enabled
         self._running = False
         self._mcp_servers = mcp_servers or {}
@@ -494,7 +492,6 @@ class AgentLoop:
             disabled_skills=defaults.disabled_skills,
             session_ttl_minutes=defaults.session_ttl_minutes,
             consolidation_ratio=defaults.consolidation_ratio,
-            max_messages=defaults.max_messages,
             auto_consolidation_enabled=defaults.auto_consolidation_enabled,
             tools_config=config.tools,
             model_presets=preset_helpers.configured_model_presets(config),
@@ -1492,7 +1489,6 @@ class AgentLoop:
         if getattr(self, "_auto_consolidation_enabled", True):
             await runtime.consolidator.maybe_consolidate_by_tokens(
                 session,
-                replay_max_messages=self._max_messages,
             )
         is_subagent = msg.sender_id == "subagent"
         if is_subagent and self._persist_subagent_followup(session, msg):
@@ -1504,7 +1500,6 @@ class AgentLoop:
         )
         run_overrides = self._workframe_run_overrides(msg.metadata) if runtime.use_workspace_frame else {}
         _hist_kwargs: dict[str, Any] = {
-            "max_messages": self._max_messages,
             "max_tokens": self._replay_token_budget(
                 context_window_tokens=run_overrides.get("context_window_tokens"),
                 max_tokens=run_overrides.get("max_tokens"),
@@ -1565,7 +1560,6 @@ class AgentLoop:
             self._schedule_background(
                 runtime.consolidator.maybe_consolidate_by_tokens(
                     session,
-                    replay_max_messages=self._max_messages,
                 )
             )
         content = final_content or "Background task completed."
@@ -1817,7 +1811,6 @@ class AgentLoop:
         if not ctx.ephemeral and getattr(self, "_auto_consolidation_enabled", True):
             await runtime.consolidator.maybe_consolidate_by_tokens(
                 ctx.session,
-                replay_max_messages=self._max_messages,
             )
         self._set_tool_context(
             ctx.msg.channel,
@@ -1832,7 +1825,6 @@ class AgentLoop:
 
         run_overrides = self._workframe_run_overrides(ctx.msg.metadata) if runtime.use_workspace_frame else {}
         _hist_kwargs: dict[str, Any] = {
-            "max_messages": self._max_messages,
             "max_tokens": self._replay_token_budget(
                 context_window_tokens=run_overrides.get("context_window_tokens"),
                 max_tokens=run_overrides.get("max_tokens"),
@@ -2055,7 +2047,6 @@ class AgentLoop:
                 self._schedule_background(
                     runtime.consolidator.maybe_consolidate_by_tokens(
                         ctx.session,
-                        replay_max_messages=self._max_messages,
                     )
                 )
         self._clear_pending_user_turn(ctx.session)
@@ -2400,7 +2391,7 @@ class AgentLoop:
             "reason": None,
             "message_count": 0,
             "session_message_count": 0,
-            "max_messages": self._max_messages,
+            "max_messages": None,
             "estimated_tokens": None,
             "replay_message_count": 0,
             "replay_estimated_tokens": None,
@@ -2427,7 +2418,6 @@ class AgentLoop:
         )
         status = self.consolidator.compaction_status(
             session,
-            replay_max_messages=self._max_messages,
         )
         status["session_message_count"] = len(session.messages)
         status["available"] = True

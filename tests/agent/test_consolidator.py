@@ -364,95 +364,29 @@ class TestConsolidatorTokenBudget:
         assert len(captured["history"]) == 160
         assert captured["history"][0]["content"].endswith("msg-0")
 
-    async def test_replay_window_overflow_is_archived_even_under_token_budget(
-        self,
-        consolidator,
-    ):
-        """Old messages that cannot be replayed should be materialized first."""
+    async def test_many_messages_under_token_budget_are_not_archived(self, consolidator):
+        """Message count alone must not trigger consolidation or hide old turns."""
         consolidator._SAFETY_BUFFER = 0
-        session = Session(key="test:replay-overflow")
-        for i in range(10):
+        session = Session(key="test:many-messages")
+        for i in range(100):
             session.add_message("user", f"u{i}")
             session.add_message("assistant", f"a{i}")
-
+        session.messages[1:1] = _tool_round("early-tool")
         consolidator.sessions._session_cache[session.key] = session
-        consolidator.estimate_session_prompt_tokens = MagicMock(return_value=(100, "tiktoken"))
-        consolidator.archive = AsyncMock(return_value="old conversation summary")
+        consolidator.estimate_session_prompt_tokens = MagicMock(return_value=(100, "test"))
+        consolidator.archive = AsyncMock()
 
-        await consolidator.maybe_consolidate_by_tokens(
-            session,
-            replay_max_messages=6,
-        )
+        result = await consolidator.maybe_consolidate_by_tokens(session)
+        status = consolidator.compaction_status(session)
 
-        archived_chunk = consolidator.archive.await_args.args[0]
-        assert archived_chunk[0]["content"] == "u0"
-        assert archived_chunk[-1]["content"] == "a6"
-        assert session.last_consolidated == 14
-        assert session.metadata["_last_summary"]["text"] == "old conversation summary"
-        consolidator.sessions.save.assert_called()
-
-    async def test_replay_window_overflow_extends_to_long_recent_user_turn(
-        self,
-        consolidator,
-    ):
-        """Replay-window consolidation must not cut into the latest user turn."""
-        session = Session(key="test:replay-tool-boundary")
-        session.add_message("user", "old")
-        session.add_message("assistant", "old answer")
-        session.add_message("user", "record this")
-        for i in range(4):
-            session.messages.extend(_tool_round(f"call-{i}"))
-        session.add_message("assistant", "final answer")
-
-        consolidator.sessions._session_cache[session.key] = session
-        consolidator.estimate_session_prompt_tokens = MagicMock(return_value=(100, "tiktoken"))
-        consolidator.archive = AsyncMock(return_value="tool turn summary")
-
-        await consolidator.maybe_consolidate_by_tokens(
-            session,
-            replay_max_messages=4,
-        )
-
-        archived_chunk = consolidator.archive.await_args.args[0]
-        assert [m["content"] for m in archived_chunk] == ["old", "old answer"]
-        assert session.last_consolidated == 2
-
-        history = session.get_history(max_messages=4, extend_to_user=True)
-        assert len(history) > 4
-        assert history[0]["content"] == "record this"
-        assert history[-1]["content"] == "final answer"
-
-    async def test_replay_window_overflow_uses_newer_user_inside_window(
-        self,
-        consolidator,
-    ):
-        """Do not extend to an older long turn when the hard window has a newer user."""
-        session = Session(key="test:replay-newer-user")
-        session.add_message("user", "old")
-        session.add_message("assistant", "old answer")
-        session.add_message("user", "long older turn")
-        for i in range(8):
-            session.messages.extend(_tool_round(f"older-{i}"))
-        session.add_message("assistant", "older final")
-        session.add_message("user", "new question")
-        session.add_message("assistant", "new answer")
-
-        consolidator.sessions._session_cache[session.key] = session
-        consolidator.estimate_session_prompt_tokens = MagicMock(return_value=(100, "tiktoken"))
-        consolidator.archive = AsyncMock(return_value="older turn summary")
-
-        await consolidator.maybe_consolidate_by_tokens(
-            session,
-            replay_max_messages=6,
-        )
-
-        archived_chunk = consolidator.archive.await_args.args[0]
-        assert archived_chunk[2]["content"] == "long older turn"
-        assert archived_chunk[-1]["content"] == "older final"
-        assert session.last_consolidated == len(session.messages) - 2
-
-        history = session.get_history(max_messages=6, extend_to_user=True)
-        assert [m["content"] for m in history] == ["new question", "new answer"]
+        consolidator.archive.assert_not_awaited()
+        assert result["consolidated_messages"] == 0
+        assert session.last_consolidated == 0
+        assert len(session.get_history()) == 202
+        assert status["needed"] is False
+        assert status["reason"] is None
+        assert status["max_messages"] is None
+        assert status["replay_message_count"] == 202
 
     async def test_large_chunk_archived_without_cap(self, consolidator):
         """Without chunk cap, the full range from pick_consolidation_boundary is archived."""

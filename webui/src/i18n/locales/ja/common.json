@@ -802,7 +802,7 @@
     },
     "contextUsage": {
       "label": "コンテキスト使用量",
-      "messages": "{{used}} / {{limit}} メッセージ",
+      "messages": "{{used}} メッセージ",
       "tokens": "{{used}} / {{limit}} トークン",
       "archive": "会話をアーカイブ",
       "archiving": "アーカイブ中…",
@@ -815,7 +815,7 @@
     },
     "compactReminder": {
       "title": "会話を整理できます",
-      "body": "会話のメッセージ数またはトークン数がしきい値に達しました。整理すると古い文脈を history.jsonl に書き込み、元の session JSONL は完全に保持されます。",
+      "body": "会話のトークン数が入力予算に達しました。整理すると古い文脈を history.jsonl に書き込み、元の session JSONL は完全に保持されます。",
       "compactNow": "今すぐ整理",
       "compacting": "整理中…",
       "snooze": "後で通知",

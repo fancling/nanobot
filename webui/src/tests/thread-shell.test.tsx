@@ -1231,13 +1231,13 @@ describe("ThreadShell", () => {
       if (url.endsWith("/api/sessions/websocket%3Achat-a/compaction-status")) {
         return httpJson({
           needed: true,
-          reason: "messages",
+          reason: "tokens",
           message_count: 121,
           session_message_count: 121,
-          max_messages: 120,
-          estimated_tokens: 32000,
-          replay_message_count: 120,
-          replay_estimated_tokens: 30000,
+          max_messages: null,
+          estimated_tokens: 65000,
+          replay_message_count: 121,
+          replay_estimated_tokens: 65000,
           token_budget: 60416,
           available: true,
           keep_recent_messages: 0,

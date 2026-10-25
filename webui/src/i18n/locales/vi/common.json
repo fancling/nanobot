@@ -802,7 +802,7 @@
     },
     "contextUsage": {
       "label": "Mức dùng ngữ cảnh",
-      "messages": "{{used}} / {{limit}} tin nhắn",
+      "messages": "{{used}} tin nhắn",
       "tokens": "{{used}} / {{limit}} token",
       "archive": "Lưu trữ cuộc trò chuyện",
       "archiving": "Đang lưu trữ…",
@@ -815,7 +815,7 @@
     },
     "compactReminder": {
       "title": "Cuộc trò chuyện đã sẵn sàng để thu gọn",
-      "body": "Số tin nhắn hoặc token đã đạt ngưỡng. Thu gọn sẽ ghi ngữ cảnh cũ vào history.jsonl và giữ nguyên session JSONL gốc.",
+      "body": "Số token của cuộc trò chuyện đã đạt ngân sách đầu vào. Thu gọn sẽ ghi ngữ cảnh cũ vào history.jsonl và giữ nguyên session JSONL gốc.",
       "compactNow": "Thu gọn ngay",
       "compacting": "Đang thu gọn…",
       "snooze": "Nhắc tôi sau",

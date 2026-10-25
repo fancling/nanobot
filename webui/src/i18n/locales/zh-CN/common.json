@@ -802,7 +802,7 @@
     },
     "contextUsage": {
       "label": "上下文占用",
-      "messages": "{{used}} / {{limit}} 条消息",
+      "messages": "{{used}} 条消息",
       "tokens": "{{used}} / {{limit}} Token",
       "archive": "归档本次对话",
       "archiving": "正在归档…",
@@ -815,7 +815,7 @@
     },
     "compactReminder": {
       "title": "该整理这段对话了",
-      "body": "该会话的消息数或 Token 已达到上下文阈值。整理会把较早的上下文写入 history.jsonl，并完整保留原始 session JSONL。",
+      "body": "该会话的 Token 已达到输入预算。整理会把较早的上下文写入 history.jsonl，并完整保留原始 session JSONL。",
       "compactNow": "立即整理",
       "compacting": "正在整理…",
       "snooze": "稍后提醒",

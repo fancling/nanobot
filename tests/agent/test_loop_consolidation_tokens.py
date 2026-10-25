@@ -17,7 +17,6 @@ def _make_loop(
     estimated_tokens: int,
     context_window_tokens: int,
     auto_consolidation_enabled: bool = True,
-    max_messages: int = 120,
 ) -> AgentLoop:
     from nanobot.providers.base import GenerationSettings
     provider = MagicMock()
@@ -35,7 +34,6 @@ def _make_loop(
         model="test-model",
         context_window_tokens=context_window_tokens,
         auto_consolidation_enabled=auto_consolidation_enabled,
-        max_messages=max_messages,
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
     loop.consolidator._SAFETY_BUFFER = 0
@@ -75,13 +73,12 @@ def test_auto_consolidation_config_flows_into_loop(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_disabled_auto_consolidation_keeps_hidden_messages_in_session(tmp_path) -> None:
+async def test_disabled_auto_consolidation_preserves_session(tmp_path) -> None:
     loop = _make_loop(
         tmp_path,
         estimated_tokens=1000,
         context_window_tokens=200,
         auto_consolidation_enabled=False,
-        max_messages=2,
     )
     session = loop.sessions.get_or_create("cli:test")
     for i in range(3):
@@ -96,7 +93,7 @@ async def test_disabled_auto_consolidation_keeps_hidden_messages_in_session(tmp_
     loop.consolidator.maybe_consolidate_by_tokens.assert_not_awaited()
     assert session.last_consolidated == 0
     assert session.messages[: len(original_messages)] == original_messages
-    assert len(session.get_history(max_messages=2)) <= 2
+    assert len(session.get_history()) > len(original_messages)
     assert not (tmp_path / "memory" / "history.jsonl").exists()
 
 
@@ -175,13 +172,12 @@ async def test_manual_compact_refuses_active_session(tmp_path) -> None:
     loop.consolidator.archive_session_tail.assert_not_awaited()  # type: ignore[attr-defined]
 
 
-def test_manual_compact_status_uses_message_and_token_thresholds(tmp_path) -> None:
+def test_manual_compact_status_uses_token_threshold(tmp_path) -> None:
     loop = _make_loop(
         tmp_path,
         estimated_tokens=1000,
         context_window_tokens=200,
         auto_consolidation_enabled=False,
-        max_messages=2,
     )
     session = loop.sessions.get_or_create("websocket:test")
     for i in range(3):
@@ -192,17 +188,39 @@ def test_manual_compact_status_uses_message_and_token_thresholds(tmp_path) -> No
     status = loop.session_compaction_status("websocket:test")
 
     assert status["needed"] is True
-    assert status["reason"] == "both"
+    assert status["reason"] == "tokens"
     assert status["message_count"] == 6
     assert status["session_message_count"] == 6
-    assert status["max_messages"] == 2
+    assert status["max_messages"] is None
     assert status["estimated_tokens"] == 1000
-    assert status["replay_message_count"] == 2
+    assert status["replay_message_count"] == 6
     assert status["replay_estimated_tokens"] == 1000
     assert status["token_budget"] == 200
     assert status["available"] is True
     assert status["keep_recent_messages"] == 0
     assert status["auto_consolidation_enabled"] is False
+
+
+def test_compact_status_below_token_budget_has_no_message_threshold(tmp_path) -> None:
+    loop = _make_loop(
+        tmp_path,
+        estimated_tokens=40_000,
+        context_window_tokens=128_000,
+        auto_consolidation_enabled=False,
+    )
+    session = loop.sessions.get_or_create("websocket:test")
+    for i in range(100):
+        session.add_message("user", f"u{i}")
+        session.add_message("assistant", f"a{i}")
+    loop.sessions.save(session)
+
+    status = loop.session_compaction_status(session.key)
+
+    assert status["needed"] is False
+    assert status["reason"] is None
+    assert status["replay_message_count"] == 200
+    assert status["replay_estimated_tokens"] == 40_000
+    assert status["max_messages"] is None
 
 
 def test_compact_status_remains_visible_when_auto_consolidation_is_enabled(tmp_path) -> None:
@@ -408,7 +426,6 @@ async def test_preflight_consolidation_receives_pending_summary(tmp_path) -> Non
 
     loop.consolidator.maybe_consolidate_by_tokens.assert_any_await(
         session,
-        replay_max_messages=loop._max_messages,
     )
 
 

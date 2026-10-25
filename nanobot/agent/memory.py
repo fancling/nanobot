@@ -806,31 +806,6 @@ class Consolidator:
             return None
         return first_visible_idx
 
-    async def _consolidate_replay_overflow(
-        self,
-        session: Session,
-        replay_max_messages: int | None,
-    ) -> str | None:
-        """Archive messages that would be hidden by the replay message window."""
-        end_idx = self._replay_overflow_boundary(session, replay_max_messages)
-        if end_idx is None:
-            return None
-        chunk = session.messages[session.last_consolidated:end_idx]
-        if not chunk:
-            return None
-        logger.info(
-            "Replay-window consolidation for {}: chunk={} msgs, replay_max={}",
-            session.key,
-            len(chunk),
-            replay_max_messages,
-        )
-        summary = await self.archive(chunk, session_key=session.key)
-        if not summary:
-            return summary
-        session.last_consolidated = end_idx
-        self.sessions.save(session)
-        return summary
-
     def _persist_last_summary(self, session: Session, summary: str | None) -> None:
         if summary and summary != "(nothing)":
             session.metadata["_last_summary"] = {
@@ -839,21 +814,9 @@ class Consolidator:
             }
             self.sessions.save(session)
 
-    def estimate_session_prompt_tokens(
-        self,
-        session: Session,
-        *,
-        replay_max_messages: int | None = None,
-    ) -> tuple[int, str]:
-        """Estimate prompt size from the full tail or the actual replay window."""
-        history = (
-            session.get_history(
-                max_messages=replay_max_messages,
-                include_timestamps=True,
-            )
-            if replay_max_messages is not None
-            else self._full_unconsolidated_history(session, include_timestamps=True)
-        )
+    def estimate_session_prompt_tokens(self, session: Session) -> tuple[int, str]:
+        """Estimate prompt size from the whole unconsolidated history."""
+        history = self._full_unconsolidated_history(session, include_timestamps=True)
         channel, chat_id = (session.key.split(":", 1) if ":" in session.key else (None, None))
         # Include archived summary in estimation so the budget accounts for it.
         meta = session.metadata.get("_last_summary")
@@ -876,36 +839,16 @@ class Consolidator:
             self._get_tool_definitions(),
         )
 
-    def compaction_status(
-        self,
-        session: Session,
-        *,
-        replay_max_messages: int | None = None,
-    ) -> dict[str, Any]:
-        """Return whether the same thresholds used by consolidation have been reached."""
+    def compaction_status(self, session: Session) -> dict[str, Any]:
+        """Return whether the input-token budget used by consolidation is reached."""
         unconsolidated_messages = max(0, len(session.messages) - session.last_consolidated)
-        message_limit_reached = (
-            self._replay_overflow_boundary(session, replay_max_messages) is not None
-        )
         token_budget = self._input_token_budget if self.context_window_tokens > 0 else 0
         estimated_tokens: int | None = None
-        replay_estimated_tokens: int | None = None
-        replay_message_count = len(
-            session.get_history(max_messages=replay_max_messages)
-            if replay_max_messages is not None
-            else self._full_unconsolidated_history(session)
-        )
+        replay_message_count = len(self._full_unconsolidated_history(session))
         token_limit_reached = False
         if session.messages and token_budget > 0:
             try:
                 estimated_tokens, _source = self.estimate_session_prompt_tokens(session)
-                if replay_message_count == unconsolidated_messages:
-                    replay_estimated_tokens = estimated_tokens
-                else:
-                    replay_estimated_tokens, _source = self.estimate_session_prompt_tokens(
-                        session,
-                        replay_max_messages=replay_max_messages,
-                    )
             except Exception:
                 logger.exception("Token estimation failed for compact status of {}", session.key)
             token_limit_reached = bool(
@@ -914,17 +857,14 @@ class Consolidator:
                 and estimated_tokens >= token_budget
             )
 
-        reason = "both" if message_limit_reached and token_limit_reached else (
-            "messages" if message_limit_reached else "tokens" if token_limit_reached else None
-        )
         return {
-            "needed": message_limit_reached or token_limit_reached,
-            "reason": reason,
+            "needed": token_limit_reached,
+            "reason": "tokens" if token_limit_reached else None,
             "message_count": unconsolidated_messages,
-            "max_messages": replay_max_messages,
+            "max_messages": None,
             "estimated_tokens": estimated_tokens,
             "replay_message_count": replay_message_count,
-            "replay_estimated_tokens": replay_estimated_tokens,
+            "replay_estimated_tokens": estimated_tokens,
             "token_budget": token_budget or None,
         }
 
@@ -1062,12 +1002,7 @@ class Consolidator:
                 "summary_created": True,
             }
 
-    async def maybe_consolidate_by_tokens(
-        self,
-        session: Session,
-        *,
-        replay_max_messages: int | None = None,
-    ) -> dict[str, Any]:
+    async def maybe_consolidate_by_tokens(self, session: Session) -> dict[str, Any]:
         """Loop: archive old messages until prompt fits within safe budget.
 
         The budget reserves space for completion tokens and a safety buffer
@@ -1096,10 +1031,7 @@ class Consolidator:
             initial_cursor = session.last_consolidated
             budget = self._input_token_budget
             target = int(budget * self.consolidation_ratio)
-            last_summary = await self._consolidate_replay_overflow(
-                session,
-                replay_max_messages,
-            )
+            last_summary: str | None = None
 
             def result() -> dict[str, Any]:
                 consolidated = max(0, session.last_consolidated - initial_cursor)

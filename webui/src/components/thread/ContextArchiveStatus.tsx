@@ -31,18 +31,12 @@ export function ContextArchiveStatus({
 }) {
   const { i18n, t } = useTranslation();
   const locale = i18n.resolvedLanguage ?? "en";
-  const replayMessages = status.replay_message_count ?? Math.min(
-    status.message_count,
-    status.max_messages ?? status.message_count,
-  );
+  const replayMessages = status.replay_message_count ?? status.message_count;
   const replayTokens = status.replay_estimated_tokens ?? status.estimated_tokens;
-  const messageRatio = status.max_messages
-    ? replayMessages / status.max_messages
-    : 0;
   const tokenRatio = replayTokens !== null && status.token_budget
     ? replayTokens / status.token_budget
     : 0;
-  const percent = Math.max(0, Math.min(100, Math.round(Math.max(messageRatio, tokenRatio) * 100)));
+  const percent = Math.max(0, Math.min(100, Math.round(tokenRatio * 100)));
   const canArchive = status.message_count > (status.keep_recent_messages ?? 0);
 
   return (
@@ -59,7 +53,6 @@ export function ContextArchiveStatus({
         <span>
           {t("thread.contextUsage.messages", {
             used: formatCount(replayMessages, locale),
-            limit: status.max_messages === null ? "∞" : formatCount(status.max_messages, locale),
           })}
         </span>
         {replayTokens !== null && status.token_budget ? <span>

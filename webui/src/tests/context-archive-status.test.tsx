@@ -19,7 +19,7 @@ describe("ContextArchiveStatus", () => {
           needed: false,
           reason: null,
           message_count: 42,
-          max_messages: 120,
+          max_messages: null,
           estimated_tokens: 12000,
           replay_message_count: 42,
           replay_estimated_tokens: 12000,
@@ -34,11 +34,13 @@ describe("ContextArchiveStatus", () => {
 
     const status = screen.getByRole("region", { name: "Context usage" });
     expect(status).toHaveClass("mx-auto", "w-full", "max-w-[49.5rem]");
-    expect(status).toHaveTextContent("42 / 120 messages");
+    expect(status).toHaveTextContent("42 messages");
+    expect(status).not.toHaveTextContent("/ 120");
+    expect(status).not.toHaveTextContent("∞");
     expect(status).toHaveTextContent("12K / 60K tokens");
     expect(screen.getByRole("progressbar", { name: "Context usage" })).toHaveAttribute(
       "aria-valuenow",
-      "35",
+      "20",
     );
     await user.click(screen.getByRole("button", { name: "Archive conversation" }));
     expect(onArchive).toHaveBeenCalledTimes(1);
@@ -56,7 +58,7 @@ describe("ContextArchiveStatus", () => {
           needed: false,
           reason: null,
           message_count: 0,
-          max_messages: 120,
+          max_messages: null,
           estimated_tokens: 0,
           replay_message_count: 0,
           replay_estimated_tokens: 0,
@@ -71,6 +73,34 @@ describe("ContextArchiveStatus", () => {
 
     expect(screen.getByRole("region", { name: "Context usage" })).toHaveClass(
       "max-w-[58rem]",
+    );
+  });
+
+  it("shows more than 120 messages without filling the token progress bar", () => {
+    render(
+      <ContextArchiveStatus
+        archiving={false}
+        onArchive={vi.fn()}
+        status={{
+          needed: false,
+          reason: null,
+          message_count: 200,
+          max_messages: null,
+          estimated_tokens: 40000,
+          replay_message_count: 200,
+          replay_estimated_tokens: 40000,
+          token_budget: 128000,
+          available: true,
+        }}
+      />,
+    );
+
+    const status = screen.getByRole("region", { name: "Context usage" });
+    expect(status).toHaveTextContent("200 messages");
+    expect(status).not.toHaveTextContent("/ 120");
+    expect(screen.getByRole("progressbar", { name: "Context usage" })).toHaveAttribute(
+      "aria-valuenow",
+      "31",
     );
   });
 });

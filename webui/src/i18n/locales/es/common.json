@@ -802,7 +802,7 @@
     },
     "contextUsage": {
       "label": "Uso de contexto",
-      "messages": "{{used}} / {{limit}} mensajes",
+      "messages": "{{used}} mensajes",
       "tokens": "{{used}} / {{limit}} tokens",
       "archive": "Archivar conversación",
       "archiving": "Archivando…",
@@ -815,7 +815,7 @@
     },
     "compactReminder": {
       "title": "La conversación está lista para compactar",
-      "body": "La conversación alcanzó el límite de mensajes o tokens. Al compactar se escribe el contexto anterior en history.jsonl y se conserva el session JSONL original.",
+      "body": "La conversación alcanzó el presupuesto de tokens de entrada. Al compactar se escribe el contexto anterior en history.jsonl y se conserva el session JSONL original.",
       "compactNow": "Compactar ahora",
       "compacting": "Compactando…",
       "snooze": "Recordármelo más tarde",
